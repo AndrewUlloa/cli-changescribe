@@ -42,6 +42,16 @@ changescribe pr --base main --create-pr --mode release
 changescribe pr --dry-run
 ```
 
+### Npm script parity aliases
+
+These match the npm scripts in your repo:
+
+```bash
+changescribe pr:summary
+changescribe feature:pr
+changescribe staging:pr
+```
+
 ## Notes
 
 - `changescribe commit` stages changes if nothing is staged and commits/pushes by default.
