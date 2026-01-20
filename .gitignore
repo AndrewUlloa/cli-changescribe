@@ -2,6 +2,7 @@ node_modules/
 .env
 .env.local
 .pr-summaries/
+cursor_commit_and_pr_script_reusability.md
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
