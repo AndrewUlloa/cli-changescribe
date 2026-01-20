@@ -42,6 +42,18 @@ function runInit(cwd = process.cwd()) {
     process.exit(1);
   }
 
+  const pnpmLock = path.join(cwd, 'pnpm-lock.yaml');
+  const yarnLock = path.join(cwd, 'yarn.lock');
+  if (fs.existsSync(pnpmLock)) {
+    console.warn(
+      '⚠️  pnpm-lock.yaml detected. Use pnpm to install/update dependencies so the lockfile stays in sync.'
+    );
+  } else if (fs.existsSync(yarnLock)) {
+    console.warn(
+      '⚠️  yarn.lock detected. Use yarn to install/update dependencies so the lockfile stays in sync.'
+    );
+  }
+
   const pkg = readPackageJson(packagePath);
   const added = ensureScripts(pkg);
   writePackageJson(packagePath, pkg);

@@ -4,8 +4,27 @@ CLI to generate Conventional Commit messages and PR summaries using Groq.
 
 ## Install
 
+Pick the install command that matches your repo's package manager:
+
 ```bash
+# npm
 npm install -g cli-changescribe
+# or in a repo
+npm install cli-changescribe
+```
+
+```bash
+# pnpm
+pnpm add -g cli-changescribe
+# or in a repo
+pnpm add cli-changescribe
+```
+
+```bash
+# yarn
+yarn global add cli-changescribe
+# or in a repo
+yarn add cli-changescribe
 ```
 
 ## Setup
@@ -15,6 +34,10 @@ Create a `.env.local` file in the repo where you run the CLI:
 ```bash
 GROQ_API_KEY="your-key-here"
 ```
+
+If your repo uses `pnpm` or `yarn`, make sure you install `cli-changescribe`
+with the same package manager so the correct lockfile is updated (Vercel uses
+`frozen-lockfile` by default).
 
 ### Setup process (recommended)
 
