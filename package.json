@@ -1,0 +1,32 @@
+{
+  "name": "cli-changescribe",
+  "version": "0.1.0",
+  "description": "CLI for generating commit messages and PR summaries",
+  "bin": {
+    "changescribe": "./bin/changescribe.js"
+  },
+  "type": "commonjs",
+  "files": [
+    "bin",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "cli",
+    "commit",
+    "conventional-commits",
+    "pr",
+    "summary",
+    "changelog",
+    "groq"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.1",
+    "groq-sdk": "^0.8.0"
+  }
+}
