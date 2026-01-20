@@ -495,6 +495,17 @@ function checkExistingPr(base, head) {
   }
 }
 
+function hasNpmScript(scriptName, cwd = process.cwd()) {
+  try {
+    const packagePath = path.join(cwd, 'package.json');
+    const raw = fs.readFileSync(packagePath, 'utf8');
+    const pkg = JSON.parse(raw);
+    return Boolean(pkg?.scripts?.[scriptName]);
+  } catch {
+    return false;
+  }
+}
+
 function extractPrTitle(summary, mode) {
   const targetSection = mode === 'release' ? 'release summary' : 'what change';
   // Try to extract a title from the summary
@@ -673,6 +684,7 @@ function parseArgs(argv) {
     issue: DEFAULT_ISSUE,
     createPr: false,
     mode: '',
+    skipFormat: false,
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -693,6 +705,8 @@ function parseArgs(argv) {
       args.dryRun = true;
     } else if (current === '--create-pr') {
       args.createPr = true;
+    } else if (current === '--skip-format' || current === '--no-format') {
+      args.skipFormat = true;
     } else if (current === '--mode' && argv[i + 1]) {
       args.mode = argv[i + 1];
       i += 1;
@@ -752,12 +766,18 @@ async function main(argv) {
   // Safety checks before creating PR
   if (args.createPr) {
     // Run format as a last-minute verification step
-    step('Running npm run format before PR creation...');
-    try {
-      execSync('npm run format', { encoding: 'utf8', stdio: 'inherit' });
-    } catch (_error) {
-      fail('npm run format failed; fix formatting errors first.');
-      process.exit(1);
+    if (args.skipFormat) {
+      warn('Skipping format step (flagged)');
+    } else if (!hasNpmScript('format')) {
+      warn('Skipping format step (no npm script named "format")');
+    } else {
+      step('Running npm run format before PR creation...');
+      try {
+        execSync('npm run format', { encoding: 'utf8', stdio: 'inherit' });
+      } catch (_error) {
+        fail('npm run format failed; fix formatting errors first.');
+        process.exit(1);
+      }
     }
 
     // Run tests as an extra verification step

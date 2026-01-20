@@ -30,6 +30,10 @@ async function main() {
     printHelp();
     return;
   }
+  if (rest.includes('-h') || rest.includes('--help')) {
+    printHelp();
+    return;
+  }
 
   if (command === 'commit') {
     await runCommit(rest);
@@ -47,12 +51,26 @@ async function main() {
   }
 
   if (command === 'feature:pr') {
-    await runPrSummary(['--base', 'staging', '--create-pr', '--mode', 'feature']);
+    await runPrSummary([
+      '--base',
+      'staging',
+      '--create-pr',
+      '--mode',
+      'feature',
+      ...rest,
+    ]);
     return;
   }
 
   if (command === 'staging:pr') {
-    await runPrSummary(['--base', 'main', '--create-pr', '--mode', 'release']);
+    await runPrSummary([
+      '--base',
+      'main',
+      '--create-pr',
+      '--mode',
+      'release',
+      ...rest,
+    ]);
     return;
   }
 

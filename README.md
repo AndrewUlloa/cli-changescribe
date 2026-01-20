@@ -46,6 +46,7 @@ changescribe commit
 changescribe pr --base main --mode release
 changescribe pr --base main --create-pr --mode release
 changescribe pr --dry-run
+changescribe pr --create-pr --skip-format
 ```
 
 ### Npm script parity aliases
@@ -62,4 +63,6 @@ changescribe staging:pr
 
 - `changescribe commit` stages changes if nothing is staged and commits/pushes by default.
 - `changescribe pr` can create or update a GitHub PR when `--create-pr` is passed (requires `gh`).
+- `feature:pr` and `staging:pr` aliases accept overrides (e.g., `--base main`).
+- `--skip-format` (or `--no-format`) skips the format step during `--create-pr`.
 - The CLI must be run inside a git repo.
