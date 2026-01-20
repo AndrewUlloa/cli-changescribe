@@ -27,6 +27,12 @@ Optional environment variables for PR summaries:
 
 ## Usage
 
+### Init scripts in a repo
+
+```bash
+npx changescribe init
+```
+
 ### Commit message
 
 ```bash

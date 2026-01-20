@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 const { runCommit } = require('../src/commit');
+const { runInit } = require('../src/init');
 const { runPrSummary } = require('../src/pr-summary');
 
 function printHelp() {
@@ -9,11 +10,13 @@ function printHelp() {
 Commands:
   commit        Generate a commit message and commit/push changes
   pr            Generate a PR summary (optionally create/update PR)
+  init          Add npm scripts to the current repo
   pr:summary    Alias for pr
   feature:pr    Alias for: pr --base staging --create-pr --mode feature
   staging:pr    Alias for: pr --base main --create-pr --mode release
 
 Examples:
+  changescribe init
   changescribe commit --dry-run
   changescribe pr --base main --mode release
   changescribe feature:pr
@@ -30,6 +33,11 @@ async function main() {
 
   if (command === 'commit') {
     await runCommit(rest);
+    return;
+  }
+
+  if (command === 'init') {
+    await runInit();
     return;
   }
 
