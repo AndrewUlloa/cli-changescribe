@@ -3,14 +3,12 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { config } = require('dotenv');
-const Groq = require('groq-sdk').default;
+const { createClient } = require('./provider');
 
 config({ path: '.env.local' });
 
 const DEFAULT_BASE = process.env.PR_SUMMARY_BASE || 'main';
 const DEFAULT_OUT = process.env.PR_SUMMARY_OUT || '.pr-summaries/PR_SUMMARY.md';
-const DEFAULT_MODEL =
-  process.env.GROQ_PR_MODEL || process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
 const DEFAULT_LIMIT = Number.parseInt(
   process.env.PR_SUMMARY_LIMIT || '400',
   10
@@ -18,7 +16,8 @@ const DEFAULT_LIMIT = Number.parseInt(
 const DEFAULT_ISSUE = process.env.PR_SUMMARY_ISSUE || '';
 const LARGE_BUFFER_SIZE = 10 * 1024 * 1024;
 const BODY_TRUNCATION = 4000;
-const CHUNK_SIZE_CHARS = 8000;
+const CHUNK_SIZE_CHARS = 20000;
+const DIFF_PER_COMMIT_CHARS = 3000;
 const NEWLINE_SPLIT_RE = /\r?\n/;
 
 const ui = {
@@ -38,13 +37,13 @@ function paint(text, color) {
   return `${color}${text}${ui.reset}`;
 }
 
-function banner(branch, base) {
+function banner(branch, base, providerName) {
   const title = paint('PR SYNTHESIZER', ui.magenta);
   const line = paint('═'.repeat(36), ui.purple);
   const meta = `${paint('branch', ui.cyan)} ${branch}  ${paint(
     'base',
     ui.cyan
-  )} ${base}`;
+  )} ${base}  ${paint('provider', ui.cyan)} ${providerName}`;
   return `${line}\n${title}\n${meta}\n${line}`;
 }
 
@@ -75,6 +74,44 @@ function runGit(command) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Diff enrichment
+// ---------------------------------------------------------------------------
+
+function getCommitDiffInfo(sha, title) {
+  // Skip diff for merge commits — they produce combined diffs that are noisy
+  if (title.toLowerCase().startsWith('merge')) {
+    return { stat: '(merge commit)', diff: '' };
+  }
+  try {
+    const stat = execSync(`git show ${sha} --stat --format=""`, {
+      encoding: 'utf8',
+      maxBuffer: LARGE_BUFFER_SIZE,
+    }).trim();
+
+    let diff = '';
+    try {
+      diff = execSync(`git show ${sha} -U3 --format="" --diff-filter=ACMRT`, {
+        encoding: 'utf8',
+        maxBuffer: LARGE_BUFFER_SIZE,
+      });
+      if (diff.length > DIFF_PER_COMMIT_CHARS) {
+        diff = `${diff.slice(0, DIFF_PER_COMMIT_CHARS)}\n...[truncated]...`;
+      }
+    } catch {
+      diff = '(diff unavailable)';
+    }
+
+    return { stat, diff };
+  } catch {
+    return { stat: '(unavailable)', diff: '' };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Commit collection
+// ---------------------------------------------------------------------------
+
 function collectCommits(baseRef, limit) {
   const range = `${baseRef}..HEAD`;
   let rawLog = '';
@@ -101,7 +138,7 @@ function collectCommits(baseRef, limit) {
     .map((entry) => {
       const [sha = '', title = '', bodyRaw = ''] = entry.split('\x1f');
       const body = bodyRaw.trim().slice(0, BODY_TRUNCATION);
-      return { sha: sha.trim(), title: title.trim(), body };
+      return { sha: sha.trim(), title: title.trim(), body, stat: '', diff: '' };
     });
 
   if (Number.isFinite(limit) && limit > 0 && commits.length > limit) {
@@ -109,6 +146,16 @@ function collectCommits(baseRef, limit) {
   }
 
   return commits;
+}
+
+function enrichCommitsWithDiffs(commits) {
+  step('Enriching commits with diff context...');
+  for (const commit of commits) {
+    const info = getCommitDiffInfo(commit.sha, commit.title);
+    commit.stat = info.stat;
+    commit.diff = info.diff;
+  }
+  success(`Enriched ${commits.length} commits with diffs`);
 }
 
 function tryFetchBase(baseBranch) {
@@ -146,6 +193,10 @@ function resolveBaseRef(baseBranch) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Chunking
+// ---------------------------------------------------------------------------
+
 function chunkCommits(commits, maxChars) {
   const chunks = [];
   let current = [];
@@ -170,23 +221,39 @@ function chunkCommits(commits, maxChars) {
 }
 
 function serializeCommit(commit) {
-  return `${commit.sha}\n${commit.title}\n${commit.body}\n---\n`;
+  const parts = [commit.sha, commit.title, commit.body];
+  if (commit.stat) {
+    parts.push(commit.stat);
+  }
+  if (commit.diff) {
+    parts.push(commit.diff);
+  }
+  parts.push('---');
+  return `${parts.join('\n')}\n`;
 }
 
-async function createCompletionSafe(groq, messages, model, maxTokens) {
+// ---------------------------------------------------------------------------
+// LLM helpers
+// ---------------------------------------------------------------------------
+
+async function createCompletionSafe(client, messages, model, maxTokens) {
   try {
-    return await groq.chat.completions.create({
+    return await client.chat.completions.create({
       messages,
       model,
       temperature: 0.3,
       max_tokens: maxTokens,
     });
   } catch (error) {
-    fail('Groq API error while creating completion');
+    fail('LLM API error while creating completion');
     step(formatError(error));
     process.exit(1);
   }
 }
+
+// ---------------------------------------------------------------------------
+// Prompt builders
+// ---------------------------------------------------------------------------
 
 function buildPass1Messages(commits, branch, base) {
   const titles = commits
@@ -216,21 +283,28 @@ function buildPass1Messages(commits, branch, base) {
 
 function buildPass2Messages(commitsChunk) {
   const body = commitsChunk
-    .map((commit) =>
-      [
+    .map((commit) => {
+      const parts = [
         `SHA: ${commit.sha}`,
         `Title: ${commit.title || '(no title)'}`,
         `Body:\n${commit.body || '(no body)'}`,
-        '---',
-      ].join('\n')
-    )
+      ];
+      if (commit.stat) {
+        parts.push(`Files changed:\n${commit.stat}`);
+      }
+      if (commit.diff) {
+        parts.push(`Diff:\n${commit.diff}`);
+      }
+      parts.push('---');
+      return parts.join('\n');
+    })
     .join('\n');
 
   return [
     {
       role: 'system',
       content:
-        'You are producing compact, high-signal summaries per commit: 2-3 bullets each (change, rationale, risk/test note). Flag any breaking changes or migrations.',
+        'You are producing compact, high-signal summaries per commit. Use the diff and file stats to understand exactly what changed in the code. Produce 2-3 bullets each (change, rationale, risk/test note). Flag any breaking changes or migrations.',
     },
     {
       role: 'user',
@@ -239,9 +313,9 @@ function buildPass2Messages(commitsChunk) {
         body,
         '',
         'Return for each commit:',
-        '- Title-aligned bullet: what changed + why.',
-        '- Risk or test note if visible.',
-        'Keep outputs brief; do not restate bodies.',
+        '- Title-aligned bullet: what changed + why (use the diff to be specific about files and code patterns).',
+        '- Risk or test note if visible in the diff.',
+        'Keep outputs brief; do not restate bodies verbatim.',
       ].join('\n'),
     },
   ];
@@ -286,7 +360,9 @@ function buildPass3Messages(
         'Rules:',
         '- If the issue is unknown, write: "Related: (not provided)".',
         '- If testing is unknown, write: "Testing: (not provided)".',
-        '- Prefer bullets. Be thorough but not rambly.',
+        '- Every commit must appear as its own bullet under "What change does this PR add?". Do not group commits under "miscellaneous" or similar catch-all labels.',
+        '- Be thorough and specific. Reference actual file names, functions, and architectural changes.',
+        '- Prefer bullets.',
         '',
         `Issue hint: ${issue || '(not provided)'}`,
       ].join('\n'),
@@ -333,13 +409,19 @@ function buildReleaseMessages(
         '',
         'Rules:',
         '- If unknown, write: "Unknown".',
-        '- Prefer bullets. Be thorough but not rambly.',
+        '- Every commit must appear as its own bullet. Do not group commits under catch-all labels like "miscellaneous".',
+        '- Be thorough and specific. Reference actual changes from the commit summaries.',
+        '- Prefer bullets.',
         '',
         `Issue hint: ${issue || '(not provided)'}`,
       ].join('\n'),
     },
   ];
 }
+
+// ---------------------------------------------------------------------------
+// Utilities
+// ---------------------------------------------------------------------------
 
 function formatError(error) {
   const plain = {};
@@ -438,6 +520,10 @@ function isUnknownSummary(summary, mode) {
   return unknownCount === headings.length;
 }
 
+// ---------------------------------------------------------------------------
+// GitHub helpers
+// ---------------------------------------------------------------------------
+
 function checkGhCli() {
   try {
     execSync('gh --version', { encoding: 'utf8', stdio: 'ignore' });
@@ -461,7 +547,6 @@ function checkUncommittedChanges() {
 
 function checkExistingPr(base, head) {
   try {
-    // Check for open PRs from head to base
     const result = spawnSync(
       'gh',
       [
@@ -483,14 +568,12 @@ function checkExistingPr(base, head) {
     );
 
     if (result.error || result.status !== 0) {
-      // If gh command fails, assume no PR exists (might be auth issue, but we'll catch that later)
       return null;
     }
 
     const prs = JSON.parse(result.stdout || '[]');
     return prs.length > 0 ? prs[0] : null;
   } catch {
-    // If parsing fails or command fails, assume no PR exists
     return null;
   }
 }
@@ -508,33 +591,27 @@ function hasNpmScript(scriptName, cwd = process.cwd()) {
 
 function extractPrTitle(summary, mode) {
   const targetSection = mode === 'release' ? 'release summary' : 'what change';
-  // Try to extract a title from the summary
   const lines = summary.split('\n');
   let inChangesSection = false;
 
   for (const line of lines) {
     const trimmed = line.trim();
 
-    // Detect the target section
     if (trimmed.toLowerCase().includes(targetSection)) {
       inChangesSection = true;
       continue;
     }
 
-    // If we hit another section heading, stop looking
     if (inChangesSection && trimmed && trimmed.endsWith('?')) {
       break;
     }
 
-    // If we're in the changes section, look for first bullet point
     if (inChangesSection && trimmed.startsWith('-')) {
-      // Extract bullet content, clean it up
       const bullet = trimmed.slice(1).trim();
-      // Remove markdown formatting and truncate
       const clean = bullet
-        .replace(/`([^`]+)`/g, '$1') // Remove backticks
-        .replace(/\*\*([^*]+)\*\*/g, '$1') // Remove bold
-        .replace(/\*([^*]+)\*/g, '$1') // Remove italic
+        .replace(/`([^`]+)`/g, '$1')
+        .replace(/\*\*([^*]+)\*\*/g, '$1')
+        .replace(/\*([^*]+)\*/g, '$1')
         .slice(0, 100);
       if (clean.length > 10) {
         return clean;
@@ -542,13 +619,11 @@ function extractPrTitle(summary, mode) {
     }
   }
 
-  // Fallback: use first commit title or branch name
   return null;
 }
 
 function createPrWithGh(base, branch, title, body) {
   try {
-    // Ensure branch is pushed first
     step('Pushing branch to remote...');
     try {
       execSync(`git push -u origin ${branch}`, {
@@ -557,7 +632,6 @@ function createPrWithGh(base, branch, title, body) {
       });
       success('Branch pushed to remote');
     } catch (error) {
-      // Branch might already be pushed, check if it exists
       const remoteBranches = execSync('git branch -r', {
         encoding: 'utf8',
       });
@@ -568,11 +642,9 @@ function createPrWithGh(base, branch, title, body) {
       }
     }
 
-    // Create PR using gh CLI
     step('Creating PR with GitHub CLI...');
     const prTitle = title || branch;
 
-    // Write body to temp file to avoid shell escaping issues
     const bodyFile = path.join(
       os.tmpdir(),
       `pr-body-${Date.now().toString()}.md`
@@ -592,13 +664,11 @@ function createPrWithGh(base, branch, title, body) {
       bodyFile,
     ];
 
-    // Add issue reference if provided via environment
     const issueEnv = process.env.PR_SUMMARY_ISSUE || '';
     if (issueEnv) {
       ghArgs.push('--issue', issueEnv);
     }
 
-    // Use spawnSync for better argument handling
     const result = spawnSync('gh', ghArgs, {
       encoding: 'utf8',
       stdio: 'pipe',
@@ -616,7 +686,6 @@ function createPrWithGh(base, branch, title, body) {
 
     const prUrl = result.stdout.trim();
 
-    // Cleanup temp file
     try {
       fs.unlinkSync(bodyFile);
     } catch {
@@ -675,6 +744,10 @@ function updatePrWithGh(prNumber, title, body) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// CLI
+// ---------------------------------------------------------------------------
+
 function parseArgs(argv) {
   const args = {
     base: DEFAULT_BASE,
@@ -716,21 +789,31 @@ function parseArgs(argv) {
   return args;
 }
 
+// ---------------------------------------------------------------------------
+// Main
+// ---------------------------------------------------------------------------
+
 async function main(argv) {
-  if (!process.env.GROQ_API_KEY || process.env.GROQ_API_KEY === '') {
-    fail('GROQ_API_KEY environment variable is required');
-    step('Set it in .env.local: GROQ_API_KEY="your-key-here"');
+  const providerInfo = createClient();
+  if (!providerInfo) {
+    fail('No API key found. Set CEREBRAS_API_KEY or GROQ_API_KEY in .env.local');
     process.exit(1);
   }
+
+  const { client, provider, defaultModel } = providerInfo;
+  const model =
+    process.env.CHANGESCRIBE_MODEL ||
+    process.env.GROQ_PR_MODEL ||
+    process.env.GROQ_MODEL ||
+    defaultModel;
 
   const args = parseArgs(argv);
   const branch = runGit('git branch --show-current').trim();
   const mode =
     args.mode ||
     (branch === 'staging' && args.base === 'main' ? 'release' : 'feature');
-  const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
-  process.stdout.write(`${banner(branch, args.base)}\n`);
+  process.stdout.write(`${banner(branch, args.base, provider)}\n`);
 
   const didFetch = tryFetchBase(args.base);
   if (!didFetch) {
@@ -753,6 +836,8 @@ async function main(argv) {
     step(`Issue: ${args.issue || '(not provided)'}`);
     step(`Create PR: ${args.createPr ? 'yes' : 'no'}`);
     step(`Mode: ${mode}`);
+    step(`Provider: ${provider}`);
+    step(`Model: ${model}`);
     return;
   }
 
@@ -765,7 +850,6 @@ async function main(argv) {
 
   // Safety checks before creating PR
   if (args.createPr) {
-    // Run format as a last-minute verification step
     if (args.skipFormat) {
       warn('Skipping format step (flagged)');
     } else if (!hasNpmScript('format')) {
@@ -780,7 +864,6 @@ async function main(argv) {
       }
     }
 
-    // Run tests as an extra verification step
     step('Running npm test before PR creation...');
     try {
       execSync('npm test', { encoding: 'utf8', stdio: 'inherit' });
@@ -789,7 +872,6 @@ async function main(argv) {
       process.exit(1);
     }
 
-    // Run build as a final verification step
     step('Running npm run build before PR creation...');
     try {
       execSync('npm run build', { encoding: 'utf8', stdio: 'inherit' });
@@ -798,14 +880,12 @@ async function main(argv) {
       process.exit(1);
     }
 
-    // Check for uncommitted changes after formatting
     if (checkUncommittedChanges()) {
       fail('You have uncommitted changes; please commit them first.');
       step('Run: git add . && git commit -m "your message"');
       process.exit(1);
     }
 
-    // Check for existing open PR
     const existingPr = checkExistingPr(args.base, branch);
     if (existingPr) {
       warn(`Found existing PR #${existingPr.number}: ${existingPr.title}`);
@@ -814,16 +894,16 @@ async function main(argv) {
 
   step(`Collecting ${commits.length} commits from ${baseRef}..HEAD`);
 
+  // Enrich commits with diff context for better LLM understanding
+  enrichCommitsWithDiffs(commits);
+
+  // Pass 1: 5Cs snapshot from titles only
   const pass1Messages = buildPass1Messages(commits, branch, baseRef);
-  const pass1 = await createCompletionSafe(
-    groq,
-    pass1Messages,
-    DEFAULT_MODEL,
-    2048
-  );
+  const pass1 = await createCompletionSafe(client, pass1Messages, model, 2048);
   const pass1Text = pass1?.choices?.[0]?.message?.content?.trim() || '';
   success('Pass 1 complete (5Cs snapshot)');
 
+  // Pass 2: per-commit condensation with diff context
   const chunks = chunkCommits(commits, CHUNK_SIZE_CHARS);
   step(`Pass 2 across ${chunks.length} chunk(s)`);
   const pass2Outputs = [];
@@ -831,10 +911,10 @@ async function main(argv) {
     const messages = buildPass2Messages(chunk);
     // biome-ignore lint/nursery/noAwaitInLoop: sequential LLM calls to avoid rate limits and keep output order predictable
     const completion = await createCompletionSafe(
-      groq,
+      client,
       messages,
-      DEFAULT_MODEL,
-      2048
+      model,
+      4096
     );
     const chunkText = completion?.choices?.[0]?.message?.content?.trim();
     if (chunkText) {
@@ -843,6 +923,7 @@ async function main(argv) {
   }
   success('Pass 2 complete (per-commit condensation)');
 
+  // Pass 3: synthesize PR summary
   const pass3Messages =
     mode === 'release'
       ? buildReleaseMessages(
@@ -861,12 +942,7 @@ async function main(argv) {
           pass1Text,
           formatCommitTitles(commits, 40)
         );
-  const pass3 = await createCompletionSafe(
-    groq,
-    pass3Messages,
-    DEFAULT_MODEL,
-    2048
-  );
+  const pass3 = await createCompletionSafe(client, pass3Messages, model, 4096);
   let finalSummary = pass3?.choices?.[0]?.message?.content?.trim() || '';
   if (isUnknownSummary(finalSummary, mode)) {
     warn('Pass 3 summary returned Unknown; retrying with fallback context...');
@@ -889,10 +965,10 @@ async function main(argv) {
             formatCommitTitles(commits, 80)
           );
     const retry = await createCompletionSafe(
-      groq,
+      client,
       retryMessages,
-      DEFAULT_MODEL,
-      2048
+      model,
+      4096
     );
     finalSummary =
       retry?.choices?.[0]?.message?.content?.trim() || finalSummary;
@@ -921,7 +997,6 @@ async function main(argv) {
     ? args.out
     : path.join(process.cwd(), args.out);
 
-  // Ensure output directory exists
   const outDir = path.dirname(resolvedOut);
   if (!fs.existsSync(outDir)) {
     fs.mkdirSync(outDir, { recursive: true });
@@ -930,7 +1005,6 @@ async function main(argv) {
   fs.writeFileSync(resolvedOut, fullOutput, 'utf8');
   success(`PR summary written to ${resolvedOut}`);
 
-  // Write a slim, PR-ready version without appendices to avoid GH body limits
   const finalOutPath = path.join(
     path.dirname(resolvedOut),
     `${path.basename(resolvedOut, path.extname(resolvedOut))}.final.md`
@@ -938,7 +1012,6 @@ async function main(argv) {
   fs.writeFileSync(finalOutPath, prBlock, 'utf8');
   success(`PR-ready (slim) summary written to ${finalOutPath}`);
 
-  // Also stash an autosave in tmp for debugging
   const tmpPath = path.join(
     os.tmpdir(),
     `pr-summary-${Date.now().toString()}-${path.basename(resolvedOut)}`
@@ -946,7 +1019,6 @@ async function main(argv) {
   fs.writeFileSync(tmpPath, fullOutput, 'utf8');
   warn(`Backup copy saved to ${tmpPath}`);
 
-  // Create PR if requested
   if (args.createPr) {
     const prTitle = extractPrTitle(finalSummary, mode) || branch;
     try {
@@ -957,7 +1029,6 @@ async function main(argv) {
         createPrWithGh(args.base, branch, prTitle, finalSummary);
       }
     } catch (_error) {
-      // Error already logged in createPrWithGh
       process.exit(1);
     }
   }

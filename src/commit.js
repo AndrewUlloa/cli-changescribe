@@ -3,7 +3,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { config } = require('dotenv');
-const Groq = require('groq-sdk').default;
+const { createClient } = require('./provider');
 
 // Load environment variables from .env.local
 config({ path: '.env.local' });
@@ -193,18 +193,19 @@ function getFileType(filename) {
 async function generateCommitMessage(argv) {
   try {
     const isDryRun = argv.includes('--dry-run');
-    // Check if GROQ_API_KEY is set
-    if (!process.env.GROQ_API_KEY || process.env.GROQ_API_KEY === '') {
-      console.error('❌ GROQ_API_KEY environment variable is required');
-      console.log('💡 Get your API key from: https://console.groq.com/keys');
-      console.log('💡 Set it in .env.local file: GROQ_API_KEY="your-key-here"');
+
+    const providerInfo = createClient();
+    if (!providerInfo) {
+      console.error('❌ No API key found');
+      console.log('💡 Set CEREBRAS_API_KEY or GROQ_API_KEY in .env.local');
       process.exit(1);
     }
 
-    // Initialize Groq client
-    const groq = new Groq({
-      apiKey: process.env.GROQ_API_KEY,
-    });
+    const { client, provider, defaultModel } = providerInfo;
+    const model =
+      process.env.CHANGESCRIBE_MODEL ||
+      process.env.GROQ_MODEL ||
+      defaultModel;
 
     // Get comprehensive analysis of all changes
     let changeAnalysis;
@@ -220,13 +221,14 @@ async function generateCommitMessage(argv) {
       return;
     }
 
-    console.log('🤖 Generating commit message with AI...');
+    console.log(`🤖 Generating commit message with AI (${provider})...`);
 
-    // Generate commit message using Groq with comprehensive analysis
+    // Generate commit message using LLM with comprehensive analysis
     const completion = await createCompletionSafe(
-      groq,
+      client,
       buildChatMessages(changeAnalysis),
-      'openai/gpt-oss-120b'
+      model,
+      provider
     );
 
     const rawContent = completion?.choices?.[0]?.message?.content
@@ -249,9 +251,10 @@ async function generateCommitMessage(argv) {
     const violations = findCommitViolations(built);
     if (violations.length > 0) {
       const repairCompletion = await createCompletionSafe(
-        groq,
+        client,
         buildRepairMessages(rawContent || '', reasoning || '', built, violations),
-        'openai/gpt-oss-120b'
+        model,
+        provider
       );
       const repairedContent = repairCompletion?.choices?.[0]?.message?.content
         ?.trim()
@@ -324,17 +327,21 @@ async function generateCommitMessage(argv) {
   }
 }
 
-async function createCompletionSafe(groq, messages, model) {
+async function createCompletionSafe(client, messages, model, provider) {
   try {
-    return await groq.chat.completions.create({
+    const params = {
       messages,
       model,
       temperature: 0.3,
       max_tokens: 16_384,
-      reasoning_effort: 'high',
-    });
+    };
+    // reasoning_effort is a Groq-specific parameter; omit for other providers
+    if (provider === 'groq') {
+      params.reasoning_effort = 'high';
+    }
+    return await client.chat.completions.create(params);
   } catch (error) {
-    console.error('❌ Groq API error while creating completion');
+    console.error('❌ LLM API error while creating completion');
     console.error(formatError(error));
     process.exit(1);
   }

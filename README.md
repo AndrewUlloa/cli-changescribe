@@ -1,6 +1,6 @@
 # changescribe
 
-CLI to generate Conventional Commit messages and PR summaries using Groq.
+CLI to generate Conventional Commit messages and PR summaries using Cerebras or Groq.
 
 ## Install
 
@@ -32,8 +32,13 @@ yarn add cli-changescribe
 Create a `.env.local` file in the repo where you run the CLI:
 
 ```bash
+# Pick one (Cerebras is preferred for higher throughput)
+CEREBRAS_API_KEY="your-key-here"
+# or
 GROQ_API_KEY="your-key-here"
 ```
+
+Provider priority: if both keys are set, Cerebras is used.
 
 If your repo uses `pnpm` or `yarn`, make sure you install `cli-changescribe`
 with the same package manager so the correct lockfile is updated (Vercel uses
@@ -42,7 +47,7 @@ with the same package manager so the correct lockfile is updated (Vercel uses
 ### Setup process (recommended)
 
 1. Install `cli-changescribe` (global or per repo).
-2. Add `.env.local` with `GROQ_API_KEY`.
+2. Add `.env.local` with `CEREBRAS_API_KEY` or `GROQ_API_KEY`.
 3. Run `npx changescribe init` to add npm scripts.
 4. If you plan to use `--create-pr`, install and auth GitHub CLI: `gh auth login`.
 5. Run a dry run to validate:
@@ -55,8 +60,8 @@ Optional environment variables for PR summaries:
 - `PR_SUMMARY_OUT` (default: `.pr-summaries/PR_SUMMARY.md`)
 - `PR_SUMMARY_LIMIT` (default: `400`)
 - `PR_SUMMARY_ISSUE` (default: empty)
-- `GROQ_PR_MODEL` (default: `openai/gpt-oss-120b`)
-- `GROQ_MODEL` (fallback)
+- `CHANGESCRIBE_MODEL` (override model name for any provider)
+- `GROQ_PR_MODEL` / `GROQ_MODEL` (legacy overrides, still supported)
 
 ## Usage
 
