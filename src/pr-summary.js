@@ -79,19 +79,25 @@ function runGit(command) {
 // ---------------------------------------------------------------------------
 
 function getCommitDiffInfo(sha, title) {
-  // Skip diff for merge commits — they produce combined diffs that are noisy
-  if (title.toLowerCase().startsWith('merge')) {
-    return { stat: '(merge commit)', diff: '' };
-  }
+  const isMerge = title.toLowerCase().startsWith('merge');
+
   try {
-    const stat = execSync(`git show ${sha} --stat --format=""`, {
+    // For merge commits, diff against the first parent to see what the merge introduced.
+    // For normal commits, use git show which diffs against the single parent.
+    const statCmd = isMerge
+      ? `git diff ${sha}^1..${sha} --stat`
+      : `git show ${sha} --stat --format=""`;
+    const stat = execSync(statCmd, {
       encoding: 'utf8',
       maxBuffer: LARGE_BUFFER_SIZE,
     }).trim();
 
     let diff = '';
     try {
-      diff = execSync(`git show ${sha} -U3 --format="" --diff-filter=ACMRT`, {
+      const diffCmd = isMerge
+        ? `git diff ${sha}^1..${sha} -U3 --diff-filter=ACMRT`
+        : `git show ${sha} -U3 --format="" --diff-filter=ACMRT`;
+      diff = execSync(diffCmd, {
         encoding: 'utf8',
         maxBuffer: LARGE_BUFFER_SIZE,
       });
@@ -304,7 +310,7 @@ function buildPass2Messages(commitsChunk) {
     {
       role: 'system',
       content:
-        'You are producing compact, high-signal summaries per commit. Use the diff and file stats to understand exactly what changed in the code. Produce 2-3 bullets each (change, rationale, risk/test note). Flag any breaking changes or migrations.',
+        'You are producing compact, high-signal summaries per commit. Use the diff and file stats to understand exactly what changed in the code. Produce 2-3 bullets each (change, rationale, risk/test note). Flag any breaking changes or migrations. IMPORTANT: Only reference technologies, frameworks, and patterns that are explicitly visible in the diff or file names. Do not infer or guess technologies that are not shown (e.g., do not mention GraphQL unless you see .graphql files or GraphQL client imports in the diff).',
     },
     {
       role: 'user',
@@ -333,7 +339,7 @@ function buildPass3Messages(
     {
       role: 'system',
       content:
-        'You write PR summaries that are easy to review. Be concise, specific, and action-oriented. Do not include markdown fences.',
+        'You write PR summaries that are easy to review. Be concise, specific, and action-oriented. Do not include markdown fences. Only reference technologies and patterns that appear in the commit summaries provided. Never fabricate or assume technologies not explicitly mentioned (e.g., do not mention GraphQL, Apollo, Relay, or similar unless the summaries explicitly reference them).',
     },
     {
       role: 'user',
@@ -382,7 +388,7 @@ function buildReleaseMessages(
     {
       role: 'system',
       content:
-        'You write release PR summaries for QA to production. Be concise, concrete, and action-oriented. Do not include markdown fences.',
+        'You write release PR summaries for QA to production. Be concise, concrete, and action-oriented. Do not include markdown fences. Only reference technologies and patterns that appear in the commit summaries provided. Never fabricate or assume technologies not explicitly mentioned.',
     },
     {
       role: 'user',
