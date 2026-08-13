@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-type CliCall = ['commit' | 'pr', string[]] | ['init'];
+type CliCall = ['commit' | 'doctor' | 'pr', string[]] | ['init'];
 
 interface CliRunners {
   runCommit(args: string[]): Promise<void>;
+  runDoctor(args: string[]): Promise<void>;
   runInit(): Promise<void>;
   runPrSummary(args: string[]): Promise<void>;
 }
@@ -20,6 +21,9 @@ function recordingRunners(): { calls: CliCall[]; runners: CliRunners } {
     runners: {
       runCommit: async (args: string[]) => {
         calls.push(['commit', args]);
+      },
+      runDoctor: async (args: string[]) => {
+        calls.push(['doctor', args]);
       },
       runInit: async () => {
         calls.push(['init']);
@@ -94,4 +98,84 @@ test('help does not invoke a command runner', async () => {
 
   assert.equal(await runCli(['commit', '--help'], runners), 0);
   assert.deepEqual(calls, []);
+});
+
+test('unknown commit, doctor, and init options fail before invoking a runner', async () => {
+  const { calls, runners } = recordingRunners();
+
+  assert.equal(await runCli(['commit', '--dry-rnu'], runners), 1);
+  assert.equal(await runCli(['commit', '--dry-run', 'extra'], runners), 1);
+  assert.equal(await runCli(['doctor', '--network'], runners), 1);
+  assert.equal(await runCli(['init', '--force'], runners), 1);
+
+  assert.deepEqual(calls, []);
+});
+
+test('invalid PR options fail before invoking a runner', async () => {
+  const invalidInvocations = [
+    ['pr', '--base'],
+    ['pr', '--out', '--dry-run'],
+    ['pr', '--limit', '0'],
+    ['pr', '--limit', 'abc'],
+    ['pr', '--mode', 'other'],
+    ['pr', '--issue', '#0'],
+    ['pr', '--issue', 'abc'],
+    ['pr', '--wat'],
+  ];
+
+  for (const invocation of invalidInvocations) {
+    const { calls, runners } = recordingRunners();
+    assert.equal(await runCli(invocation, runners), 1, invocation.join(' '));
+    assert.deepEqual(calls, [], invocation.join(' '));
+  }
+});
+
+test('valid doctor and PR options still reach their runners unchanged', async () => {
+  const { calls, runners } = recordingRunners();
+
+  assert.equal(await runCli(['doctor', '--live'], runners), 0);
+  assert.equal(
+    await runCli(
+      [
+        'pr',
+        '--base',
+        'develop',
+        '--out',
+        'summary.md',
+        '--limit',
+        '12',
+        '--issue',
+        '#34',
+        '--mode',
+        'feature',
+        '--dry-run',
+        '--create-pr',
+        '--skip-format',
+      ],
+      runners,
+    ),
+    0,
+  );
+
+  assert.deepEqual(calls, [
+    ['doctor', ['--live']],
+    [
+      'pr',
+      [
+        '--base',
+        'develop',
+        '--out',
+        'summary.md',
+        '--limit',
+        '12',
+        '--issue',
+        '#34',
+        '--mode',
+        'feature',
+        '--dry-run',
+        '--create-pr',
+        '--skip-format',
+      ],
+    ],
+  ]);
 });

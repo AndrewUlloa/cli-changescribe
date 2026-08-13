@@ -2,6 +2,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
+import {
+  normalizeIssueReference,
+  validatePrArguments,
+} from './arguments';
 import { resolveProvider, type ResolvedProvider } from './provider';
 import {
   knownSecretValues,
@@ -800,6 +804,7 @@ function updatePrWithGh(
 // ---------------------------------------------------------------------------
 
 function parseArgs(argv: string[], env: NodeJS.ProcessEnv): PrArguments {
+  validatePrArguments(argv);
   const args: PrArguments = {
     base: env.PR_SUMMARY_BASE || 'main',
     out: env.PR_SUMMARY_OUT || '.pr-summaries/PR_SUMMARY.md',
@@ -823,7 +828,7 @@ function parseArgs(argv: string[], env: NodeJS.ProcessEnv): PrArguments {
       args.limit = Number.parseInt(argv[i + 1], 10);
       i += 1;
     } else if (current === '--issue' && argv[i + 1]) {
-      args.issue = argv[i + 1];
+      args.issue = normalizeIssueReference(argv[i + 1]);
       i += 1;
     } else if (current === '--dry-run') {
       args.dryRun = true;
@@ -872,6 +877,7 @@ function validateBaseBranch(base: string): string {
 // ---------------------------------------------------------------------------
 
 async function main(argv: string[]): Promise<void> {
+  validatePrArguments(argv);
   const runtime = loadRuntimeConfig();
   const knownSecrets = knownSecretValues(runtime.values);
   const resolved = resolveProvider({

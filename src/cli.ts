@@ -1,5 +1,6 @@
 import { runCommit } from './commit';
 import { runDoctor } from './doctor';
+import { CliArgumentError, validateCommandArguments } from './arguments';
 import { formatSafeError } from './errors';
 import { runInit } from './init';
 import { runPrSummary } from './pr-summary';
@@ -54,6 +55,22 @@ export async function runCli(
   if (rest.includes('-h') || rest.includes('--help')) {
     printHelp();
     return 0;
+  }
+
+  const validatedCommand =
+    command === 'pr:summary' || command === 'feature:pr' || command === 'staging:pr'
+      ? 'pr'
+      : command;
+  if (validatedCommand === 'commit' || validatedCommand === 'doctor' || validatedCommand === 'init' || validatedCommand === 'pr') {
+    try {
+      validateCommandArguments(validatedCommand, rest);
+    } catch (error) {
+      if (error instanceof CliArgumentError) {
+        console.error(`Error: ${error.message}`);
+        return 1;
+      }
+      throw error;
+    }
   }
 
   if (command === 'commit') {
