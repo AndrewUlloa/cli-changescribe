@@ -100,6 +100,59 @@ test('help does not invoke a command runner', async () => {
   assert.deepEqual(calls, []);
 });
 
+test('each command exposes focused help with its real options and side effects', async () => {
+  const cases = [
+    {
+      invocation: ['commit', '--help'],
+      expected: [/Usage: diffwright commit/, /--dry-run/, /stages all changes/i],
+    },
+    {
+      invocation: ['pr', '--help'],
+      expected: [/Usage: diffwright pr/, /--create-pr/, /--issue <number>/],
+    },
+    {
+      invocation: ['doctor', '--help'],
+      expected: [/Usage: diffwright doctor/, /--live/, /one provider request/i],
+    },
+    {
+      invocation: ['init', '--help'],
+      expected: [/Usage: diffwright init/, /package\.json/, /accepts no options/i],
+    },
+  ];
+
+  for (const { invocation, expected } of cases) {
+    const { calls, runners } = recordingRunners();
+    const output: string[] = [];
+    const originalLog = console.log;
+    console.log = (message?: unknown) => output.push(String(message ?? ''));
+    try {
+      assert.equal(await runCli(invocation, runners), 0);
+    } finally {
+      console.log = originalLog;
+    }
+    assert.deepEqual(calls, []);
+    for (const pattern of expected) {
+      assert.match(output.join('\n'), pattern, invocation.join(' '));
+    }
+  }
+});
+
+test('global help links to the complete CLI reference', async () => {
+  const output: string[] = [];
+  const originalLog = console.log;
+  console.log = (message?: unknown) => output.push(String(message ?? ''));
+  try {
+    assert.equal(await runCli(['--help']), 0);
+  } finally {
+    console.log = originalLog;
+  }
+
+  assert.match(
+    output.join('\n'),
+    /github\.com\/AndrewUlloa\/diffwright\/blob\/main\/documentation\/cli-reference\.md/,
+  );
+});
+
 test('unknown commit, doctor, and init options fail before invoking a runner', async () => {
   const { calls, runners } = recordingRunners();
 
