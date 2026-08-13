@@ -1,9 +1,14 @@
-const { execSync, spawnSync } = require('child_process');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const { config } = require('dotenv');
-const { createClient } = require('./provider');
+import { execFileSync, spawnSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { config } from 'dotenv';
+import type OpenAI from 'openai';
+import type {
+  ChatCompletion,
+  ChatCompletionMessageParam,
+} from 'openai/resources/chat/completions';
+import { createClient } from './provider';
 
 config({ path: '.env.local' });
 
@@ -20,6 +25,35 @@ const CHUNK_SIZE_CHARS = 20000;
 const DIFF_PER_COMMIT_CHARS = 3000;
 const NEWLINE_SPLIT_RE = /\r?\n/;
 
+interface CommitRecord {
+  sha: string;
+  title: string;
+  body: string;
+  stat: string;
+  diff: string;
+}
+
+interface PrArguments {
+  base: string;
+  out: string;
+  limit: number;
+  dryRun: boolean;
+  issue: string;
+  createPr: boolean;
+  mode: string;
+  skipFormat: boolean;
+}
+
+interface ExistingPr {
+  number: number;
+  title: string;
+  url: string;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 const ui = {
   reset: '\x1b[0m',
   bold: '\x1b[1m',
@@ -33,11 +67,11 @@ const ui = {
   red: '\x1b[38;2;255;99;132m',
 };
 
-function paint(text, color) {
+function paint(text: string, color: string): string {
   return `${color}${text}${ui.reset}`;
 }
 
-function banner(branch, base, providerName) {
+function banner(branch: string, base: string, providerName: string): string {
   const title = paint('PR SYNTHESIZER', ui.magenta);
   const line = paint('═'.repeat(36), ui.purple);
   const meta = `${paint('branch', ui.cyan)} ${branch}  ${paint(
@@ -47,30 +81,30 @@ function banner(branch, base, providerName) {
   return `${line}\n${title}\n${meta}\n${line}`;
 }
 
-function step(label) {
+function step(label: string): void {
   process.stdout.write(`${paint('◆', ui.blue)} ${label}\n`);
 }
 
-function success(label) {
+function success(label: string): void {
   process.stdout.write(`${paint('✓', ui.green)} ${label}\n`);
 }
 
-function warn(label) {
+function warn(label: string): void {
   process.stdout.write(`${paint('◷', ui.yellow)} ${label}\n`);
 }
 
-function fail(label) {
+function fail(label: string): void {
   process.stdout.write(`${paint('✕', ui.red)} ${label}\n`);
 }
 
-function runGit(command) {
+function runGit(args: string[]): string {
   try {
-    return execSync(command, {
+    return execFileSync('git', args, {
       encoding: 'utf8',
       maxBuffer: LARGE_BUFFER_SIZE,
     });
   } catch (error) {
-    throw new Error(`Git command failed: ${error.message}`);
+    throw new Error(`Git command failed: ${errorMessage(error)}`);
   }
 }
 
@@ -78,26 +112,29 @@ function runGit(command) {
 // Diff enrichment
 // ---------------------------------------------------------------------------
 
-function getCommitDiffInfo(sha, title) {
+function getCommitDiffInfo(
+  sha: string,
+  title: string,
+): { stat: string; diff: string } {
   const isMerge = title.toLowerCase().startsWith('merge');
 
   try {
     // For merge commits, diff against the first parent to see what the merge introduced.
     // For normal commits, use git show which diffs against the single parent.
-    const statCmd = isMerge
-      ? `git diff ${sha}^1..${sha} --stat`
-      : `git show ${sha} --stat --format=""`;
-    const stat = execSync(statCmd, {
+    const statArgs = isMerge
+      ? ['diff', `${sha}^1..${sha}`, '--stat']
+      : ['show', sha, '--stat', '--format='];
+    const stat = execFileSync('git', statArgs, {
       encoding: 'utf8',
       maxBuffer: LARGE_BUFFER_SIZE,
     }).trim();
 
     let diff = '';
     try {
-      const diffCmd = isMerge
-        ? `git diff ${sha}^1..${sha} -U3 --diff-filter=ACMRT`
-        : `git show ${sha} -U3 --format="" --diff-filter=ACMRT`;
-      diff = execSync(diffCmd, {
+      const diffArgs = isMerge
+        ? ['diff', `${sha}^1..${sha}`, '-U3', '--diff-filter=ACMRT']
+        : ['show', sha, '-U3', '--format=', '--diff-filter=ACMRT'];
+      diff = execFileSync('git', diffArgs, {
         encoding: 'utf8',
         maxBuffer: LARGE_BUFFER_SIZE,
       });
@@ -118,15 +155,18 @@ function getCommitDiffInfo(sha, title) {
 // Commit collection
 // ---------------------------------------------------------------------------
 
-function collectCommits(baseRef, limit) {
+function collectCommits(baseRef: string, limit: number): CommitRecord[] {
   const range = `${baseRef}..HEAD`;
   let rawLog = '';
   try {
-    rawLog = runGit(
-      `git log ${range} --reverse --pretty=format:%H%x1f%s%x1f%b%x1e`
-    );
+    rawLog = runGit([
+      'log',
+      range,
+      '--reverse',
+      '--pretty=format:%H%x1f%s%x1f%b%x1e',
+    ]);
   } catch (error) {
-    if (error.message.includes('unknown revision')) {
+    if (errorMessage(error).includes('unknown revision')) {
       throw new Error(
         `Base ref "${baseRef}" not found. Use --base to set a valid branch.`
       );
@@ -154,7 +194,7 @@ function collectCommits(baseRef, limit) {
   return commits;
 }
 
-function enrichCommitsWithDiffs(commits) {
+function enrichCommitsWithDiffs(commits: CommitRecord[]): void {
   step('Enriching commits with diff context...');
   for (const commit of commits) {
     const info = getCommitDiffInfo(commit.sha, commit.title);
@@ -164,9 +204,9 @@ function enrichCommitsWithDiffs(commits) {
   success(`Enriched ${commits.length} commits with diffs`);
 }
 
-function tryFetchBase(baseBranch) {
+function tryFetchBase(baseBranch: string): boolean {
   try {
-    execSync(`git fetch origin ${baseBranch}`, {
+    execFileSync('git', ['fetch', 'origin', baseBranch], {
       encoding: 'utf8',
       stdio: 'ignore',
       maxBuffer: LARGE_BUFFER_SIZE,
@@ -177,21 +217,29 @@ function tryFetchBase(baseBranch) {
   }
 }
 
-function resolveBaseRef(baseBranch) {
+function resolveBaseRef(baseBranch: string): string {
   try {
-    execSync(`git show-ref --verify refs/remotes/origin/${baseBranch}`, {
+    execFileSync(
+      'git',
+      ['show-ref', '--verify', `refs/remotes/origin/${baseBranch}`],
+      {
       encoding: 'utf8',
       stdio: 'ignore',
       maxBuffer: LARGE_BUFFER_SIZE,
-    });
+      }
+    );
     return `origin/${baseBranch}`;
   } catch {
     try {
-      execSync(`git show-ref --verify refs/heads/${baseBranch}`, {
+      execFileSync(
+        'git',
+        ['show-ref', '--verify', `refs/heads/${baseBranch}`],
+        {
         encoding: 'utf8',
         stdio: 'ignore',
         maxBuffer: LARGE_BUFFER_SIZE,
-      });
+        }
+      );
       return baseBranch;
     } catch {
       return baseBranch;
@@ -203,9 +251,12 @@ function resolveBaseRef(baseBranch) {
 // Chunking
 // ---------------------------------------------------------------------------
 
-function chunkCommits(commits, maxChars) {
-  const chunks = [];
-  let current = [];
+function chunkCommits(
+  commits: CommitRecord[],
+  maxChars: number,
+): CommitRecord[][] {
+  const chunks: CommitRecord[][] = [];
+  let current: CommitRecord[] = [];
   let currentSize = 0;
 
   for (const commit of commits) {
@@ -226,7 +277,7 @@ function chunkCommits(commits, maxChars) {
   return chunks;
 }
 
-function serializeCommit(commit) {
+function serializeCommit(commit: CommitRecord): string {
   const parts = [commit.sha, commit.title, commit.body];
   if (commit.stat) {
     parts.push(commit.stat);
@@ -242,7 +293,12 @@ function serializeCommit(commit) {
 // LLM helpers
 // ---------------------------------------------------------------------------
 
-async function createCompletionSafe(client, messages, model, maxTokens) {
+async function createCompletionSafe(
+  client: OpenAI,
+  messages: ChatCompletionMessageParam[],
+  model: string,
+  maxTokens: number,
+): Promise<ChatCompletion> {
   try {
     return await client.chat.completions.create({
       messages,
@@ -261,7 +317,11 @@ async function createCompletionSafe(client, messages, model, maxTokens) {
 // Prompt builders
 // ---------------------------------------------------------------------------
 
-function buildPass1Messages(commits, branch, base) {
+function buildPass1Messages(
+  commits: CommitRecord[],
+  branch: string,
+  base: string,
+): ChatCompletionMessageParam[] {
   const titles = commits
     .map((commit) => `- ${commit.title || '(no title)'}`)
     .join('\n');
@@ -287,7 +347,9 @@ function buildPass1Messages(commits, branch, base) {
   ];
 }
 
-function buildPass2Messages(commitsChunk) {
+function buildPass2Messages(
+  commitsChunk: CommitRecord[],
+): ChatCompletionMessageParam[] {
   const body = commitsChunk
     .map((commit) => {
       const parts = [
@@ -328,13 +390,13 @@ function buildPass2Messages(commitsChunk) {
 }
 
 function buildPass3Messages(
-  pass2Summaries,
-  branch,
-  base,
-  issue,
-  pass1Text,
-  commitTitles
-) {
+  pass2Summaries: string[],
+  branch: string,
+  base: string,
+  issue: string,
+  pass1Text: string,
+  commitTitles: string,
+): ChatCompletionMessageParam[] {
   return [
     {
       role: 'system',
@@ -377,13 +439,13 @@ function buildPass3Messages(
 }
 
 function buildReleaseMessages(
-  pass2Summaries,
-  branch,
-  base,
-  issue,
-  pass1Text,
-  commitTitles
-) {
+  pass2Summaries: string[],
+  branch: string,
+  base: string,
+  issue: string,
+  pass1Text: string,
+  commitTitles: string,
+): ChatCompletionMessageParam[] {
   return [
     {
       role: 'system',
@@ -429,19 +491,22 @@ function buildReleaseMessages(
 // Utilities
 // ---------------------------------------------------------------------------
 
-function formatError(error) {
-  const plain = {};
-  for (const key of Object.getOwnPropertyNames(error)) {
-    if (key === 'response' && error.response) {
+function formatError(error: unknown): string {
+  const plain: Record<string, unknown> = {};
+  const errorObject =
+    typeof error === 'object' && error !== null ? error : { message: String(error) };
+  for (const key of Object.getOwnPropertyNames(errorObject)) {
+    const value: unknown = Reflect.get(errorObject, key);
+    if (key === 'response' && typeof value === 'object' && value !== null) {
       plain.response = {
-        status: error.response.status,
-        statusText: error.response.statusText,
-        headers: error.response.headers || undefined,
-        data: error.response.data || undefined,
+        status: Reflect.get(value, 'status'),
+        statusText: Reflect.get(value, 'statusText'),
+        headers: Reflect.get(value, 'headers') || undefined,
+        data: Reflect.get(value, 'data') || undefined,
       };
     } else {
       try {
-        plain[key] = error[key];
+        plain[key] = value;
       } catch {
         // ignore
       }
@@ -450,9 +515,9 @@ function formatError(error) {
   return safeStringify(plain);
 }
 
-function safeStringify(obj) {
+function safeStringify(obj: unknown): string {
   try {
-    const seen = new WeakSet();
+    const seen = new WeakSet<object>();
     return JSON.stringify(
       obj,
       (_key, value) => {
@@ -478,7 +543,7 @@ function safeStringify(obj) {
   }
 }
 
-function formatCommitTitles(commits, limit) {
+function formatCommitTitles(commits: CommitRecord[], limit: number): string {
   const items = commits.slice(-limit).map((commit) => {
     const title = commit.title?.trim() || '(no title)';
     return `- ${title}`;
@@ -486,7 +551,7 @@ function formatCommitTitles(commits, limit) {
   return items.join('\n');
 }
 
-function isUnknownSummary(summary, mode) {
+function isUnknownSummary(summary: string, mode: string): boolean {
   const trimmed = summary.trim();
   if (!trimmed) {
     return true;
@@ -530,18 +595,18 @@ function isUnknownSummary(summary, mode) {
 // GitHub helpers
 // ---------------------------------------------------------------------------
 
-function checkGhCli() {
+function checkGhCli(): boolean {
   try {
-    execSync('gh --version', { encoding: 'utf8', stdio: 'ignore' });
+    execFileSync('gh', ['--version'], { encoding: 'utf8', stdio: 'ignore' });
     return true;
   } catch {
     return false;
   }
 }
 
-function checkUncommittedChanges() {
+function checkUncommittedChanges(): boolean {
   try {
-    const status = execSync('git status --porcelain', {
+    const status = execFileSync('git', ['status', '--porcelain'], {
       encoding: 'utf8',
       maxBuffer: LARGE_BUFFER_SIZE,
     }).trim();
@@ -551,7 +616,7 @@ function checkUncommittedChanges() {
   }
 }
 
-function checkExistingPr(base, head) {
+function checkExistingPr(base: string, head: string): ExistingPr | null {
   try {
     const result = spawnSync(
       'gh',
@@ -577,25 +642,50 @@ function checkExistingPr(base, head) {
       return null;
     }
 
-    const prs = JSON.parse(result.stdout || '[]');
-    return prs.length > 0 ? prs[0] : null;
+    const parsed: unknown = JSON.parse(result.stdout || '[]');
+    if (!Array.isArray(parsed) || parsed.length === 0) {
+      return null;
+    }
+    const first: unknown = parsed[0];
+    if (
+      typeof first !== 'object' ||
+      first === null ||
+      typeof Reflect.get(first, 'number') !== 'number' ||
+      typeof Reflect.get(first, 'title') !== 'string' ||
+      typeof Reflect.get(first, 'url') !== 'string'
+    ) {
+      return null;
+    }
+    return {
+      number: Reflect.get(first, 'number'),
+      title: Reflect.get(first, 'title'),
+      url: Reflect.get(first, 'url'),
+    };
   } catch {
     return null;
   }
 }
 
-function hasNpmScript(scriptName, cwd = process.cwd()) {
+function hasNpmScript(scriptName: string, cwd = process.cwd()): boolean {
   try {
     const packagePath = path.join(cwd, 'package.json');
     const raw = fs.readFileSync(packagePath, 'utf8');
-    const pkg = JSON.parse(raw);
-    return Boolean(pkg?.scripts?.[scriptName]);
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null) {
+      return false;
+    }
+    const scripts: unknown = Reflect.get(parsed, 'scripts');
+    return Boolean(
+      typeof scripts === 'object' &&
+        scripts !== null &&
+        Reflect.get(scripts, scriptName),
+    );
   } catch {
     return false;
   }
 }
 
-function extractPrTitle(summary, mode) {
+function extractPrTitle(summary: string, mode: string): string | null {
   const targetSection = mode === 'release' ? 'release summary' : 'what change';
   const lines = summary.split('\n');
   let inChangesSection = false;
@@ -628,17 +718,22 @@ function extractPrTitle(summary, mode) {
   return null;
 }
 
-function createPrWithGh(base, branch, title, body) {
+function createPrWithGh(
+  base: string,
+  branch: string,
+  title: string,
+  body: string,
+): string {
   try {
     step('Pushing branch to remote...');
     try {
-      execSync(`git push -u origin ${branch}`, {
+      execFileSync('git', ['push', '-u', 'origin', branch], {
         encoding: 'utf8',
         stdio: 'pipe',
       });
       success('Branch pushed to remote');
     } catch (error) {
-      const remoteBranches = execSync('git branch -r', {
+      const remoteBranches = execFileSync('git', ['branch', '-r'], {
         encoding: 'utf8',
       });
       if (remoteBranches.includes(`origin/${branch}`)) {
@@ -701,13 +796,17 @@ function createPrWithGh(base, branch, title, body) {
     success(`PR created: ${prUrl}`);
     return prUrl;
   } catch (error) {
-    fail(`Failed to create PR: ${error.message}`);
+    fail(`Failed to create PR: ${errorMessage(error)}`);
     warn('You can create the PR manually using the generated summary file');
     throw error;
   }
 }
 
-function updatePrWithGh(prNumber, title, body) {
+function updatePrWithGh(
+  prNumber: number,
+  title: string,
+  body: string,
+): void {
   try {
     step(`Updating existing PR #${prNumber}...`);
     const bodyFile = path.join(
@@ -744,7 +843,7 @@ function updatePrWithGh(prNumber, title, body) {
 
     success(`PR #${prNumber} updated`);
   } catch (error) {
-    fail(`Failed to update PR: ${error.message}`);
+    fail(`Failed to update PR: ${errorMessage(error)}`);
     warn('You can update the PR manually using the generated summary file');
     throw error;
   }
@@ -754,8 +853,8 @@ function updatePrWithGh(prNumber, title, body) {
 // CLI
 // ---------------------------------------------------------------------------
 
-function parseArgs(argv) {
-  const args = {
+function parseArgs(argv: string[]): PrArguments {
+  const args: PrArguments = {
     base: DEFAULT_BASE,
     out: DEFAULT_OUT,
     limit: DEFAULT_LIMIT,
@@ -799,7 +898,7 @@ function parseArgs(argv) {
 // Main
 // ---------------------------------------------------------------------------
 
-async function main(argv) {
+async function main(argv: string[]): Promise<void> {
   const providerInfo = createClient();
   if (!providerInfo) {
     fail('No API key found. Set CEREBRAS_API_KEY or GROQ_API_KEY in .env.local');
@@ -815,7 +914,7 @@ async function main(argv) {
     defaultModel;
 
   const args = parseArgs(argv);
-  const branch = runGit('git branch --show-current').trim();
+  const branch = runGit(['branch', '--show-current']).trim();
   const mode =
     args.mode ||
     (branch === 'staging' && args.base === 'main' ? 'release' : 'feature');
@@ -864,7 +963,10 @@ async function main(argv) {
     } else {
       step('Running npm run format before PR creation...');
       try {
-        execSync('npm run format', { encoding: 'utf8', stdio: 'inherit' });
+        execFileSync('npm', ['run', 'format'], {
+          encoding: 'utf8',
+          stdio: 'inherit',
+        });
       } catch (_error) {
         fail('npm run format failed; fix formatting errors first.');
         process.exit(1);
@@ -873,7 +975,7 @@ async function main(argv) {
 
     step('Running npm test before PR creation...');
     try {
-      execSync('npm test', { encoding: 'utf8', stdio: 'inherit' });
+      execFileSync('npm', ['test'], { encoding: 'utf8', stdio: 'inherit' });
     } catch (_error) {
       fail('npm test failed; fix test failures first.');
       process.exit(1);
@@ -881,7 +983,10 @@ async function main(argv) {
 
     step('Running npm run build before PR creation...');
     try {
-      execSync('npm run build', { encoding: 'utf8', stdio: 'inherit' });
+      execFileSync('npm', ['run', 'build'], {
+        encoding: 'utf8',
+        stdio: 'inherit',
+      });
     } catch (_error) {
       fail('npm run build failed; fix build errors first.');
       process.exit(1);
@@ -913,7 +1018,7 @@ async function main(argv) {
   // Pass 2: per-commit condensation with diff context
   const chunks = chunkCommits(commits, CHUNK_SIZE_CHARS);
   step(`Pass 2 across ${chunks.length} chunk(s)`);
-  const pass2Outputs = [];
+  const pass2Outputs: string[] = [];
   for (const chunk of chunks) {
     const messages = buildPass2Messages(chunk);
     // biome-ignore lint/nursery/noAwaitInLoop: sequential LLM calls to avoid rate limits and keep output order predictable
@@ -1041,12 +1146,12 @@ async function main(argv) {
   }
 }
 
-async function runPrSummary(argv = process.argv.slice(2)) {
+export async function runPrSummary(
+  argv = process.argv.slice(2),
+): Promise<void> {
   await main(argv);
 }
 
 if (require.main === module) {
   runPrSummary();
 }
-
-module.exports = { runPrSummary };

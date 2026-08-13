@@ -1,7 +1,7 @@
 # Spec: TypeScript migration
 
 > Filed by: Codex orchestration session
-> Status: approved
+> Status: implemented; release verification in progress
 > Last updated: 2026-08-12
 
 ## One-line summary
@@ -54,8 +54,9 @@ completion using red-green TDD on 2026-08-12.
 ## Non-goals
 
 - Rewriting Diffwright in Rust or adding native binaries.
-- Changing prompt content, Git behavior, provider selection, error messages,
-  or command semantics.
+- Changing prompt content, provider selection, error messages, or command
+  semantics. One security correction replaces shell-parsed Git commands with
+  argument arrays while preserving valid-input behavior.
 - Adding package `main`, `exports`, declarations, or a supported library API.
 - Optimizing startup or lazy-loading command implementations in this change.
 - Modifying unrelated untracked `docs/` or `signal/` content.
@@ -130,4 +131,3 @@ None. Performance optimization and provider-neutral BYOK are separately scoped.
 - [x] Success criteria are measurable.
 - [x] Boundaries are explicit.
 - [x] No blocking questions remain.
-

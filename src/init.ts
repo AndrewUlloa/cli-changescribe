@@ -1,38 +1,56 @@
-const fs = require('fs');
-const path = require('path');
+import fs from 'node:fs';
+import path from 'node:path';
 
-const SCRIPT_MAP = {
+interface PackageJson {
+  scripts?: Record<string, string> | null;
+  [key: string]: unknown;
+}
+
+interface ScriptChanges {
+  added: string[];
+  migrated: string[];
+}
+
+const SCRIPT_MAP: Readonly<Record<string, string>> = {
   commit: 'diffwright commit',
   'pr:summary': 'diffwright pr:summary',
   'feature:pr': 'diffwright feature:pr',
   'staging:pr': 'diffwright staging:pr',
 };
 
-const LEGACY_SCRIPT_MAP = {
+const LEGACY_SCRIPT_MAP: Readonly<Record<string, string>> = {
   commit: 'changescribe commit',
   'pr:summary': 'changescribe pr:summary',
   'feature:pr': 'changescribe feature:pr',
   'staging:pr': 'changescribe staging:pr',
 };
 
-function readPackageJson(packagePath) {
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function readPackageJson(packagePath: string): PackageJson {
   try {
     const raw = fs.readFileSync(packagePath, 'utf8');
-    return JSON.parse(raw);
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      throw new Error('package.json must contain a JSON object');
+    }
+    return parsed as PackageJson;
   } catch (error) {
-    throw new Error(`Failed to read ${packagePath}: ${error.message}`);
+    throw new Error(`Failed to read ${packagePath}: ${errorMessage(error)}`);
   }
 }
 
-function writePackageJson(packagePath, data) {
+function writePackageJson(packagePath: string, data: PackageJson): void {
   const contents = `${JSON.stringify(data, null, 2)}\n`;
   fs.writeFileSync(packagePath, contents, 'utf8');
 }
 
-function ensureScripts(pkg) {
+function ensureScripts(pkg: PackageJson): ScriptChanges {
   const scripts = pkg.scripts ?? {};
-  const added = [];
-  const migrated = [];
+  const added: string[] = [];
+  const migrated: string[] = [];
   for (const [name, command] of Object.entries(SCRIPT_MAP)) {
     if (!scripts[name]) {
       scripts[name] = command;
@@ -46,7 +64,7 @@ function ensureScripts(pkg) {
   return { added, migrated };
 }
 
-function runInit(cwd = process.cwd()) {
+export function runInit(cwd = process.cwd()): void {
   const packagePath = path.join(cwd, 'package.json');
   if (!fs.existsSync(packagePath)) {
     console.error('❌ No package.json found in the current directory.');
@@ -57,11 +75,11 @@ function runInit(cwd = process.cwd()) {
   const yarnLock = path.join(cwd, 'yarn.lock');
   if (fs.existsSync(pnpmLock)) {
     console.warn(
-      '⚠️  pnpm-lock.yaml detected. Use pnpm to install/update dependencies so the lockfile stays in sync.'
+      '⚠️  pnpm-lock.yaml detected. Use pnpm to install/update dependencies so the lockfile stays in sync.',
     );
   } else if (fs.existsSync(yarnLock)) {
     console.warn(
-      '⚠️  yarn.lock detected. Use yarn to install/update dependencies so the lockfile stays in sync.'
+      '⚠️  yarn.lock detected. Use yarn to install/update dependencies so the lockfile stays in sync.',
     );
   }
 
@@ -85,5 +103,3 @@ function runInit(cwd = process.cwd()) {
 if (require.main === module) {
   runInit();
 }
-
-module.exports = { runInit };

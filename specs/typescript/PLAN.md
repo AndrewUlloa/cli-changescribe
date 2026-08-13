@@ -1,7 +1,7 @@
 # Plan: TypeScript migration
 
 > Derived from: `specs/typescript/SPEC.md`
-> Status: approved and in progress
+> Status: implementation complete; hosted verification in progress
 > Last updated: 2026-08-12
 
 ## Architecture decisions
@@ -40,14 +40,14 @@
 
 ### Phase 1: Contract and RED
 
-- [ ] **Task 1: Characterize public CLI behavior**
+- [x] **Task 1: Characterize public CLI behavior**
   - Acceptance: help, unknown command, init behavior, aliases, executable path,
     and bridge path are covered without relying on source imports.
   - Verify: `npm test` remains green before migration assertions are enabled.
   - Files: `test/branding.test.js`, `test/compatibility-bridge.test.js`
   - Size: S
 
-- [ ] **Task 2: Add the failing TypeScript/package contract**
+- [x] **Task 2: Add the failing TypeScript/package contract**
   - Acceptance: tests demand strict tsconfig, `.ts` source, build/typecheck
     scripts, compiled package contents, and stable shim behavior.
   - Verify: targeted test fails against the current JavaScript package for the
@@ -58,12 +58,12 @@
 
 ### Checkpoint: RED
 
-- [ ] Existing characterization tests green.
-- [ ] New migration test observed red with intended assertions.
+- [x] Existing characterization tests green.
+- [x] New migration test observed red with intended assertions.
 
 ### Phase 2: GREEN compilation slices
 
-- [ ] **Task 3: Add strict compiler and package plumbing**
+- [x] **Task 3: Add strict compiler and package plumbing**
   - Acceptance: TypeScript/Node types are direct dev dependencies; build,
     typecheck, test, and prepack scripts exist; output is CommonJS in `dist/`.
   - Verify: `npm run typecheck`; `npm run build`.
@@ -71,7 +71,7 @@
   - Depends on: Task 2
   - Size: M
 
-- [ ] **Task 4: Migrate leaf modules**
+- [x] **Task 4: Migrate leaf modules**
   - Acceptance: provider and init are strict TypeScript; init behavior remains
     black-box compatible.
   - Verify: `npm run build`; targeted init/provider tests.
@@ -79,7 +79,7 @@
   - Depends on: Task 3
   - Size: M
 
-- [ ] **Task 5: Migrate commit workflow**
+- [x] **Task 5: Migrate commit workflow**
   - Acceptance: commit analysis, prompt/response domain values, completion
     parsing, and errors have explicit types without suppression.
   - Verify: `npm run typecheck`; commit characterization tests.
@@ -87,7 +87,7 @@
   - Depends on: Task 4
   - Size: M
 
-- [ ] **Task 6: Migrate PR workflow**
+- [x] **Task 6: Migrate PR workflow**
   - Acceptance: arguments, commit records, GitHub JSON, prompt messages, and
     completion results compile strictly with behavior unchanged.
   - Verify: `npm run typecheck`; PR characterization tests.
@@ -95,7 +95,7 @@
   - Depends on: Task 4
   - Size: M
 
-- [ ] **Task 7: Switch command routing and distribution**
+- [x] **Task 7: Switch command routing and distribution**
   - Acceptance: `src/cli.ts` owns routing; bin shim loads `dist/cli.js`; package
     publishes bin/dist only; migration contract becomes green.
   - Verify: `npm test`; CLI help/unknown/init through the shim.
@@ -105,13 +105,13 @@
 
 ### Checkpoint: GREEN
 
-- [ ] Strict build and full suite pass.
-- [ ] No `.js` implementation remains in `src/`.
-- [ ] No TypeScript suppression directive exists.
+- [x] Strict build and full suite pass.
+- [x] No `.js` implementation remains in `src/`.
+- [x] No TypeScript suppression directive exists.
 
 ### Phase 3: Distribution, review, and release
 
-- [ ] **Task 8: Add CI version matrix**
+- [ ] **Task 8: Add CI version matrix** (workflow complete; hosted run pending)
   - Acceptance: GitHub Actions installs, typechecks, builds, and tests on Node
     18, 20, and 22.
   - Verify: workflow syntax review and green hosted checks after push.
@@ -119,7 +119,7 @@
   - Depends on: Task 7
   - Size: S
 
-- [ ] **Task 9: Prove clean package and bridge installations**
+- [x] **Task 9: Prove clean package and bridge installations**
   - Acceptance: exact tarball allowlist; clean `diffwright` help/unknown/init;
     clean local bridge install and `changescribe --help` delegation.
   - Verify: automated E2E test and manual independent temporary install.
@@ -127,7 +127,7 @@
   - Depends on: Task 7
   - Size: M
 
-- [ ] **Task 10: Review and document**
+- [x] **Task 10: Review and document**
   - Acceptance: five-axis review has no unresolved required finding; README
     describes TypeScript development commands; rollback/launch note is ready.
   - Verify: `npm test`, `npm run typecheck`, `npm pack --dry-run`, audit, diff.
@@ -161,4 +161,3 @@ continues to accept both patch versions, so no bridge release is required.
 - [x] Dependencies are ordered.
 - [x] No task is XL.
 - [x] Requester approved autonomous completion.
-
