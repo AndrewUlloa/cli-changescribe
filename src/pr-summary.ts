@@ -201,7 +201,7 @@ function enrichCommitsWithDiffs(commits: CommitRecord[]): void {
 
 function tryFetchBase(baseBranch: string): boolean {
   try {
-    execFileSync('git', ['fetch', 'origin', baseBranch], {
+    execFileSync('git', ['fetch', '--', 'origin', baseBranch], {
       encoding: 'utf8',
       stdio: 'ignore',
       maxBuffer: LARGE_BUFFER_SIZE,
@@ -837,7 +837,34 @@ function parseArgs(argv: string[], env: NodeJS.ProcessEnv): PrArguments {
     }
   }
 
+  args.base = validateBaseBranch(args.base);
   return args;
+}
+
+function validateBaseBranch(base: string): string {
+  if (
+    base.length === 0 ||
+    base.startsWith('-') ||
+    base !== base.trim() ||
+    /[\u0000-\u001f\u007f]/.test(base)
+  ) {
+    throw new Error(
+      'Invalid base branch. Use a valid Git branch name without leading dashes.',
+    );
+  }
+
+  try {
+    execFileSync('git', ['check-ref-format', '--branch', base], {
+      encoding: 'utf8',
+      stdio: 'ignore',
+    });
+  } catch {
+    throw new Error(
+      'Invalid base branch. Use a valid Git branch name without leading dashes.',
+    );
+  }
+
+  return base;
 }
 
 // ---------------------------------------------------------------------------

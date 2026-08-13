@@ -72,6 +72,35 @@ test('PR base refs are passed to Git without shell evaluation', (context) => {
   assert.equal(fs.existsSync(marker), false);
 });
 
+test('PR rejects option-like base refs before Git can execute an upload-pack helper', (context) => {
+  const directory = createRepository(context);
+  const remote = path.join(directory, 'remote.git');
+  git(directory, ['init', '--quiet', '--bare', remote]);
+  git(directory, ['remote', 'add', 'origin', remote]);
+
+  const marker = path.join(directory, 'upload-pack-ran');
+  const probe = path.join(directory, 'upload-pack-probe.sh');
+  fs.writeFileSync(
+    probe,
+    `#!/bin/sh\ntouch ${marker}\nexit 1\n`,
+    { encoding: 'utf8', mode: 0o700 },
+  );
+
+  const result = spawnSync(
+    bin,
+    ['pr', '--dry-run', '--base', `--upload-pack=${probe}`],
+    {
+      cwd: directory,
+      encoding: 'utf8',
+      env: { ...process.env, CEREBRAS_API_KEY: 'test-key' },
+    },
+  );
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /invalid base branch/i);
+  assert.equal(fs.existsSync(marker), false);
+});
+
 test('PR dry-run inspects a valid range without API calls or output writes', (context) => {
   const directory = createRepository(context);
   const output = path.join(directory, 'summary.md');
