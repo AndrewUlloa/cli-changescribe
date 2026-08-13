@@ -23,7 +23,7 @@
 - [x] `npm audit --omit=dev` (zero vulnerabilities)
 - [x] `git diff --check`
 - [x] Focused Diffwright dry-run dogfood with an explicit keyless loopback profile
-- [ ] Hosted CI on Node 18, 20, and 22
+- [x] Hosted CI on Node 18, 20, and 22 (PR #8)
 - [x] Local clean packed/install execution for Diffwright and the ChangeScribe bridge
 - [ ] Post-publish clean registry install verification
 
