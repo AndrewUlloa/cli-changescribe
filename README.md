@@ -1,5 +1,10 @@
 # Diffwright
 
+[![npm version](https://shieldcn.dev/npm/diffwright.svg?variant=outline)](https://www.npmjs.com/package/diffwright)
+[![npm downloads](https://shieldcn.dev/npm/dw/diffwright.svg?variant=outline)](https://www.npmjs.com/package/diffwright)
+[![GitHub stars](https://shieldcn.dev/github/stars/AndrewUlloa/diffwright.svg?variant=outline)](https://github.com/AndrewUlloa/diffwright)
+[![license](https://shieldcn.dev/npm/license/diffwright.svg?variant=outline)](LICENSE)
+
 Turn code changes into the words that ship them. Diffwright generates
 Conventional Commit messages and PR summaries using Cerebras or Groq.
 
