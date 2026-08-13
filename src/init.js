@@ -2,6 +2,13 @@ const fs = require('fs');
 const path = require('path');
 
 const SCRIPT_MAP = {
+  commit: 'diffwright commit',
+  'pr:summary': 'diffwright pr:summary',
+  'feature:pr': 'diffwright feature:pr',
+  'staging:pr': 'diffwright staging:pr',
+};
+
+const LEGACY_SCRIPT_MAP = {
   commit: 'changescribe commit',
   'pr:summary': 'changescribe pr:summary',
   'feature:pr': 'changescribe feature:pr',
@@ -25,14 +32,18 @@ function writePackageJson(packagePath, data) {
 function ensureScripts(pkg) {
   const scripts = pkg.scripts ?? {};
   const added = [];
+  const migrated = [];
   for (const [name, command] of Object.entries(SCRIPT_MAP)) {
     if (!scripts[name]) {
       scripts[name] = command;
       added.push(name);
+    } else if (scripts[name] === LEGACY_SCRIPT_MAP[name]) {
+      scripts[name] = command;
+      migrated.push(name);
     }
   }
   pkg.scripts = scripts;
-  return added;
+  return { added, migrated };
 }
 
 function runInit(cwd = process.cwd()) {
@@ -55,15 +66,20 @@ function runInit(cwd = process.cwd()) {
   }
 
   const pkg = readPackageJson(packagePath);
-  const added = ensureScripts(pkg);
+  const { added, migrated } = ensureScripts(pkg);
   writePackageJson(packagePath, pkg);
 
-  if (added.length === 0) {
+  if (added.length === 0 && migrated.length === 0) {
     console.log('✅ Scripts already present; no changes made.');
     return;
   }
 
-  console.log(`✅ Added npm scripts: ${added.join(', ')}`);
+  if (added.length > 0) {
+    console.log(`✅ Added npm scripts: ${added.join(', ')}`);
+  }
+  if (migrated.length > 0) {
+    console.log(`✅ Migrated npm scripts to Diffwright: ${migrated.join(', ')}`);
+  }
 }
 
 if (require.main === module) {
