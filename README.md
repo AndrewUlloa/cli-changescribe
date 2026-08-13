@@ -137,3 +137,19 @@ You can also pair it with a lint check:
 ```bash
 ultracite lint || (ultracite format && ultracite lint)
 ```
+
+## Development
+
+Diffwright is written in strict TypeScript and compiled to CommonJS for
+Node.js 18 and newer. The npm package ships compiled JavaScript and source maps,
+so consumers do not need TypeScript or a runtime transpiler.
+
+```bash
+npm ci
+npm run typecheck
+npm test
+npm run build
+```
+
+The executable remains at `bin/diffwright.js` for npm and ChangeScribe
+compatibility; application code lives in `src/` and compiles into `dist/`.

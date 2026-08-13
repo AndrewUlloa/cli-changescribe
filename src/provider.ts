@@ -1,4 +1,18 @@
-const OpenAI = require('openai');
+import OpenAI from 'openai';
+
+export type ProviderId = 'cerebras' | 'groq';
+
+export interface ProviderInfo {
+  client: OpenAI;
+  provider: ProviderId;
+  defaultModel: string;
+}
+
+export type OpenAIClientOptions = ConstructorParameters<typeof OpenAI>[0];
+export type OpenAIClientFactory = (options: OpenAIClientOptions) => OpenAI;
+
+const defaultClientFactory: OpenAIClientFactory = (options) =>
+  new OpenAI(options);
 
 /**
  * Create an LLM client that works with Cerebras or Groq.
@@ -10,13 +24,16 @@ const OpenAI = require('openai');
  * Both providers expose an OpenAI-compatible API so we use the
  * `openai` SDK for both, swapping only baseURL and model name.
  */
-function createClient() {
-  const cerebrasKey = process.env.CEREBRAS_API_KEY;
-  const groqKey = process.env.GROQ_API_KEY;
+export function createClient(
+  env: NodeJS.ProcessEnv = process.env,
+  clientFactory: OpenAIClientFactory = defaultClientFactory,
+): ProviderInfo | null {
+  const cerebrasKey = env.CEREBRAS_API_KEY;
+  const groqKey = env.GROQ_API_KEY;
 
   if (cerebrasKey) {
     return {
-      client: new OpenAI({
+      client: clientFactory({
         apiKey: cerebrasKey,
         baseURL: 'https://api.cerebras.ai/v1',
       }),
@@ -27,7 +44,7 @@ function createClient() {
 
   if (groqKey) {
     return {
-      client: new OpenAI({
+      client: clientFactory({
         apiKey: groqKey,
         baseURL: 'https://api.groq.com/openai/v1',
       }),
@@ -38,5 +55,3 @@ function createClient() {
 
   return null;
 }
-
-module.exports = { createClient };

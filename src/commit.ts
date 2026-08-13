@@ -1,9 +1,19 @@
-const { execSync } = require('child_process');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const { config } = require('dotenv');
-const { createClient } = require('./provider');
+import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { config } from 'dotenv';
+import type OpenAI from 'openai';
+import type {
+  ChatCompletion,
+  ChatCompletionCreateParamsNonStreaming,
+  ChatCompletionMessageParam,
+} from 'openai/resources/chat/completions';
+import {
+  createClient,
+  type ProviderId,
+  type ProviderInfo,
+} from './provider';
 
 // Load environment variables from .env.local
 config({ path: '.env.local' });
@@ -18,10 +28,59 @@ const TITLE_RE =
   /^(?<type>chore|deprecate|feat|fix|release)(?<breaking>!)?:\s*(?<subject>.+)$/gim;
 const TITLE_VALIDATION_RE = /^(chore|deprecate|feat|fix|release)!?:\s+/;
 
+interface FileAnalysis {
+  file: string;
+  changes: string;
+  type: string;
+}
+
+interface ChangeAnalysis {
+  hasChanges: true;
+  summary: {
+    totalFiles: number;
+    stats: string;
+    branch: string;
+    lastCommit: string;
+  };
+  fileChanges: string;
+  detailedDiff: string;
+  fileAnalysis: FileAnalysis[];
+}
+
+type ChangeAnalysisResult = ChangeAnalysis | { hasChanges: false };
+
+interface BuiltCommit {
+  title: string;
+  body: string;
+  footer: string;
+}
+
+interface CommitDependencies {
+  createClient(): ProviderInfo | null;
+}
+
+const defaultDependencies: CommitDependencies = { createClient };
+
+type ExtendedCompletionParams = ChatCompletionCreateParamsNonStreaming & {
+  reasoning_effort?: 'high';
+};
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function completionReasoning(completion: ChatCompletion): string {
+  const message = completion.choices[0]?.message;
+  if (!message || !('reasoning' in message) || message.reasoning == null) {
+    return '';
+  }
+  return String(message.reasoning).trim();
+}
+
 /**
  * Analyze all code changes comprehensively for AI review
  */
-function analyzeAllChanges() {
+function analyzeAllChanges(): ChangeAnalysisResult {
   console.log('🔍 Analyzing all code changes...');
 
   // Use larger buffer for git commands that may produce large output
@@ -30,7 +89,7 @@ function analyzeAllChanges() {
   // Check if there are any changes to analyze
   let gitStatus;
   try {
-    gitStatus = execSync('git status --porcelain', {
+    gitStatus = execFileSync('git', ['status', '--porcelain'], {
       encoding: 'utf8',
       maxBuffer: LARGE_BUFFER_SIZE,
     });
@@ -38,28 +97,28 @@ function analyzeAllChanges() {
       return { hasChanges: false };
     }
   } catch (error) {
-    throw new Error(`Failed to get git status: ${error.message}`);
+    throw new Error(`Failed to get git status: ${errorMessage(error)}`);
   }
 
   // Stage all changes if nothing is staged
-  let gitDiff = execSync('git diff --staged --name-status', {
+  let gitDiff = execFileSync('git', ['diff', '--staged', '--name-status'], {
     encoding: 'utf8',
     maxBuffer: LARGE_BUFFER_SIZE,
   });
   if (!gitDiff.trim()) {
     console.log('📝 Staging all changes for analysis...');
-    execSync('git add .', {
+    execFileSync('git', ['add', '.'], {
       encoding: 'utf8',
       maxBuffer: LARGE_BUFFER_SIZE,
     });
-    gitDiff = execSync('git diff --staged --name-status', {
+    gitDiff = execFileSync('git', ['diff', '--staged', '--name-status'], {
       encoding: 'utf8',
       maxBuffer: LARGE_BUFFER_SIZE,
     });
   }
 
   // Get list of modified files first (needed for other operations)
-  const modifiedFiles = execSync('git diff --staged --name-only', {
+  const modifiedFiles = execFileSync('git', ['diff', '--staged', '--name-only'], {
     encoding: 'utf8',
     maxBuffer: LARGE_BUFFER_SIZE,
   })
@@ -71,18 +130,22 @@ function analyzeAllChanges() {
   let detailedDiff = '';
   try {
     // Use minimal context (U3) and limit to text files to reduce size
-    detailedDiff = execSync('git diff --staged -U3 --diff-filter=ACMRT', {
+    detailedDiff = execFileSync(
+      'git',
+      ['diff', '--staged', '-U3', '--diff-filter=ACMRT'],
+      {
       encoding: 'utf8',
       maxBuffer: LARGE_BUFFER_SIZE,
-    });
+      }
+    );
     // Truncate if still too large (keep first 5MB)
     if (detailedDiff.length > 5 * 1024 * 1024) {
       detailedDiff = `${detailedDiff.slice(0, 5 * 1024 * 1024)}\n...[truncated due to size]...`;
     }
   } catch (error) {
     if (
-      error.message.includes('ENOBUFS') ||
-      error.message.includes('maxBuffer')
+      errorMessage(error).includes('ENOBUFS') ||
+      errorMessage(error).includes('maxBuffer')
     ) {
       console.log('⚠️  Diff too large, using summary only');
       // Fallback: get diff stats only
@@ -105,26 +168,26 @@ function analyzeAllChanges() {
     modifiedFiles,
 
     // Get diff stats (additions/deletions)
-    diffStats: execSync('git diff --staged --stat', {
+    diffStats: execFileSync('git', ['diff', '--staged', '--stat'], {
       encoding: 'utf8',
       maxBuffer: LARGE_BUFFER_SIZE,
     }),
 
     // Get commit info context
-    lastCommit: execSync('git log -1 --oneline', {
+    lastCommit: execFileSync('git', ['log', '-1', '--oneline'], {
       encoding: 'utf8',
       maxBuffer: LARGE_BUFFER_SIZE,
     }).trim(),
 
     // Branch information
-    currentBranch: execSync('git branch --show-current', {
+    currentBranch: execFileSync('git', ['branch', '--show-current'], {
       encoding: 'utf8',
       maxBuffer: LARGE_BUFFER_SIZE,
     }).trim(),
   };
 
   // Analyze each modified file individually for better context
-  const fileAnalysis = [];
+  const fileAnalysis: FileAnalysis[] = [];
   for (const file of changes.modifiedFiles.slice(0, 10)) {
     // Limit to 10 files and skip binary/large files
     const fileType = getFileType(file);
@@ -133,10 +196,14 @@ function analyzeAllChanges() {
     }
 
     try {
-      const fileDiff = execSync(`git diff --staged -U3 -- "${file}"`, {
+      const fileDiff = execFileSync(
+        'git',
+        ['diff', '--staged', '-U3', '--', file],
+        {
         encoding: 'utf8',
         maxBuffer: 1024 * 1024, // 1MB per file
-      });
+        }
+      );
       fileAnalysis.push({
         file,
         changes: fileDiff.slice(0, 2000), // Limit per file for API
@@ -144,13 +211,13 @@ function analyzeAllChanges() {
       });
     } catch (error) {
       if (
-        error.message.includes('ENOBUFS') ||
-        error.message.includes('maxBuffer')
+        errorMessage(error).includes('ENOBUFS') ||
+        errorMessage(error).includes('maxBuffer')
       ) {
         // File too large, skip it
         continue;
       }
-      console.error(`⚠️  Failed to analyze file ${file}:`, error.message);
+      console.error(`⚠️  Failed to analyze file ${file}:`, errorMessage(error));
     }
   }
 
@@ -171,9 +238,9 @@ function analyzeAllChanges() {
 /**
  * Determine file type for better AI analysis
  */
-function getFileType(filename) {
+function getFileType(filename: string): string {
   const ext = filename.split('.').pop()?.toLowerCase();
-  const typeMap = {
+  const typeMap: Readonly<Record<string, string>> = {
     tsx: 'React TypeScript Component',
     ts: 'TypeScript',
     jsx: 'React JavaScript Component',
@@ -184,17 +251,20 @@ function getFileType(filename) {
     yml: 'Configuration',
     yaml: 'Configuration',
   };
-  return typeMap[ext] || 'Code';
+  return (ext ? typeMap[ext] : undefined) || 'Code';
 }
 
 /**
  * Generate an AI-powered commit message based on git changes
  */
-async function generateCommitMessage(argv) {
+async function generateCommitMessage(
+  argv: string[],
+  dependencies: CommitDependencies,
+): Promise<void> {
   try {
     const isDryRun = argv.includes('--dry-run');
 
-    const providerInfo = createClient();
+    const providerInfo = dependencies.createClient();
     if (!providerInfo) {
       console.error('❌ No API key found');
       console.log('💡 Set CEREBRAS_API_KEY or GROQ_API_KEY in .env.local');
@@ -213,7 +283,7 @@ async function generateCommitMessage(argv) {
     try {
       changeAnalysis = analyzeAllChanges();
     } catch (error) {
-      console.error('❌ Failed to analyze changes:', error.message);
+      console.error('❌ Failed to analyze changes:', errorMessage(error));
       process.exit(1);
     }
 
@@ -239,8 +309,7 @@ async function generateCommitMessage(argv) {
       .trim();
 
     // Some models put useful text in a nonstandard `reasoning` field
-    const reasoning =
-      completion?.choices?.[0]?.message?.reasoning?.toString?.().trim?.() ?? '';
+    const reasoning = completionReasoning(completion);
 
     // Build a robust Conventional Commit from either content or reasoning
     let built = buildConventionalCommit(rawContent || '', reasoning || '');
@@ -262,10 +331,7 @@ async function generateCommitMessage(argv) {
         .replace(OPENING_CODE_BLOCK_REGEX, '')
         .replace(CLOSING_CODE_BLOCK_REGEX, '')
         .trim();
-      const repairedReasoning =
-        repairCompletion?.choices?.[0]?.message?.reasoning
-          ?.toString?.()
-          .trim?.() ?? '';
+      const repairedReasoning = completionReasoning(repairCompletion);
       built = buildConventionalCommit(repairedContent || '', repairedReasoning || '');
       if (!built) {
         logCompletionFailureAndExit(repairCompletion);
@@ -296,10 +362,10 @@ async function generateCommitMessage(argv) {
 
     // Commit using -F to read message from file
     try {
-      execSync(`git commit -F "${tmpFile}"`, { encoding: 'utf8' });
+      execFileSync('git', ['commit', '-F', tmpFile], { encoding: 'utf8' });
       console.log('✅ Changes committed successfully');
     } catch (error) {
-      console.error('❌ Failed to commit changes:', error.message);
+      console.error('❌ Failed to commit changes:', errorMessage(error));
       process.exit(1);
     }
     // Cleanup temp file (best-effort)
@@ -311,13 +377,15 @@ async function generateCommitMessage(argv) {
 
     // Push to remote
     try {
-      const currentBranch = execSync('git branch --show-current', {
+      const currentBranch = execFileSync('git', ['branch', '--show-current'], {
         encoding: 'utf8',
       }).trim();
-      execSync(`git push origin ${currentBranch}`, { encoding: 'utf8' });
+      execFileSync('git', ['push', 'origin', currentBranch], {
+        encoding: 'utf8',
+      });
       console.log(`🚀 Changes pushed to origin/${currentBranch}`);
     } catch (error) {
-      console.error('❌ Failed to push changes:', error.message);
+      console.error('❌ Failed to push changes:', errorMessage(error));
       console.log('💡 You may need to push manually with: git push');
       process.exit(1);
     }
@@ -328,9 +396,14 @@ async function generateCommitMessage(argv) {
   }
 }
 
-async function createCompletionSafe(client, messages, model, provider) {
+async function createCompletionSafe(
+  client: OpenAI,
+  messages: ChatCompletionMessageParam[],
+  model: string,
+  provider: ProviderId,
+): Promise<ChatCompletion> {
   try {
-    const params = {
+    const params: ExtendedCompletionParams = {
       messages,
       model,
       temperature: 0.3,
@@ -348,7 +421,9 @@ async function createCompletionSafe(client, messages, model, provider) {
   }
 }
 
-function buildChatMessages(changeAnalysis) {
+function buildChatMessages(
+  changeAnalysis: ChangeAnalysis,
+): ChatCompletionMessageParam[] {
   const filesBlock = changeAnalysis.fileAnalysis
     .map((file) => `### ${file.file} (${file.type})\n${file.changes}`)
     .join('\n\n');
@@ -414,7 +489,7 @@ function buildChatMessages(changeAnalysis) {
   ];
 }
 
-function logCompletionFailureAndExit(completion) {
+function logCompletionFailureAndExit(completion: ChatCompletion): never {
   console.error(
     '❌ Failed to generate commit message. Raw completion payload:'
   );
@@ -439,7 +514,10 @@ function logCompletionFailureAndExit(completion) {
   process.exit(1);
 }
 
-function buildConventionalCommit(content, reasoning) {
+function buildConventionalCommit(
+  content: string,
+  reasoning: string,
+): BuiltCommit | null {
   const text = sanitizeText([content, reasoning].filter(Boolean).join('\n'));
   if (!text.trim()) {
     return null;
@@ -457,9 +535,13 @@ function buildConventionalCommit(content, reasoning) {
     return null;
   }
 
-  const { type } = titleMatch.groups;
-  const breaking = titleMatch.groups.breaking ? '!' : '';
-  let subject = titleMatch.groups.subject.trim();
+  const groups = titleMatch.groups;
+  if (!groups?.subject || !groups.type) {
+    return null;
+  }
+  const { type } = groups;
+  const breaking = groups.breaking ? '!' : '';
+  let subject = groups.subject.trim();
   subject = stripWrappingQuotes(subject);
 
   const title = `${type}${breaking}: ${subject}`;
@@ -469,7 +551,7 @@ function buildConventionalCommit(content, reasoning) {
   return { title, body, footer };
 }
 
-function sanitizeText(s) {
+function sanitizeText(s: string): string {
   if (!s) {
     return '';
   }
@@ -480,7 +562,7 @@ function sanitizeText(s) {
     .trim();
 }
 
-function stripWrappingQuotes(s) {
+function stripWrappingQuotes(s: string): string {
   if (!s) {
     return s;
   }
@@ -494,14 +576,14 @@ function stripWrappingQuotes(s) {
   return s;
 }
 
-function buildStructuredBody(text) {
+function buildStructuredBody(text: string): { body: string; footer: string } {
   const lines = text.split(NEWLINE_SPLIT_RE);
   const extracted = {
     change: '',
     why: '',
     risk: '',
   };
-  const footerLines = [];
+  const footerLines: string[] = [];
 
   for (const line of lines) {
     const trimmed = line.trim();
@@ -549,7 +631,12 @@ function buildStructuredBody(text) {
   return { body, footer };
 }
 
-function buildRepairMessages(content, reasoning, built, violations) {
+function buildRepairMessages(
+  content: string,
+  reasoning: string,
+  built: BuiltCommit,
+  violations: string[],
+): ChatCompletionMessageParam[] {
   const issueList = violations.map((v) => `- ${v}`).join('\n');
   const raw = sanitizeText([content, reasoning].filter(Boolean).join('\n'));
   return [
@@ -586,8 +673,8 @@ function buildRepairMessages(content, reasoning, built, violations) {
   ];
 }
 
-function findCommitViolations(built) {
-  const violations = [];
+function findCommitViolations(built: BuiltCommit): string[] {
+  const violations: string[] = [];
   const title = built.title || '';
   if (!title) {
     violations.push('title is missing');
@@ -641,11 +728,11 @@ function findCommitViolations(built) {
   return violations;
 }
 
-function formatViolations(violations) {
+function formatViolations(violations: string[]): string {
   return violations.map((violation) => `- ${violation}`).join('\n');
 }
 
-function buildFullMessage(built) {
+function buildFullMessage(built: BuiltCommit): string {
   const sections = [built.title];
   if (built.body) {
     sections.push(built.body);
@@ -656,9 +743,9 @@ function buildFullMessage(built) {
   return sections.join('\n\n');
 }
 
-function safeStringify(obj) {
+function safeStringify(obj: unknown): string {
   try {
-    const seen = new WeakSet();
+    const seen = new WeakSet<object>();
     return JSON.stringify(
       obj,
       (_key, value) => {
@@ -685,24 +772,27 @@ function safeStringify(obj) {
   }
 }
 
-function formatError(error) {
+function formatError(error: unknown): string {
   // Try to include as much structured information as possible
-  const plain = {};
-  for (const key of Object.getOwnPropertyNames(error)) {
+  const plain: Record<string, unknown> = {};
+  const errorObject =
+    typeof error === 'object' && error !== null ? error : { message: String(error) };
+  for (const key of Object.getOwnPropertyNames(errorObject)) {
     // include standard fields: name, message, stack, cause, status, code, response
     // avoid huge nested response bodies without control
-    if (key === 'response' && error.response) {
+    const value: unknown = Reflect.get(errorObject, key);
+    if (key === 'response' && typeof value === 'object' && value !== null) {
       plain.response = {
-        status: error.response.status,
-        statusText: error.response.statusText,
-        headers: error.response.headers || undefined,
-        data: error.response.data || undefined,
+        status: Reflect.get(value, 'status'),
+        statusText: Reflect.get(value, 'statusText'),
+        headers: Reflect.get(value, 'headers') || undefined,
+        data: Reflect.get(value, 'data') || undefined,
       };
     } else {
       try {
         // Copy other enumerable properties safely
         // eslint-disable-next-line no-param-reassign
-        plain[key] = error[key];
+        plain[key] = value;
       } catch {
         // ignore non-readable props
       }
@@ -711,12 +801,13 @@ function formatError(error) {
   return safeStringify(plain);
 }
 
-async function runCommit(argv = process.argv.slice(2)) {
-  await generateCommitMessage(argv);
+export async function runCommit(
+  argv = process.argv.slice(2),
+  dependencies: CommitDependencies = defaultDependencies,
+): Promise<void> {
+  await generateCommitMessage(argv, dependencies);
 }
 
 if (require.main === module) {
   runCommit();
 }
-
-module.exports = { runCommit };
