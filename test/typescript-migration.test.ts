@@ -53,7 +53,14 @@ test('compiler contract is strict CommonJS for Node 18', () => {
 });
 
 test('all application sources are TypeScript and compiled output exists', () => {
-  const expectedModules = ['cli', 'commit', 'init', 'pr-summary', 'provider'];
+  const expectedModules = [
+    'cli',
+    'commit',
+    'init',
+    'pr-summary',
+    'provider',
+    'runtime-config',
+  ];
   const sourceFiles = fs.readdirSync(path.join(repoRoot, 'src')).sort();
 
   assert.deepEqual(
