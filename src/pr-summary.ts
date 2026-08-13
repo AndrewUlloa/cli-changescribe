@@ -673,7 +673,6 @@ function createPrWithGh(
   branch: string,
   title: string,
   body: string,
-  issue: string,
 ): string {
   try {
     step('Pushing branch to remote...');
@@ -715,10 +714,6 @@ function createPrWithGh(
       '--body-file',
       bodyFile,
     ];
-
-    if (issue) {
-      ghArgs.push('--issue', issue);
-    }
 
     const result = spawnSync('gh', ghArgs, {
       encoding: 'utf8',
@@ -842,8 +837,18 @@ function parseArgs(argv: string[], env: NodeJS.ProcessEnv): PrArguments {
     }
   }
 
+  if (args.issue) {
+    args.issue = normalizeIssueReference(args.issue);
+  }
   args.base = validateBaseBranch(args.base);
   return args;
+}
+
+function appendIssueClosingDirective(body: string, issue: string): string {
+  if (!issue) {
+    return body;
+  }
+  return `${body.trimEnd()}\n\nCloses ${issue}`;
 }
 
 function validateBaseBranch(base: string): string {
@@ -1125,12 +1130,13 @@ async function main(argv: string[]): Promise<void> {
 
   if (args.createPr) {
     const prTitle = extractPrTitle(finalSummary, mode) || branch;
+    const prBody = appendIssueClosingDirective(finalSummary, args.issue);
     try {
       const existingPr = checkExistingPr(args.base, branch);
       if (existingPr) {
-        updatePrWithGh(existingPr.number, prTitle, finalSummary);
+        updatePrWithGh(existingPr.number, prTitle, prBody);
       } else {
-        createPrWithGh(args.base, branch, prTitle, finalSummary, args.issue);
+        createPrWithGh(args.base, branch, prTitle, prBody);
       }
     } catch (error) {
       throw error;
