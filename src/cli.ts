@@ -152,7 +152,9 @@ export async function runCli(
       validateCommandArguments(validatedCommand, rest);
     } catch (error) {
       if (error instanceof CliArgumentError) {
-        console.error(`Error: ${error.message}`);
+        console.error(
+          `Error: ${formatSafeError(error, knownSecretValues(process.env))}`,
+        );
         return 1;
       }
       throw error;

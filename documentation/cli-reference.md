@@ -9,10 +9,10 @@ This page is the complete command reference for Diffwright. Run
 diffwright <command> [options]
 ```
 
-Unknown commands, unknown options, incomplete value options, and invalid
-option values fail with a nonzero exit status. Validation occurs before a
-command runner starts, so invalid arguments do not stage files, load provider
-configuration, fetch, call a model, commit, or push.
+Unknown commands/options, incomplete value options, and invalid limit, issue,
+or mode values fail with a nonzero exit status before workflow side effects.
+Branch names are validated before fetch or GitHub use. Invalid invocations do
+not stage files, fetch, call a model, write output, commit, or push.
 
 `-h` and `--help` are supported globally and as the only option after a known
 command.
@@ -72,7 +72,7 @@ diffwright pr [options]
 | `--out <path>` | `PR_SUMMARY_OUT` or `.pr-summaries/PR_SUMMARY.md` | Detailed output path. |
 | `--limit <number>` | `PR_SUMMARY_LIMIT` or `400` | Positive maximum commit count. |
 | `--issue <number>` | `PR_SUMMARY_ISSUE` or empty | Add issue context and, with `--create-pr`, append `Closes #NUMBER` to the PR body. Accepts `123` or `#123`. |
-| `--mode <mode>` | inferred | `feature` or `release`. |
+| `--mode <mode>` | `release` only for branch `staging` with base `main`; otherwise `feature` | `feature` or `release`. |
 | `--dry-run` | off | Print the resolved range and plan without model calls or summary writes. |
 | `--create-pr` | off | Run project gates and create or update a PR with `gh`. |
 | `--skip-format` | off | Skip the optional format script. |

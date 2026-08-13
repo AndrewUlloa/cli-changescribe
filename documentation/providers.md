@@ -14,7 +14,7 @@ documentation.
 | DeepSeek | `deepseek` | `DEEPSEEK_API_KEY` | [First API call](https://api-docs.deepseek.com/) | [Models and pricing](https://api-docs.deepseek.com/quick_start/pricing) |
 | OpenRouter | `openrouter` | `OPENROUTER_API_KEY` | [API keys](https://openrouter.ai/settings/keys) | [Models](https://openrouter.ai/models) |
 | Vercel AI Gateway | `vercel` | `AI_GATEWAY_API_KEY` or `VERCEL_OIDC_TOKEN` | [Authentication](https://vercel.com/docs/ai-gateway/authentication-and-byok) | [Models](https://vercel.com/ai-gateway/models) |
-| Cerebras | `cerebras` | `CEREBRAS_API_KEY` | [Quickstart](https://inference-docs.cerebras.ai/quickstart) | [Models](https://inference-docs.cerebras.ai/introduction) |
+| Cerebras | `cerebras` | `CEREBRAS_API_KEY` | [Quickstart](https://inference-docs.cerebras.ai/quickstart) | [Models](https://inference-docs.cerebras.ai/models/overview) |
 | Groq | `groq` | `GROQ_API_KEY` | [API keys](https://console.groq.com/keys) | [Models](https://console.groq.com/docs/models) |
 | Ollama | `ollama` | none | [Quickstart](https://docs.ollama.com/quickstart) | [OpenAI compatibility](https://docs.ollama.com/api/openai-compatibility) |
 
@@ -47,9 +47,10 @@ configured in Vercel does not replace `AI_GATEWAY_API_KEY` or
 `AI_GATEWAY_API_KEY`. OIDC is eligible only with explicit
 `DIFFWRIGHT_PROVIDER=vercel`.
 
-Diffwright makes one outbound request and disables its own retries and
-failover. Vercel may independently route, retry, or use system-credit fallback.
-Use Vercel's dashboard BYOK test and attempt observability to determine which
+For each model call, Diffwright makes one outbound request to Vercel and
+disables its own retries and failover; PR workflows make multiple model calls.
+Vercel may independently route, retry, or use system-credit fallback. Use
+Vercel's dashboard BYOK test and attempt observability to determine which
 downstream credential was used.
 
 ## Custom endpoints

@@ -113,7 +113,7 @@ test('CLI reference documents every supported option and exit behavior', () => {
   ]) {
     assert.ok(reference.includes(`\`${option}`), option);
   }
-  assert.match(reference, /unknown option.*nonzero/is);
+  assert.match(reference, /unknown commands\/options.*nonzero/is);
   assert.match(reference, /Closes #/);
 });
 

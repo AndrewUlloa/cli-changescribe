@@ -5,9 +5,9 @@ export class CliArgumentError extends Error {
   }
 }
 
-function rejectUnknown(command: string, option: string): never {
+function rejectUnknown(command: string, _option: string): never {
   throw new CliArgumentError(
-    `Unknown ${command} option: ${option}. Run \`diffwright ${command} --help\` for usage.`,
+    `Unknown ${command} option. Run \`diffwright ${command} --help\` for usage.`,
   );
 }
 
@@ -51,6 +51,20 @@ export function normalizeIssueReference(value: string): string {
   return `#${normalized}`;
 }
 
+export function parsePositiveSafeInteger(
+  value: string,
+  label: string,
+): number {
+  if (!/^[1-9]\d*$/.test(value)) {
+    throw new CliArgumentError(`${label} must be a positive safe integer.`);
+  }
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    throw new CliArgumentError(`${label} must be a positive safe integer.`);
+  }
+  return parsed;
+}
+
 export function validatePrArguments(argv: string[]): void {
   const valueOptions = new Set(['--base', '--out', '--limit', '--issue', '--mode']);
   const booleanOptions = new Set([
@@ -73,8 +87,8 @@ export function validatePrArguments(argv: string[]): void {
     }
 
     const value = requireValue(argv, index, option);
-    if (option === '--limit' && !/^[1-9]\d*$/.test(value)) {
-      throw new CliArgumentError('--limit must be a positive integer.');
+    if (option === '--limit') {
+      parsePositiveSafeInteger(value, '--limit');
     }
     if (option === '--mode' && value !== 'feature' && value !== 'release') {
       throw new CliArgumentError('--mode must be either feature or release.');

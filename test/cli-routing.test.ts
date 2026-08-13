@@ -164,12 +164,39 @@ test('unknown commit, doctor, and init options fail before invoking a runner', a
   assert.deepEqual(calls, []);
 });
 
+test('argument errors redact shell credentials and normalize control characters', async () => {
+  const { calls, runners } = recordingRunners();
+  const secretName = 'OPENAI_API_KEY';
+  const originalSecret = process.env[secretName];
+  const secret = 'argument-secret';
+  const errors: string[] = [];
+  const originalError = console.error;
+  process.env[secretName] = secret;
+  console.error = (message?: unknown) => errors.push(String(message ?? ''));
+  try {
+    assert.equal(await runCli(['commit', `${secret}\nnext-line`], runners), 1);
+  } finally {
+    console.error = originalError;
+    if (originalSecret === undefined) {
+      delete process.env[secretName];
+    } else {
+      process.env[secretName] = originalSecret;
+    }
+  }
+
+  assert.deepEqual(calls, []);
+  assert.doesNotMatch(errors.join('\n'), new RegExp(secret));
+  assert.doesNotMatch(errors.join('\n'), /\nnext-line/);
+  assert.match(errors.join('\n'), /Unknown commit option/);
+});
+
 test('invalid PR options fail before invoking a runner', async () => {
   const invalidInvocations = [
     ['pr', '--base'],
     ['pr', '--out', '--dry-run'],
     ['pr', '--limit', '0'],
     ['pr', '--limit', 'abc'],
+    ['pr', '--limit', '999999999999999999999999999999999999999'],
     ['pr', '--mode', 'other'],
     ['pr', '--issue', '#0'],
     ['pr', '--issue', 'abc'],

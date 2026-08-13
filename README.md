@@ -38,8 +38,9 @@ Diffwright in automation.
 ## Requirements
 
 - Node.js 18 or newer
-- A Git repository with at least one commit
-- An AI provider API key, or a local Ollama/compatible loopback endpoint
+- Commit and PR workflows require a Git repository with at least one commit.
+- Commit, PR, and live doctor require an AI provider API key or a local
+  Ollama/compatible loopback endpoint.
 - GitHub CLI (`gh`) authenticated with `gh auth login` only when using
   `--create-pr`
 
@@ -142,7 +143,7 @@ Other notes reviewers should know (risks + follow-ups)
 | Bring your own AI | Use a direct provider, a gateway, or a local OpenAI-compatible server. |
 | Deterministic routing | One invocation resolves one provider and never silently fails over to another. |
 | Local-first configuration | Keys stay in process memory and requests go directly to the resolved endpoint. |
-| Fail-closed CLI | Unknown, incomplete, or invalid options stop before a command runner starts. |
+| Fail-closed CLI | Unknown options, missing values, and invalid limit/issue/mode values stop before workflow side effects. |
 | Legacy compatibility | Existing Cerebras, Groq, and ChangeScribe setups continue to work. |
 
 ## Commands
@@ -231,10 +232,11 @@ AI_GATEWAY_API_KEY="your-gateway-key"
 
 Gateway authentication is required even when downstream provider BYOK is
 configured in Vercel. `AI_GATEWAY_API_KEY` wins over `VERCEL_OIDC_TOKEN`; OIDC
-is eligible only when Vercel is explicitly selected. Diffwright makes one
-outbound request and does not reroute it, but Vercel may independently route,
-retry, or use system-credit fallback. Use Vercel's BYOK key test and attempt
-observability to confirm which downstream credential was used.
+is eligible only when Vercel is explicitly selected. For each model call,
+Diffwright sends one outbound request to Vercel and does not retry or reroute
+it itself; a PR workflow makes multiple model calls. Vercel may independently
+route, retry, or use system-credit fallback. Use Vercel's BYOK key test and
+attempt observability to confirm which downstream credential was used.
 
 ### Ollama and compatible endpoints
 

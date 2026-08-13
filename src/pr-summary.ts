@@ -4,6 +4,7 @@ import path from 'node:path';
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 import {
   normalizeIssueReference,
+  parsePositiveSafeInteger,
   validatePrArguments,
 } from './arguments';
 import { resolveProvider, type ResolvedProvider } from './provider';
@@ -155,6 +156,9 @@ function getCommitDiffInfo(
 // ---------------------------------------------------------------------------
 
 function collectCommits(baseRef: string, limit: number): CommitRecord[] {
+  if (!Number.isSafeInteger(limit) || limit <= 0) {
+    throw new Error('PR commit limit must be a positive safe integer.');
+  }
   const range = `${baseRef}..HEAD`;
   let rawLog = '';
   try {
@@ -186,7 +190,7 @@ function collectCommits(baseRef: string, limit: number): CommitRecord[] {
       return { sha: sha.trim(), title: title.trim(), body, stat: '', diff: '' };
     });
 
-  if (Number.isFinite(limit) && limit > 0 && commits.length > limit) {
+  if (commits.length > limit) {
     return commits.slice(-limit);
   }
 
@@ -803,7 +807,10 @@ function parseArgs(argv: string[], env: NodeJS.ProcessEnv): PrArguments {
   const args: PrArguments = {
     base: env.PR_SUMMARY_BASE || 'main',
     out: env.PR_SUMMARY_OUT || '.pr-summaries/PR_SUMMARY.md',
-    limit: Number.parseInt(env.PR_SUMMARY_LIMIT || '400', 10),
+    limit: parsePositiveSafeInteger(
+      env.PR_SUMMARY_LIMIT || '400',
+      'PR_SUMMARY_LIMIT',
+    ),
     dryRun: false,
     issue: env.PR_SUMMARY_ISSUE || '',
     createPr: false,
@@ -820,7 +827,7 @@ function parseArgs(argv: string[], env: NodeJS.ProcessEnv): PrArguments {
       args.out = argv[i + 1];
       i += 1;
     } else if (current === '--limit' && argv[i + 1]) {
-      args.limit = Number.parseInt(argv[i + 1], 10);
+      args.limit = parsePositiveSafeInteger(argv[i + 1], '--limit');
       i += 1;
     } else if (current === '--issue' && argv[i + 1]) {
       args.issue = normalizeIssueReference(argv[i + 1]);
@@ -885,6 +892,7 @@ async function main(argv: string[]): Promise<void> {
   validatePrArguments(argv);
   const runtime = loadRuntimeConfig();
   const knownSecrets = knownSecretValues(runtime.values);
+  const args = parseArgs(argv, runtime.values);
   const resolved = resolveProvider({
     env: runtime.values,
     sources: runtime.sources,
@@ -898,7 +906,6 @@ async function main(argv: string[]): Promise<void> {
 
   const { id: provider, model } = resolved.profile;
 
-  const args = parseArgs(argv, runtime.values);
   const branch = runGit(['branch', '--show-current']).trim();
   const mode =
     args.mode ||
