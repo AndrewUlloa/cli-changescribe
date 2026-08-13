@@ -1,14 +1,38 @@
-const assert = require('node:assert/strict');
-const { execFileSync, spawnSync } = require('node:child_process');
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
-const test = require('node:test');
+import assert from 'node:assert/strict';
+import { execFileSync, spawnSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import test from 'node:test';
+
+interface FixturePackage {
+  name: string;
+  private?: boolean;
+  scripts?: Record<string, string>;
+}
+
+interface PackFile {
+  path: string;
+  mode: number;
+}
+
+interface PackMetadata {
+  filename: string;
+  files: PackFile[];
+}
+
+interface PackedPackage {
+  metadata: PackMetadata;
+  tarball: string;
+}
 
 const repoRoot = path.resolve(__dirname, '..');
 const bridgeRoot = path.join(repoRoot, 'compat', 'cli-changescribe');
 
-function writePackage(directory, contents = { name: 'fixture', private: true }) {
+function writePackage(
+  directory: string,
+  contents: FixturePackage = { name: 'fixture', private: true },
+): void {
   fs.mkdirSync(directory, { recursive: true });
   fs.writeFileSync(
     path.join(directory, 'package.json'),
@@ -16,7 +40,11 @@ function writePackage(directory, contents = { name: 'fixture', private: true }) 
   );
 }
 
-function packPackage(packageRoot, artifactDirectory, env) {
+function packPackage(
+  packageRoot: string,
+  artifactDirectory: string,
+  env: NodeJS.ProcessEnv,
+): PackedPackage {
   const stdout = execFileSync(
     'npm',
     [
@@ -29,7 +57,7 @@ function packPackage(packageRoot, artifactDirectory, env) {
     ],
     { cwd: packageRoot, encoding: 'utf8', env },
   );
-  const result = JSON.parse(stdout);
+  const result: PackMetadata[] = JSON.parse(stdout);
   assert.equal(result.length, 1);
   return {
     metadata: result[0],
@@ -37,7 +65,7 @@ function packPackage(packageRoot, artifactDirectory, env) {
   };
 }
 
-function expectedDiffwrightFiles() {
+function expectedDiffwrightFiles(): string[] {
   const files = ['LICENSE', 'README.md', 'bin/diffwright.js', 'package.json'];
   for (const moduleName of [
     'cli',
@@ -51,8 +79,10 @@ function expectedDiffwrightFiles() {
   return files.sort();
 }
 
-function assertInitialized(packagePath) {
-  const fixturePackage = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
+function assertInitialized(packagePath: string): void {
+  const fixturePackage: FixturePackage = JSON.parse(
+    fs.readFileSync(packagePath, 'utf8'),
+  );
   assert.deepEqual(fixturePackage.scripts, {
     commit: 'diffwright commit',
     'pr:summary': 'diffwright pr:summary',
@@ -61,7 +91,7 @@ function assertInitialized(packagePath) {
   });
 }
 
-function helpBody(output) {
+function helpBody(output: string): string {
   const start = output.indexOf('diffwright <command>');
   assert.notEqual(start, -1, `help marker missing from output:\n${output}`);
   return output.slice(start);
@@ -84,7 +114,7 @@ test('packed Diffwright and ChangeScribe install and execute end to end', (conte
   writePackage(diffwrightProject);
   writePackage(bridgeProject);
 
-  const env = {
+  const env: NodeJS.ProcessEnv = {
     ...process.env,
     npm_config_cache: path.join(temporaryRoot, 'npm-cache'),
     npm_config_audit: 'false',
@@ -111,6 +141,8 @@ test('packed Diffwright and ChangeScribe install and execute end to end', (conte
   const packedBridgeBin = bridge.metadata.files.find(
     (file) => file.path === 'bin/changescribe.js',
   );
+  assert.ok(packedBin);
+  assert.ok(packedBridgeBin);
   assert.equal(packedBin.mode & 0o111, 0o111);
   assert.equal(packedBridgeBin.mode & 0o111, 0o111);
 

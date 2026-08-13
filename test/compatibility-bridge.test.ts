@@ -1,12 +1,20 @@
-const assert = require('node:assert/strict');
-const { readFileSync } = require('node:fs');
-const path = require('node:path');
-const test = require('node:test');
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import test from 'node:test';
+
+interface BridgeManifest {
+  name: string;
+  version: string;
+  bin: Record<string, string>;
+  dependencies: Record<string, string>;
+  scripts?: Record<string, string>;
+}
 
 const bridgeRoot = path.join(__dirname, '..', 'compat', 'cli-changescribe');
 
 test('legacy package delegates to Diffwright without install hooks', () => {
-  const manifest = JSON.parse(
+  const manifest: BridgeManifest = JSON.parse(
     readFileSync(path.join(bridgeRoot, 'package.json'), 'utf8'),
   );
   const wrapper = readFileSync(

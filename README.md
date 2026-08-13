@@ -144,6 +144,10 @@ Diffwright is written in strict TypeScript and compiled to CommonJS for
 Node.js 18 and newer. The npm package ships compiled JavaScript and source maps,
 so consumers do not need TypeScript or a runtime transpiler.
 
+The test suite is also strict TypeScript. It compiles into the ignored
+`.test-dist/` directory before Node's built-in test runner executes it against
+the compiled application and packed npm artifact.
+
 ```bash
 npm ci
 npm run typecheck

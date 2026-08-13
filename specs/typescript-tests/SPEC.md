@@ -1,7 +1,7 @@
 # Spec: TypeScript test-suite migration
 
 > Filed by: Codex orchestration session
-> Status: approved
+> Status: implemented; hosted verification pending
 > Last updated: 2026-08-12
 
 ## One-line summary
@@ -100,4 +100,3 @@ None.
 - [x] Success criteria are measurable.
 - [x] Boundaries are explicit.
 - [x] No blocking questions remain.
-

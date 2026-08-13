@@ -32,7 +32,7 @@
 
 ## Task list
 
-- [ ] **Task 1: Add failing TypeScript-test contract**
+- [x] **Task 1: Add failing TypeScript-test contract**
   - Acceptance: contract requires `.ts` tests, strict test config, compiled
     test command, ignored output, and no JS tests.
   - Verify: targeted contract fails against the current JS suite for intended
@@ -40,7 +40,7 @@
   - Files: `test/typescript-migration.test.js`
   - Size: S
 
-- [ ] **Task 2: Add compiler and package plumbing**
+- [x] **Task 2: Add compiler and package plumbing**
   - Acceptance: `tsconfig.test.json`, `build:test`, combined typecheck, clean,
     test execution, and ignore rules satisfy the contract.
   - Verify: compiler reaches test type errors rather than configuration errors.
@@ -48,7 +48,7 @@
   - Depends on: Task 1
   - Size: S
 
-- [ ] **Task 3: Convert unit and routing tests**
+- [x] **Task 3: Convert unit and routing tests**
   - Acceptance: branding, CLI routing, provider, compatibility, and compiler
     contract tests compile strictly with unchanged assertions.
   - Verify: targeted compiled tests pass.
@@ -56,7 +56,7 @@
   - Depends on: Task 2
   - Size: M
 
-- [ ] **Task 4: Convert Git and distribution E2E tests**
+- [x] **Task 4: Convert Git and distribution E2E tests**
   - Acceptance: security and distribution fixtures have explicit types and
     retain all subprocess, package-resolution, and no-shell-evaluation proofs.
   - Verify: targeted compiled tests pass with public-boundary assertions.
@@ -64,7 +64,7 @@
   - Depends on: Task 2
   - Size: S
 
-- [ ] **Task 5: Verify and review**
+- [x] **Task 5: Verify and review**
   - Acceptance: 25 tests pass, strict app/test typecheck passes, audit clean,
     exact publish dry-run unchanged, and five-axis review has no required issue.
   - Verify: all commands in the spec plus independent diff review.
@@ -80,9 +80,9 @@
 
 ## Checkpoints
 
-- [ ] RED observed for intended test-language contract.
-- [ ] All tests compile strictly.
-- [ ] Full local lifecycle is green.
+- [x] RED observed for intended test-language contract.
+- [x] All tests compile strictly.
+- [x] Full local lifecycle is green.
 - [ ] Hosted Node matrix is green before merge.
 
 ## Rollback
