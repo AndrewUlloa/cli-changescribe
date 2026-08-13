@@ -5,24 +5,28 @@ import os from 'node:os';
 import path from 'node:path';
 import test, { type TestContext } from 'node:test';
 
-interface Completion {
-  choices: Array<{ message: { content: string } }>;
-}
-
-interface FakeClient {
-  chat: {
-    completions: {
-      create(): Promise<Completion>;
-    };
-  };
-}
-
 interface CommitDependencies {
-  createClient(): {
-    client: FakeClient;
-    provider: 'cerebras';
-    defaultModel: string;
+  loadRuntimeConfig(): {
+    values: Readonly<NodeJS.ProcessEnv>;
+    sources: Readonly<Record<string, 'shell' | '.env.local'>>;
   };
+  resolveProvider(): {
+    profile: {
+      id: 'cerebras';
+      model: string;
+      baseURL: string;
+      credentialEnv: string;
+      transport: 'openai-chat-completions';
+      status: 'docs-verified';
+      outputTokenField: 'max_completion_tokens';
+    };
+    credential: { value: string; source: 'shell' };
+  };
+  completeChat(): Promise<{
+    content: string;
+    reasoning: string;
+    finishReason: string | null;
+  }>;
 }
 
 type RunCommit = (
@@ -103,35 +107,35 @@ test('commit dry-run treats staged filenames as data and never commits', async (
   git(directory, ['add', maliciousFilename]);
   const headBefore = git(directory, ['rev-parse', 'HEAD']).trim();
   let completionCalls = 0;
-  const fakeClient = {
-    chat: {
-      completions: {
-        create: async () => {
-          completionCalls += 1;
-          return {
-            choices: [
-              {
-                message: {
-                  content:
-                    'fix: prevent unsafe command parsing\n\n' +
-                    '- change: pass untrusted values as process arguments\n' +
-                    '- why: prevent shell evaluation\n' +
-                    '- risk: low',
-                },
-              },
-            ],
-          };
-        },
-      },
-    },
-  };
-
   await runCommit(['--dry-run'], {
-    createClient: () => ({
-      client: fakeClient,
-      provider: 'cerebras',
-      defaultModel: 'test-model',
+    loadRuntimeConfig: () => ({
+      values: { CEREBRAS_API_KEY: 'test-key' },
+      sources: { CEREBRAS_API_KEY: 'shell' },
     }),
+    resolveProvider: () => ({
+      profile: {
+        id: 'cerebras',
+        model: 'test-model',
+        baseURL: 'https://api.cerebras.ai/v1',
+        credentialEnv: 'CEREBRAS_API_KEY',
+        transport: 'openai-chat-completions',
+        status: 'docs-verified',
+        outputTokenField: 'max_completion_tokens',
+      },
+      credential: { value: 'test-key', source: 'shell' },
+    }),
+    completeChat: async () => {
+      completionCalls += 1;
+      return {
+        content:
+          'fix: prevent unsafe command parsing\n\n' +
+          '- change: pass untrusted values as process arguments\n' +
+          '- why: prevent shell evaluation\n' +
+          '- risk: low',
+        reasoning: '',
+        finishReason: 'stop',
+      };
+    },
   });
 
   assert.equal(completionCalls, 1);

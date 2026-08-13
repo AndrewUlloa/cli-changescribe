@@ -1,6 +1,6 @@
 {
   "name": "diffwright",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "description": "Turn Git diffs into Conventional Commit messages and PR summaries",
   "bin": {
     "diffwright": "bin/diffwright.js"
@@ -38,7 +38,10 @@
     "changelog",
     "groq",
     "cerebras",
-    "openai"
+    "openai",
+    "byok",
+    "openrouter",
+    "vercel-ai-gateway"
   ],
   "license": "MIT",
   "repository": {
