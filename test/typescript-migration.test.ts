@@ -56,6 +56,7 @@ test('all application sources are TypeScript and compiled output exists', () => 
   const expectedModules = [
     'cli',
     'commit',
+    'doctor',
     'init',
     'pr-summary',
     'provider',

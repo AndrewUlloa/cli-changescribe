@@ -70,6 +70,7 @@ function expectedDiffwrightFiles(): string[] {
   for (const moduleName of [
     'cli',
     'commit',
+    'doctor',
     'init',
     'pr-summary',
     'provider',
