@@ -3,6 +3,7 @@
 > Owner: Andrew Ulloa
 > Target: GitHub `main`
 > Spec: `specs/typescript-tests/SPEC.md`
+> Status: complete
 
 ## Launch plan
 
@@ -31,3 +32,10 @@ registry rollback or dist-tag change is needed.
 
 No feature flag, production telemetry, infrastructure change, or user-facing
 rollout applies to this development-only migration.
+
+## Post-merge verification
+
+- PR #6 merged as commit `3931ffd`.
+- No `.js` file remains under `test/`.
+- GitHub reports 90,724 TypeScript bytes and 383 JavaScript bytes: approximately
+  99.6% TypeScript and 0.4% JavaScript.

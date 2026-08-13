@@ -1,7 +1,7 @@
 # Spec: TypeScript test-suite migration
 
 > Filed by: Codex orchestration session
-> Status: implemented; hosted verification pending
+> Status: implemented
 > Last updated: 2026-08-12
 
 ## One-line summary

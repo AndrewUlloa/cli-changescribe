@@ -8,7 +8,7 @@
 
 ## Outcome
 
-Approved for hosted CI. The seven JavaScript test files are now strict
+Approved and merged. The seven JavaScript test files are now strict
 TypeScript compiled before Node executes them. All existing behavioral
 assertions remain, and one new contract test proves the test-language boundary.
 
@@ -65,6 +65,7 @@ assertions remain, and one new contract test proves the test-language boundary.
   reports the unchanged 14-file package allowlist.
 - GREEN: `npm audit --omit=dev` reports 0 vulnerabilities.
 - GREEN: `git diff --check` reports no whitespace errors.
+- GREEN: hosted Node 18, 20, and 22 publish-lifecycle checks passed.
 
 ## Review finding resolved
 
@@ -76,4 +77,4 @@ assertions remain, and one new contract test proves the test-language boundary.
 
 ## Verdict
 
-Approved. Hosted Node 18/20/22 checks remain the merge gate.
+Approved. PR #6 merged after all hosted checks passed.
