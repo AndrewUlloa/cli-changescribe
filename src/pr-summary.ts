@@ -1,27 +1,15 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { config } from 'dotenv';
-import type OpenAI from 'openai';
-import type {
-  ChatCompletion,
-  ChatCompletionMessageParam,
-} from 'openai/resources/chat/completions';
-import { createClient } from './provider';
+import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
+import { resolveProvider, type ResolvedProvider } from './provider';
+import { loadRuntimeConfig } from './runtime-config';
 import { defaultCommandRunner } from './subprocess';
+import { completeChat, type ParsedCompletion } from './transport';
 
 const execFileSync = defaultCommandRunner.exec;
 const spawnSync = defaultCommandRunner.spawn;
 
-config({ path: '.env.local' });
-
-const DEFAULT_BASE = process.env.PR_SUMMARY_BASE || 'main';
-const DEFAULT_OUT = process.env.PR_SUMMARY_OUT || '.pr-summaries/PR_SUMMARY.md';
-const DEFAULT_LIMIT = Number.parseInt(
-  process.env.PR_SUMMARY_LIMIT || '400',
-  10
-);
-const DEFAULT_ISSUE = process.env.PR_SUMMARY_ISSUE || '';
 const LARGE_BUFFER_SIZE = 10 * 1024 * 1024;
 const BODY_TRUNCATION = 4000;
 const CHUNK_SIZE_CHARS = 20000;
@@ -297,23 +285,15 @@ function serializeCommit(commit: CommitRecord): string {
 // ---------------------------------------------------------------------------
 
 async function createCompletionSafe(
-  client: OpenAI,
+  resolved: ResolvedProvider,
   messages: ChatCompletionMessageParam[],
-  model: string,
   maxTokens: number,
-): Promise<ChatCompletion> {
-  try {
-    return await client.chat.completions.create({
-      messages,
-      model,
-      temperature: 0.3,
-      max_tokens: maxTokens,
-    });
-  } catch (error) {
-    fail('LLM API error while creating completion');
-    step(formatError(error));
-    process.exit(1);
-  }
+): Promise<ParsedCompletion> {
+  return await completeChat(resolved, {
+    messages,
+    outputLimit: maxTokens,
+    intent: 'workflow',
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -488,62 +468,6 @@ function buildReleaseMessages(
       ].join('\n'),
     },
   ];
-}
-
-// ---------------------------------------------------------------------------
-// Utilities
-// ---------------------------------------------------------------------------
-
-function formatError(error: unknown): string {
-  const plain: Record<string, unknown> = {};
-  const errorObject =
-    typeof error === 'object' && error !== null ? error : { message: String(error) };
-  for (const key of Object.getOwnPropertyNames(errorObject)) {
-    const value: unknown = Reflect.get(errorObject, key);
-    if (key === 'response' && typeof value === 'object' && value !== null) {
-      plain.response = {
-        status: Reflect.get(value, 'status'),
-        statusText: Reflect.get(value, 'statusText'),
-        headers: Reflect.get(value, 'headers') || undefined,
-        data: Reflect.get(value, 'data') || undefined,
-      };
-    } else {
-      try {
-        plain[key] = value;
-      } catch {
-        // ignore
-      }
-    }
-  }
-  return safeStringify(plain);
-}
-
-function safeStringify(obj: unknown): string {
-  try {
-    const seen = new WeakSet<object>();
-    return JSON.stringify(
-      obj,
-      (_key, value) => {
-        if (typeof value === 'object' && value !== null) {
-          if (seen.has(value)) {
-            return '[Circular]';
-          }
-          seen.add(value);
-        }
-        if (typeof value === 'bigint') {
-          return value.toString();
-        }
-        return value;
-      },
-      2
-    );
-  } catch {
-    try {
-      return String(obj);
-    } catch {
-      return '[Unstringifiable]';
-    }
-  }
 }
 
 function formatCommitTitles(commits: CommitRecord[], limit: number): string {
@@ -726,6 +650,7 @@ function createPrWithGh(
   branch: string,
   title: string,
   body: string,
+  issue: string,
 ): string {
   try {
     step('Pushing branch to remote...');
@@ -768,9 +693,8 @@ function createPrWithGh(
       bodyFile,
     ];
 
-    const issueEnv = process.env.PR_SUMMARY_ISSUE || '';
-    if (issueEnv) {
-      ghArgs.push('--issue', issueEnv);
+    if (issue) {
+      ghArgs.push('--issue', issue);
     }
 
     const result = spawnSync('gh', ghArgs, {
@@ -856,13 +780,13 @@ function updatePrWithGh(
 // CLI
 // ---------------------------------------------------------------------------
 
-function parseArgs(argv: string[]): PrArguments {
+function parseArgs(argv: string[], env: NodeJS.ProcessEnv): PrArguments {
   const args: PrArguments = {
-    base: DEFAULT_BASE,
-    out: DEFAULT_OUT,
-    limit: DEFAULT_LIMIT,
+    base: env.PR_SUMMARY_BASE || 'main',
+    out: env.PR_SUMMARY_OUT || '.pr-summaries/PR_SUMMARY.md',
+    limit: Number.parseInt(env.PR_SUMMARY_LIMIT || '400', 10),
     dryRun: false,
-    issue: DEFAULT_ISSUE,
+    issue: env.PR_SUMMARY_ISSUE || '',
     createPr: false,
     mode: '',
     skipFormat: false,
@@ -902,21 +826,21 @@ function parseArgs(argv: string[]): PrArguments {
 // ---------------------------------------------------------------------------
 
 async function main(argv: string[]): Promise<void> {
-  const providerInfo = createClient();
-  if (!providerInfo) {
-    fail('No API key found. Set CEREBRAS_API_KEY or GROQ_API_KEY in .env.local');
-    process.exit(1);
+  const runtime = loadRuntimeConfig();
+  const resolved = resolveProvider({
+    env: runtime.values,
+    sources: runtime.sources,
+    command: 'pr',
+  });
+  if (!resolved) {
+    throw new Error(
+      'No provider configured. Set DIFFWRIGHT_PROVIDER and its credential, or CEREBRAS_API_KEY/GROQ_API_KEY.',
+    );
   }
 
-  const { client, provider, defaultModel } = providerInfo;
-  const model =
-    process.env.DIFFWRIGHT_MODEL ||
-    process.env.CHANGESCRIBE_MODEL ||
-    process.env.GROQ_PR_MODEL ||
-    process.env.GROQ_MODEL ||
-    defaultModel;
+  const { id: provider, model } = resolved.profile;
 
-  const args = parseArgs(argv);
+  const args = parseArgs(argv, runtime.values);
   const branch = runGit(['branch', '--show-current']).trim();
   const mode =
     args.mode ||
@@ -951,10 +875,9 @@ async function main(argv: string[]): Promise<void> {
   }
 
   if (args.createPr && !checkGhCli()) {
-    fail('GitHub CLI (gh) is required for --create-pr but not found');
-    step('Install it: https://cli.github.com/');
-    step('Then authenticate: gh auth login');
-    process.exit(1);
+    throw new Error(
+      'GitHub CLI (gh) is required for --create-pr. Install it from https://cli.github.com/ and run gh auth login.',
+    );
   }
 
   // Safety checks before creating PR
@@ -971,8 +894,7 @@ async function main(argv: string[]): Promise<void> {
           stdio: 'inherit',
         });
       } catch (_error) {
-        fail('npm run format failed; fix formatting errors first.');
-        process.exit(1);
+        throw new Error('npm run format failed; fix formatting errors first.');
       }
     }
 
@@ -980,8 +902,7 @@ async function main(argv: string[]): Promise<void> {
     try {
       execFileSync('npm', ['test'], { encoding: 'utf8', stdio: 'inherit' });
     } catch (_error) {
-      fail('npm test failed; fix test failures first.');
-      process.exit(1);
+      throw new Error('npm test failed; fix test failures first.');
     }
 
     step('Running npm run build before PR creation...');
@@ -991,14 +912,13 @@ async function main(argv: string[]): Promise<void> {
         stdio: 'inherit',
       });
     } catch (_error) {
-      fail('npm run build failed; fix build errors first.');
-      process.exit(1);
+      throw new Error('npm run build failed; fix build errors first.');
     }
 
     if (checkUncommittedChanges()) {
-      fail('You have uncommitted changes; please commit them first.');
-      step('Run: git add . && git commit -m "your message"');
-      process.exit(1);
+      throw new Error(
+        'You have uncommitted changes; commit them before creating a PR.',
+      );
     }
 
     const existingPr = checkExistingPr(args.base, branch);
@@ -1014,8 +934,8 @@ async function main(argv: string[]): Promise<void> {
 
   // Pass 1: 5Cs snapshot from titles only
   const pass1Messages = buildPass1Messages(commits, branch, baseRef);
-  const pass1 = await createCompletionSafe(client, pass1Messages, model, 2048);
-  const pass1Text = pass1?.choices?.[0]?.message?.content?.trim() || '';
+  const pass1 = await createCompletionSafe(resolved, pass1Messages, 2048);
+  const pass1Text = pass1.content.trim();
   success('Pass 1 complete (5Cs snapshot)');
 
   // Pass 2: per-commit condensation with diff context
@@ -1026,12 +946,11 @@ async function main(argv: string[]): Promise<void> {
     const messages = buildPass2Messages(chunk);
     // biome-ignore lint/nursery/noAwaitInLoop: sequential LLM calls to avoid rate limits and keep output order predictable
     const completion = await createCompletionSafe(
-      client,
+      resolved,
       messages,
-      model,
       4096
     );
-    const chunkText = completion?.choices?.[0]?.message?.content?.trim();
+    const chunkText = completion.content.trim();
     if (chunkText) {
       pass2Outputs.push(chunkText);
     }
@@ -1057,8 +976,8 @@ async function main(argv: string[]): Promise<void> {
           pass1Text,
           formatCommitTitles(commits, 40)
         );
-  const pass3 = await createCompletionSafe(client, pass3Messages, model, 4096);
-  let finalSummary = pass3?.choices?.[0]?.message?.content?.trim() || '';
+  const pass3 = await createCompletionSafe(resolved, pass3Messages, 4096);
+  let finalSummary = pass3.content.trim();
   if (isUnknownSummary(finalSummary, mode)) {
     warn('Pass 3 summary returned Unknown; retrying with fallback context...');
     const retryMessages =
@@ -1080,13 +999,11 @@ async function main(argv: string[]): Promise<void> {
             formatCommitTitles(commits, 80)
           );
     const retry = await createCompletionSafe(
-      client,
+      resolved,
       retryMessages,
-      model,
       4096
     );
-    finalSummary =
-      retry?.choices?.[0]?.message?.content?.trim() || finalSummary;
+    finalSummary = retry.content.trim() || finalSummary;
   }
   success('Pass 3 complete (PR synthesis)');
 
@@ -1141,10 +1058,10 @@ async function main(argv: string[]): Promise<void> {
       if (existingPr) {
         updatePrWithGh(existingPr.number, prTitle, finalSummary);
       } else {
-        createPrWithGh(args.base, branch, prTitle, finalSummary);
+        createPrWithGh(args.base, branch, prTitle, finalSummary, args.issue);
       }
-    } catch (_error) {
-      process.exit(1);
+    } catch (error) {
+      throw error;
     }
   }
 }

@@ -67,8 +67,7 @@ function ensureScripts(pkg: PackageJson): ScriptChanges {
 export function runInit(cwd = process.cwd()): void {
   const packagePath = path.join(cwd, 'package.json');
   if (!fs.existsSync(packagePath)) {
-    console.error('❌ No package.json found in the current directory.');
-    process.exit(1);
+    throw new Error('No package.json found in the current directory.');
   }
 
   const pnpmLock = path.join(cwd, 'pnpm-lock.yaml');

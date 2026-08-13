@@ -1,24 +1,24 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { config } from 'dotenv';
-import type OpenAI from 'openai';
-import type {
-  ChatCompletion,
-  ChatCompletionCreateParamsNonStreaming,
-  ChatCompletionMessageParam,
-} from 'openai/resources/chat/completions';
+import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 import {
-  createClient,
-  type ProviderId,
-  type ProviderInfo,
+  resolveProvider,
+  type ResolveProviderOptions,
+  type ResolvedProvider,
 } from './provider';
+import {
+  loadRuntimeConfig,
+  type RuntimeConfig,
+} from './runtime-config';
 import { defaultCommandRunner } from './subprocess';
+import {
+  completeChat,
+  type CompleteChatInput,
+  type ParsedCompletion,
+} from './transport';
 
 const execFileSync = defaultCommandRunner.exec;
-
-// Load environment variables from .env.local
-config({ path: '.env.local' });
 
 // Regex patterns for cleaning commit messages
 const OPENING_CODE_BLOCK_REGEX = /^```[\s\S]*?\n/;
@@ -58,25 +58,22 @@ interface BuiltCommit {
 }
 
 interface CommitDependencies {
-  createClient(): ProviderInfo | null;
+  loadRuntimeConfig(): RuntimeConfig;
+  resolveProvider(options: ResolveProviderOptions): ResolvedProvider | null;
+  completeChat(
+    resolved: ResolvedProvider,
+    input: CompleteChatInput,
+  ): Promise<ParsedCompletion>;
 }
 
-const defaultDependencies: CommitDependencies = { createClient };
-
-type ExtendedCompletionParams = ChatCompletionCreateParamsNonStreaming & {
-  reasoning_effort?: 'high';
+const defaultDependencies: CommitDependencies = {
+  loadRuntimeConfig,
+  resolveProvider,
+  completeChat,
 };
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function completionReasoning(completion: ChatCompletion): string {
-  const message = completion.choices[0]?.message;
-  if (!message || !('reasoning' in message) || message.reasoning == null) {
-    return '';
-  }
-  return String(message.reasoning).trim();
 }
 
 /**
@@ -263,30 +260,29 @@ async function generateCommitMessage(
   argv: string[],
   dependencies: CommitDependencies,
 ): Promise<void> {
+  const runtime = dependencies.loadRuntimeConfig();
   try {
     const isDryRun = argv.includes('--dry-run');
 
-    const providerInfo = dependencies.createClient();
-    if (!providerInfo) {
-      console.error('❌ No API key found');
-      console.log('💡 Set CEREBRAS_API_KEY or GROQ_API_KEY in .env.local');
-      process.exit(1);
+    const resolved = dependencies.resolveProvider({
+      env: runtime.values,
+      sources: runtime.sources,
+      command: 'commit',
+    });
+    if (!resolved) {
+      throw new Error(
+        'No provider configured. Set DIFFWRIGHT_PROVIDER and its credential, or CEREBRAS_API_KEY/GROQ_API_KEY.',
+      );
     }
 
-    const { client, provider, defaultModel } = providerInfo;
-    const model =
-      process.env.DIFFWRIGHT_MODEL ||
-      process.env.CHANGESCRIBE_MODEL ||
-      process.env.GROQ_MODEL ||
-      defaultModel;
+    const { id: provider, model } = resolved.profile;
 
     // Get comprehensive analysis of all changes
     let changeAnalysis;
     try {
       changeAnalysis = analyzeAllChanges();
     } catch (error) {
-      console.error('❌ Failed to analyze changes:', errorMessage(error));
-      process.exit(1);
+      throw new Error(`Failed to analyze changes: ${errorMessage(error)}`);
     }
 
     if (!changeAnalysis.hasChanges) {
@@ -298,20 +294,19 @@ async function generateCommitMessage(
 
     // Generate commit message using LLM with comprehensive analysis
     const completion = await createCompletionSafe(
-      client,
+      resolved,
       buildChatMessages(changeAnalysis),
-      model,
-      provider
+      dependencies,
     );
 
-    const rawContent = completion?.choices?.[0]?.message?.content
-      ?.trim()
+    const rawContent = completion.content
+      .trim()
       .replace(OPENING_CODE_BLOCK_REGEX, '') // Remove opening code block
       .replace(CLOSING_CODE_BLOCK_REGEX, '') // Remove closing code block
       .trim();
 
     // Some models put useful text in a nonstandard `reasoning` field
-    const reasoning = completionReasoning(completion);
+    const reasoning = completion.reasoning.trim();
 
     // Build a robust Conventional Commit from either content or reasoning
     let built = buildConventionalCommit(rawContent || '', reasoning || '');
@@ -323,26 +318,25 @@ async function generateCommitMessage(
     const violations = findCommitViolations(built);
     if (violations.length > 0) {
       const repairCompletion = await createCompletionSafe(
-        client,
+        resolved,
         buildRepairMessages(rawContent || '', reasoning || '', built, violations),
-        model,
-        provider
+        dependencies,
       );
-      const repairedContent = repairCompletion?.choices?.[0]?.message?.content
-        ?.trim()
+      const repairedContent = repairCompletion.content
+        .trim()
         .replace(OPENING_CODE_BLOCK_REGEX, '')
         .replace(CLOSING_CODE_BLOCK_REGEX, '')
         .trim();
-      const repairedReasoning = completionReasoning(repairCompletion);
+      const repairedReasoning = repairCompletion.reasoning.trim();
       built = buildConventionalCommit(repairedContent || '', repairedReasoning || '');
       if (!built) {
         logCompletionFailureAndExit(repairCompletion);
       }
       const remaining = findCommitViolations(built);
       if (remaining.length > 0) {
-        console.error('❌ Commit message failed validation:');
-        console.error(formatViolations(remaining));
-        process.exit(1);
+        throw new Error(
+          `Commit message failed validation: ${formatViolations(remaining)}`,
+        );
       }
     }
 
@@ -367,8 +361,7 @@ async function generateCommitMessage(
       execFileSync('git', ['commit', '-F', tmpFile], { encoding: 'utf8' });
       console.log('✅ Changes committed successfully');
     } catch (error) {
-      console.error('❌ Failed to commit changes:', errorMessage(error));
-      process.exit(1);
+      throw new Error(`Failed to commit changes: ${errorMessage(error)}`);
     }
     // Cleanup temp file (best-effort)
     try {
@@ -387,40 +380,25 @@ async function generateCommitMessage(
       });
       console.log(`🚀 Changes pushed to origin/${currentBranch}`);
     } catch (error) {
-      console.error('❌ Failed to push changes:', errorMessage(error));
-      console.log('💡 You may need to push manually with: git push');
-      process.exit(1);
+      throw new Error(
+        `Failed to push changes: ${errorMessage(error)}. You may need to push manually with: git push`,
+      );
     }
   } catch (error) {
-    console.error('❌ Error generating commit message:');
-    console.error(formatError(error));
-    process.exit(1);
+    throw error;
   }
 }
 
 async function createCompletionSafe(
-  client: OpenAI,
+  resolved: ResolvedProvider,
   messages: ChatCompletionMessageParam[],
-  model: string,
-  provider: ProviderId,
-): Promise<ChatCompletion> {
-  try {
-    const params: ExtendedCompletionParams = {
-      messages,
-      model,
-      temperature: 0.3,
-      max_tokens: 16_384,
-    };
-    // reasoning_effort is a Groq-specific parameter; omit for other providers
-    if (provider === 'groq') {
-      params.reasoning_effort = 'high';
-    }
-    return await client.chat.completions.create(params);
-  } catch (error) {
-    console.error('❌ LLM API error while creating completion');
-    console.error(formatError(error));
-    process.exit(1);
-  }
+  dependencies: CommitDependencies,
+): Promise<ParsedCompletion> {
+  return await dependencies.completeChat(resolved, {
+    messages,
+    outputLimit: 16_384,
+    intent: 'workflow',
+  });
 }
 
 function buildChatMessages(
@@ -491,29 +469,10 @@ function buildChatMessages(
   ];
 }
 
-function logCompletionFailureAndExit(completion: ChatCompletion): never {
-  console.error(
-    '❌ Failed to generate commit message. Raw completion payload:'
+function logCompletionFailureAndExit(completion: ParsedCompletion): never {
+  throw new Error(
+    `Provider returned no usable commit text (finish reason: ${completion.finishReason ?? 'unknown'})`,
   );
-  const raw = safeStringify(completion);
-  console.error(
-    raw.length > 10_000 ? `${raw.slice(0, 10_000)}\n...[truncated]...` : raw
-  );
-  if (completion?.usage) {
-    console.error('Usage:', safeStringify(completion.usage));
-  }
-  if (completion?.choices) {
-    console.error(
-      'Choices meta:',
-      safeStringify(
-        completion.choices.map((c) => ({
-          finish_reason: c.finish_reason,
-          index: c.index,
-        }))
-      )
-    );
-  }
-  process.exit(1);
 }
 
 function buildConventionalCommit(
@@ -743,64 +702,6 @@ function buildFullMessage(built: BuiltCommit): string {
     sections.push(built.footer);
   }
   return sections.join('\n\n');
-}
-
-function safeStringify(obj: unknown): string {
-  try {
-    const seen = new WeakSet<object>();
-    return JSON.stringify(
-      obj,
-      (_key, value) => {
-        if (typeof value === 'object' && value !== null) {
-          if (seen.has(value)) {
-            return '[Circular]';
-          }
-          seen.add(value);
-        }
-        if (typeof value === 'bigint') {
-          return value.toString();
-        }
-        return value;
-      },
-      2
-    );
-  } catch {
-    // Fallback to best-effort string conversion when JSON serialization fails
-    try {
-      return String(obj);
-    } catch {
-      return '[Unstringifiable]';
-    }
-  }
-}
-
-function formatError(error: unknown): string {
-  // Try to include as much structured information as possible
-  const plain: Record<string, unknown> = {};
-  const errorObject =
-    typeof error === 'object' && error !== null ? error : { message: String(error) };
-  for (const key of Object.getOwnPropertyNames(errorObject)) {
-    // include standard fields: name, message, stack, cause, status, code, response
-    // avoid huge nested response bodies without control
-    const value: unknown = Reflect.get(errorObject, key);
-    if (key === 'response' && typeof value === 'object' && value !== null) {
-      plain.response = {
-        status: Reflect.get(value, 'status'),
-        statusText: Reflect.get(value, 'statusText'),
-        headers: Reflect.get(value, 'headers') || undefined,
-        data: Reflect.get(value, 'data') || undefined,
-      };
-    } else {
-      try {
-        // Copy other enumerable properties safely
-        // eslint-disable-next-line no-param-reassign
-        plain[key] = value;
-      } catch {
-        // ignore non-readable props
-      }
-    }
-  }
-  return safeStringify(plain);
 }
 
 export async function runCommit(
