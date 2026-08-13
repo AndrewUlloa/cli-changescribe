@@ -3,7 +3,11 @@ import os from 'node:os';
 import path from 'node:path';
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 import { resolveProvider, type ResolvedProvider } from './provider';
-import { loadRuntimeConfig } from './runtime-config';
+import {
+  knownSecretValues,
+  loadRuntimeConfig,
+  redactSecretValues,
+} from './runtime-config';
 import { defaultCommandRunner } from './subprocess';
 import { completeChat, type ParsedCompletion } from './transport';
 
@@ -288,12 +292,27 @@ async function createCompletionSafe(
   resolved: ResolvedProvider,
   messages: ChatCompletionMessageParam[],
   maxTokens: number,
+  knownSecrets: readonly string[],
 ): Promise<ParsedCompletion> {
   return await completeChat(resolved, {
-    messages,
+    messages: redactMessageSecrets(messages, knownSecrets),
     outputLimit: maxTokens,
     intent: 'workflow',
   });
+}
+
+function redactMessageSecrets(
+  messages: ChatCompletionMessageParam[],
+  secrets: readonly string[],
+): ChatCompletionMessageParam[] {
+  return messages.map((message) =>
+    typeof message.content === 'string'
+      ? {
+          ...message,
+          content: redactSecretValues(message.content, secrets),
+        } as ChatCompletionMessageParam
+      : message,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -827,6 +846,7 @@ function parseArgs(argv: string[], env: NodeJS.ProcessEnv): PrArguments {
 
 async function main(argv: string[]): Promise<void> {
   const runtime = loadRuntimeConfig();
+  const knownSecrets = knownSecretValues(runtime.values);
   const resolved = resolveProvider({
     env: runtime.values,
     sources: runtime.sources,
@@ -934,8 +954,13 @@ async function main(argv: string[]): Promise<void> {
 
   // Pass 1: 5Cs snapshot from titles only
   const pass1Messages = buildPass1Messages(commits, branch, baseRef);
-  const pass1 = await createCompletionSafe(resolved, pass1Messages, 2048);
-  const pass1Text = pass1.content.trim();
+  const pass1 = await createCompletionSafe(
+    resolved,
+    pass1Messages,
+    2048,
+    knownSecrets,
+  );
+  const pass1Text = redactSecretValues(pass1.content, knownSecrets).trim();
   success('Pass 1 complete (5Cs snapshot)');
 
   // Pass 2: per-commit condensation with diff context
@@ -948,9 +973,13 @@ async function main(argv: string[]): Promise<void> {
     const completion = await createCompletionSafe(
       resolved,
       messages,
-      4096
+      4096,
+      knownSecrets,
     );
-    const chunkText = completion.content.trim();
+    const chunkText = redactSecretValues(
+      completion.content,
+      knownSecrets,
+    ).trim();
     if (chunkText) {
       pass2Outputs.push(chunkText);
     }
@@ -976,8 +1005,16 @@ async function main(argv: string[]): Promise<void> {
           pass1Text,
           formatCommitTitles(commits, 40)
         );
-  const pass3 = await createCompletionSafe(resolved, pass3Messages, 4096);
-  let finalSummary = pass3.content.trim();
+  const pass3 = await createCompletionSafe(
+    resolved,
+    pass3Messages,
+    4096,
+    knownSecrets,
+  );
+  let finalSummary = redactSecretValues(
+    pass3.content,
+    knownSecrets,
+  ).trim();
   if (isUnknownSummary(finalSummary, mode)) {
     warn('Pass 3 summary returned Unknown; retrying with fallback context...');
     const retryMessages =
@@ -1001,9 +1038,11 @@ async function main(argv: string[]): Promise<void> {
     const retry = await createCompletionSafe(
       resolved,
       retryMessages,
-      4096
+      4096,
+      knownSecrets,
     );
-    finalSummary = retry.content.trim() || finalSummary;
+    finalSummary =
+      redactSecretValues(retry.content, knownSecrets).trim() || finalSummary;
   }
   success('Pass 3 complete (PR synthesis)');
 
@@ -1070,8 +1109,4 @@ export async function runPrSummary(
   argv = process.argv.slice(2),
 ): Promise<void> {
   await main(argv);
-}
-
-if (require.main === module) {
-  runPrSummary();
 }

@@ -98,7 +98,3 @@ export function runInit(cwd = process.cwd()): void {
     console.log(`✅ Migrated npm scripts to Diffwright: ${migrated.join(', ')}`);
   }
 }
-
-if (require.main === module) {
-  runInit();
-}

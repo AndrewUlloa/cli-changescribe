@@ -71,9 +71,6 @@ for (const [id, keyName, baseURL, tokenField, status] of cases) {
       transport: 'openai-chat-completions',
       status,
       outputTokenField: tokenField,
-      ...(id === 'google'
-        ? { defaultHeaders: { 'x-goog-api-client': 'diffwright/0.3.0' } }
-        : {}),
     });
     assert.deepEqual(resolved.credential, { value: secret, source: 'shell' });
     assert.equal(Object.isFrozen(resolved.profile), true);
@@ -144,6 +141,69 @@ test('explicit Vercel accepts OIDC but implicit OIDC never activates Vercel', ()
     command: 'commit',
   });
   assert.equal(implicit?.profile.id, 'cerebras');
+});
+
+test('explicit Vercel deterministically prefers its Gateway API key over OIDC', () => {
+  const resolved = provider.resolveProvider({
+    env: {
+      DIFFWRIGHT_PROVIDER: 'vercel',
+      DIFFWRIGHT_MODEL: 'openai/gpt-5',
+      AI_GATEWAY_API_KEY: 'gateway-key',
+      VERCEL_OIDC_TOKEN: 'oidc-token',
+    },
+    command: 'doctor',
+  });
+
+  assert.equal(resolved?.profile.credentialEnv, 'AI_GATEWAY_API_KEY');
+  assert.equal(resolved?.credential.value, 'gateway-key');
+});
+
+test('implicit Vercel never consumes ambient OIDC when its API key is empty', () => {
+  assert.throws(
+    () => provider.resolveProvider({
+      env: {
+        AI_GATEWAY_API_KEY: '',
+        VERCEL_OIDC_TOKEN: 'ambient-oidc',
+        DIFFWRIGHT_MODEL: 'openai/gpt-5',
+        CEREBRAS_API_KEY: 'fallback-key',
+      },
+      command: 'doctor',
+    }),
+    /AI_GATEWAY_API_KEY/,
+  );
+});
+
+test('implicit Vercel requires DIFFWRIGHT_MODEL and ignores every legacy model variable', () => {
+  for (const [command, legacyName] of [
+    ['commit', 'CHANGESCRIBE_MODEL'],
+    ['commit', 'GROQ_MODEL'],
+    ['pr', 'GROQ_PR_MODEL'],
+  ] as const) {
+    assert.throws(
+      () => provider.resolveProvider({
+        env: {
+          AI_GATEWAY_API_KEY: 'gateway-key',
+          [legacyName]: 'legacy-model',
+          CEREBRAS_API_KEY: 'fallback-key',
+        },
+        command,
+      }),
+      /DIFFWRIGHT_MODEL/,
+      `${command}:${legacyName}`,
+    );
+  }
+
+  assert.equal(
+    provider.resolveProvider({
+      env: {
+        AI_GATEWAY_API_KEY: 'gateway-key',
+        DIFFWRIGHT_MODEL: 'openai/gpt-5',
+        GROQ_MODEL: 'legacy-model',
+      },
+      command: 'commit',
+    })?.profile.model,
+    'openai/gpt-5',
+  );
 });
 
 test('implicit resolution preserves custom, Gateway, Cerebras, then Groq priority', () => {
@@ -224,10 +284,53 @@ test('custom URL validation accepts safe loopback and HTTPS endpoints', () => {
     assert.equal(resolved?.profile.baseURL.endsWith('/'), false);
     assert.equal(resolved?.credential.source, key === undefined ? 'dummy' : 'shell');
   }
+
+  assert.equal(
+    provider.resolveProvider({
+      env: {
+        DIFFWRIGHT_PROVIDER: 'custom',
+        DIFFWRIGHT_BASE_URL: 'http://[::1]:1234/nested/v1/',
+        DIFFWRIGHT_MODEL: 'model',
+      },
+      command: 'doctor',
+    })?.profile.baseURL,
+    'http://[::1]:1234/nested/v1',
+  );
+});
+
+test('custom key requirements account for the normalized endpoint', () => {
+  assert.throws(
+    () => provider.resolveProvider({
+      env: {
+        DIFFWRIGHT_PROVIDER: 'custom',
+        DIFFWRIGHT_BASE_URL: 'http://localhost:11434/v1',
+      },
+      command: 'doctor',
+    }),
+    (error: unknown) => {
+      assert.match(String(error), /DIFFWRIGHT_MODEL/);
+      assert.doesNotMatch(String(error), /DIFFWRIGHT_API_KEY/);
+      return true;
+    },
+  );
+
+  assert.throws(
+    () => provider.resolveProvider({
+      env: {
+        DIFFWRIGHT_PROVIDER: 'custom',
+        DIFFWRIGHT_BASE_URL: 'https://provider.example/v1',
+        DIFFWRIGHT_MODEL: 'model',
+      },
+      command: 'doctor',
+    }),
+    /DIFFWRIGHT_API_KEY/,
+  );
 });
 
 test('custom URL validation rejects unsafe or ambiguous endpoints', () => {
   for (const baseURL of [
+    'not a URL',
+    'https://',
     'http://example.com/v1',
     'ftp://example.com/v1',
     'https://user:pass@example.com/v1',

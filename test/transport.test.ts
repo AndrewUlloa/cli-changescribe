@@ -50,6 +50,10 @@ interface TransportModule {
 
 interface ErrorsModule {
   TransportError: new (...args: never[]) => Error;
+  classifyTransportError(
+    error: unknown,
+    profile: PublicProviderProfile,
+  ): Error & { category: string; status?: number };
   formatSafeError(error: unknown, secrets?: readonly string[]): string;
 }
 
@@ -297,4 +301,39 @@ test('safe error formatting redacts known values and bearer tokens without dumpi
   assert.doesNotMatch(output, /secret-a|secret-b|token-value|do-not-print|authorization|config/i);
   assert.match(output, /\[REDACTED\]/);
   assert.ok(output.length < 1_000);
+});
+
+test('diagnostics classify actionable HTTP and network failures', () => {
+  for (const [status, category] of [
+    [400, 'request_incompatible'],
+    [401, 'authentication'],
+    [403, 'authentication'],
+    [402, 'payment_required'],
+    [404, 'not_found'],
+    [408, 'timeout'],
+    [429, 'rate_limit'],
+    [503, 'provider_error'],
+  ] as const) {
+    const classified = errors.classifyTransportError(
+      Object.assign(new Error('provider response'), { status }),
+      profile(),
+    );
+    assert.equal(classified.category, category, String(status));
+    assert.equal(classified.status, status);
+  }
+
+  assert.equal(
+    errors.classifyTransportError(
+      Object.assign(new Error('lookup failed'), { code: 'ENOTFOUND' }),
+      profile(),
+    ).category,
+    'dns',
+  );
+  assert.equal(
+    errors.classifyTransportError(
+      Object.assign(new Error('certificate failed'), { code: 'CERT_HAS_EXPIRED' }),
+      profile(),
+    ).category,
+    'tls',
+  );
 });

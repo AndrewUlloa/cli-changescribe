@@ -1,4 +1,3 @@
-import OpenAI from 'openai';
 import type { ConfigSource } from './runtime-config';
 
 export const SUPPORTED_PROVIDER_IDS = Object.freeze([
@@ -82,9 +81,6 @@ const PRESETS: Readonly<
     credentialEnvs: ['GEMINI_API_KEY'],
     outputTokenField: null,
     status: 'docs-verified',
-    defaultHeaders: Object.freeze({
-      'x-goog-api-client': 'diffwright/0.3.0',
-    }),
   },
   xai: {
     id: 'xai',
@@ -182,7 +178,7 @@ function resolvePreset(
   env: NodeJS.ProcessEnv,
   sources: Readonly<Record<string, ConfigSource>> | undefined,
   command: CommandPurpose,
-  explicit: boolean,
+  useLegacyModelFallback: boolean,
 ): ResolvedProvider {
   const credentialEnv = preset.credentialEnvs.find((name) => present(env[name]));
   if (!credentialEnv) {
@@ -191,9 +187,9 @@ function resolvePreset(
     );
   }
 
-  const model = explicit
-    ? env.DIFFWRIGHT_MODEL || preset.defaultModel
-    : legacyModel(env, command) || preset.defaultModel;
+  const model = useLegacyModelFallback
+    ? legacyModel(env, command) || preset.defaultModel
+    : env.DIFFWRIGHT_MODEL || preset.defaultModel;
   if (!model) {
     throw new ProviderConfigError(`${preset.id} requires DIFFWRIGHT_MODEL`);
   }
@@ -259,30 +255,26 @@ function resolveCustom(
 ): ResolvedProvider {
   const rawBaseURL = env.DIFFWRIGHT_BASE_URL;
   const rawModel = env.DIFFWRIGHT_MODEL;
-  const missing: string[] = [];
   if (!present(rawBaseURL)) {
-    missing.push('DIFFWRIGHT_BASE_URL');
-  }
-  if (!present(rawModel)) {
-    missing.push('DIFFWRIGHT_MODEL');
-  }
-  if (missing.length > 0) {
-    if (!present(env.DIFFWRIGHT_API_KEY)) {
-      missing.push('DIFFWRIGHT_API_KEY');
-    }
+    const missing = [
+      'DIFFWRIGHT_BASE_URL',
+      ...(present(rawModel) ? [] : ['DIFFWRIGHT_MODEL']),
+    ];
     throw new ProviderConfigError(`custom requires ${missing.join(', ')}`);
-  }
-
-  if (!present(rawBaseURL) || !present(rawModel)) {
-    throw new ProviderConfigError('custom configuration is incomplete');
   }
 
   const normalized = normalizeCustomBaseURL(rawBaseURL);
   const hasKey = present(env.DIFFWRIGHT_API_KEY);
-  if (!hasKey && !normalized.keylessAllowed) {
-    throw new ProviderConfigError(
-      'custom requires DIFFWRIGHT_API_KEY unless using an HTTP loopback endpoint',
-    );
+  const missing = [
+    ...(present(rawModel) ? [] : ['DIFFWRIGHT_MODEL']),
+    ...(!hasKey && !normalized.keylessAllowed ? ['DIFFWRIGHT_API_KEY'] : []),
+  ];
+  if (missing.length > 0) {
+    throw new ProviderConfigError(`custom requires ${missing.join(', ')}`);
+  }
+
+  if (!present(rawModel)) {
+    throw new ProviderConfigError('custom requires DIFFWRIGHT_MODEL');
   }
 
   const profile = freezeProfile({
@@ -351,53 +343,26 @@ export function resolveProvider({
     if (id === 'ollama') {
       return resolveOllama(env);
     }
-    return resolvePreset(PRESETS[id], env, sources, command, true);
+    return resolvePreset(PRESETS[id], env, sources, command, false);
   }
 
   if (hasOwn(env, 'DIFFWRIGHT_BASE_URL') || hasOwn(env, 'DIFFWRIGHT_API_KEY')) {
     return resolveCustom(env, sources);
   }
   if (hasOwn(env, 'AI_GATEWAY_API_KEY')) {
-    return resolvePreset(PRESETS.vercel, env, sources, command, false);
+    return resolvePreset(
+      { ...PRESETS.vercel, credentialEnvs: ['AI_GATEWAY_API_KEY'] },
+      env,
+      sources,
+      command,
+      false,
+    );
   }
   if (present(env.CEREBRAS_API_KEY)) {
-    return resolvePreset(PRESETS.cerebras, env, sources, command, false);
+    return resolvePreset(PRESETS.cerebras, env, sources, command, true);
   }
   if (present(env.GROQ_API_KEY)) {
-    return resolvePreset(PRESETS.groq, env, sources, command, false);
+    return resolvePreset(PRESETS.groq, env, sources, command, true);
   }
   return null;
-}
-
-export type OpenAIClientOptions = ConstructorParameters<typeof OpenAI>[0];
-export type OpenAIClientFactory = (options: OpenAIClientOptions) => OpenAI;
-
-const defaultClientFactory: OpenAIClientFactory = (options) => new OpenAI(options);
-
-export interface ProviderInfo {
-  client: OpenAI;
-  provider: ProviderId;
-  defaultModel: string;
-}
-
-/**
- * Backward-compatible adapter retained while command workflows migrate to the
- * pure resolver and shared transport.
- */
-export function createClient(
-  env: NodeJS.ProcessEnv = process.env,
-  clientFactory: OpenAIClientFactory = defaultClientFactory,
-): ProviderInfo | null {
-  const resolved = resolveProvider({ env, command: 'commit' });
-  if (!resolved) {
-    return null;
-  }
-  return {
-    client: clientFactory({
-      apiKey: resolved.credential.value,
-      baseURL: resolved.profile.baseURL,
-    }),
-    provider: resolved.profile.id,
-    defaultModel: resolved.profile.model,
-  };
 }

@@ -73,7 +73,8 @@ DIFFWRIGHT_MODEL="provider-model-id"
 The key may be omitted only for an HTTP loopback endpoint. Diffwright parses
 the URL with `new URL`, rejects credentials, query strings, fragments,
 unsupported protocols, empty hosts, and non-loopback HTTP. The only normalized
-loopback hostnames are `localhost`, `127.0.0.1`, and `::1`. A keyless loopback
+loopback hostnames are `localhost`, `127.0.0.1`, and IPv6 loopback `::1`
+(written `[::1]` in a URL). A keyless loopback
 profile receives a fixed, non-secret dummy key solely because the OpenAI SDK
 requires a non-empty value. Non-loopback endpoints require HTTPS and a key.
 
@@ -166,10 +167,14 @@ Add `diffwright doctor`:
   Authorization header.
 - `diffwright doctor --live`: make one minimal Chat Completions request through
   the same resolver, client factory, request builder, and parser used by
-  `commit` and `pr`. Its fixed prompt requests exactly `OK`; it applies a small
-  output cap only when the selected profile documents a token field.
-- Classify DNS/TLS failures, 401/403 authentication, 404 endpoint/model, 429
-  quota/rate limiting, incompatible response bodies, and provider 5xx errors.
+  `commit` and `pr`. Its fixed prompt requests exactly `OK`; it applies a
+  provider-safe 1024-token cap only when the selected profile documents a
+  token field, omits reasoning effort, and treats a structurally valid
+  length-limited completion as transport success.
+- Classify DNS/TLS failures, 400 request incompatibility, 401/403
+  authentication, 402 payment/credits, 404 endpoint/model, 408/client timeout,
+  429 quota/rate limiting, incompatible response bodies, and provider 5xx
+  errors.
 - Sanitize all errors through one allowlisted formatter and redact known secret
   values and bearer-token patterns.
 

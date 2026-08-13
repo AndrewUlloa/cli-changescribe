@@ -1,6 +1,6 @@
 {
   "name": "cli-changescribe",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Compatibility bridge from ChangeScribe to Diffwright",
   "type": "commonjs",
   "bin": {
@@ -27,6 +27,6 @@
     "url": "git+https://github.com/AndrewUlloa/diffwright.git"
   },
   "dependencies": {
-    "diffwright": "^0.2.1"
+    "diffwright": "^0.3.0"
   }
 }

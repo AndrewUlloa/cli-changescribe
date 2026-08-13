@@ -57,7 +57,7 @@ export interface TransportOptions {
   readonly timeoutMs?: number;
 }
 
-function createClient(
+export function createOpenAIClient(
   resolved: ResolvedProvider,
   options: TransportOptions,
 ): OpenAI {
@@ -121,7 +121,7 @@ export async function completeChat(
   input: CompleteChatInput,
   options: TransportOptions = {},
 ): Promise<ParsedCompletion> {
-  const client = createClient(resolved, options);
+  const client = createOpenAIClient(resolved, options);
   try {
     const response = await client.chat.completions.create(
       buildChatRequest(

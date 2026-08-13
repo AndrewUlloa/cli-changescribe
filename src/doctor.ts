@@ -89,7 +89,3 @@ export async function runDoctor(
   });
   console.log('Live check: OK');
 }
-
-if (require.main === module) {
-  void runDoctor();
-}

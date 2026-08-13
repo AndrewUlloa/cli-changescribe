@@ -8,7 +8,9 @@ import {
   type ResolvedProvider,
 } from './provider';
 import {
+  knownSecretValues,
   loadRuntimeConfig,
+  redactSecretValues,
   type RuntimeConfig,
 } from './runtime-config';
 import { defaultCommandRunner } from './subprocess';
@@ -261,6 +263,7 @@ async function generateCommitMessage(
   dependencies: CommitDependencies,
 ): Promise<void> {
   const runtime = dependencies.loadRuntimeConfig();
+  const knownSecrets = knownSecretValues(runtime.values);
   try {
     const isDryRun = argv.includes('--dry-run');
 
@@ -297,16 +300,20 @@ async function generateCommitMessage(
       resolved,
       buildChatMessages(changeAnalysis),
       dependencies,
+      knownSecrets,
     );
 
-    const rawContent = completion.content
+    const rawContent = redactSecretValues(completion.content, knownSecrets)
       .trim()
       .replace(OPENING_CODE_BLOCK_REGEX, '') // Remove opening code block
       .replace(CLOSING_CODE_BLOCK_REGEX, '') // Remove closing code block
       .trim();
 
     // Some models put useful text in a nonstandard `reasoning` field
-    const reasoning = completion.reasoning.trim();
+    const reasoning = redactSecretValues(
+      completion.reasoning,
+      knownSecrets,
+    ).trim();
 
     // Build a robust Conventional Commit from either content or reasoning
     let built = buildConventionalCommit(rawContent || '', reasoning || '');
@@ -321,13 +328,20 @@ async function generateCommitMessage(
         resolved,
         buildRepairMessages(rawContent || '', reasoning || '', built, violations),
         dependencies,
+        knownSecrets,
       );
-      const repairedContent = repairCompletion.content
+      const repairedContent = redactSecretValues(
+        repairCompletion.content,
+        knownSecrets,
+      )
         .trim()
         .replace(OPENING_CODE_BLOCK_REGEX, '')
         .replace(CLOSING_CODE_BLOCK_REGEX, '')
         .trim();
-      const repairedReasoning = repairCompletion.reasoning.trim();
+      const repairedReasoning = redactSecretValues(
+        repairCompletion.reasoning,
+        knownSecrets,
+      ).trim();
       built = buildConventionalCommit(repairedContent || '', repairedReasoning || '');
       if (!built) {
         logCompletionFailureAndExit(repairCompletion);
@@ -393,12 +407,27 @@ async function createCompletionSafe(
   resolved: ResolvedProvider,
   messages: ChatCompletionMessageParam[],
   dependencies: CommitDependencies,
+  knownSecrets: readonly string[],
 ): Promise<ParsedCompletion> {
   return await dependencies.completeChat(resolved, {
-    messages,
+    messages: redactMessageSecrets(messages, knownSecrets),
     outputLimit: 16_384,
     intent: 'workflow',
   });
+}
+
+function redactMessageSecrets(
+  messages: ChatCompletionMessageParam[],
+  secrets: readonly string[],
+): ChatCompletionMessageParam[] {
+  return messages.map((message) =>
+    typeof message.content === 'string'
+      ? {
+          ...message,
+          content: redactSecretValues(message.content, secrets),
+        } as ChatCompletionMessageParam
+      : message,
+  );
 }
 
 function buildChatMessages(
@@ -709,8 +738,4 @@ export async function runCommit(
   dependencies: CommitDependencies = defaultDependencies,
 ): Promise<void> {
   await generateCommitMessage(argv, dependencies);
-}
-
-if (require.main === module) {
-  runCommit();
 }

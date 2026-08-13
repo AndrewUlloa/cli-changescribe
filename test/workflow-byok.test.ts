@@ -66,7 +66,7 @@ async function createCompletionServer(context: TestContext): Promise<{
                   'fix: support provider-neutral configuration\n\n' +
                   '- change: route completions through the selected endpoint\n' +
                   '- why: let users bring their own provider\n' +
-                  '- risk: low\n\n' +
+                  '- risk: workflow-secret ambient-secret\n\n' +
                   'What issue is this PR related to?\nRelated: (not provided)\n\n' +
                   'What change does this PR add?\n- Add provider-neutral completion routing\n\n' +
                   'How did you test your change?\nTesting: local wire test\n\n' +
@@ -119,12 +119,16 @@ function customEnvironment(baseURL: string): NodeJS.ProcessEnv {
     DIFFWRIGHT_BASE_URL: baseURL,
     DIFFWRIGHT_API_KEY: 'workflow-secret',
     DIFFWRIGHT_MODEL: 'fixture-model',
+    GROQ_API_KEY: 'ambient-secret',
   };
 }
 
 test('commit workflow uses explicit custom provider through the shared transport', async (context) => {
   const directory = createRepository(context);
-  fs.appendFileSync(path.join(directory, 'README.md'), 'change\n');
+  fs.appendFileSync(
+    path.join(directory, 'README.md'),
+    'change workflow-secret ambient-secret\n',
+  );
   git(directory, ['add', 'README.md']);
   const head = git(directory, ['rev-parse', 'HEAD']).trim();
   const server = await createCompletionServer(context);
@@ -138,10 +142,15 @@ test('commit workflow uses explicit custom provider through the shared transport
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /Generating commit message with AI \(custom\)/);
   assert.match(result.stdout, /fix: support provider-neutral configuration/);
+  assert.doesNotMatch(result.stdout, /workflow-secret|ambient-secret/);
   assert.equal(server.requests.length, 1);
   assert.equal(server.requests[0].url, '/v1/chat/completions');
   assert.equal(server.requests[0].authorization, 'Bearer workflow-secret');
   assert.equal(server.requests[0].body.model, 'fixture-model');
+  assert.doesNotMatch(
+    JSON.stringify(server.requests[0].body),
+    /workflow-secret|ambient-secret/,
+  );
   assert.deepEqual(Object.keys(server.requests[0].body).sort(), [
     'messages',
     'model',
@@ -152,7 +161,10 @@ test('commit workflow uses explicit custom provider through the shared transport
 test('PR workflow uses explicit custom provider for every synthesis pass', async (context) => {
   const directory = createRepository(context);
   git(directory, ['switch', '--quiet', '-c', 'feature']);
-  fs.appendFileSync(path.join(directory, 'README.md'), 'feature\n');
+  fs.appendFileSync(
+    path.join(directory, 'README.md'),
+    'feature workflow-secret ambient-secret\n',
+  );
   git(directory, ['add', 'README.md']);
   git(directory, ['commit', '--quiet', '-m', 'feat: add fixture feature']);
   const output = path.join(directory, 'summary.md');
@@ -171,7 +183,15 @@ test('PR workflow uses explicit custom provider for every synthesis pass', async
     assert.equal(request.url, '/v1/chat/completions');
     assert.equal(request.authorization, 'Bearer workflow-secret');
     assert.equal(request.body.model, 'fixture-model');
+    assert.doesNotMatch(
+      JSON.stringify(request.body),
+      /workflow-secret|ambient-secret/,
+    );
     assert.deepEqual(Object.keys(request.body).sort(), ['messages', 'model']);
   }
   assert.match(fs.readFileSync(output, 'utf8'), /What change does this PR add\?/);
+  assert.doesNotMatch(
+    fs.readFileSync(output, 'utf8'),
+    /workflow-secret|ambient-secret/,
+  );
 });

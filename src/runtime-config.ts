@@ -84,3 +84,16 @@ export function knownSecretValues(env: NodeJS.ProcessEnv): readonly string[] {
     ),
   );
 }
+
+export function redactSecretValues(
+  text: string,
+  secrets: readonly string[],
+): string {
+  let redacted = text;
+  for (const secret of secrets) {
+    if (secret.length > 0) {
+      redacted = redacted.split(secret).join('[REDACTED]');
+    }
+  }
+  return redacted;
+}
