@@ -140,10 +140,12 @@ if (args[0] === '--version') {
   process.exit(0);
 }
 if (args[0] === 'pr' && args[1] === 'list') {
-  console.log('[]');
+  console.log(process.env.GH_EXISTING_PR === '1'
+    ? '[{"number":7,"title":"Existing","url":"https://github.com/example/repo/pull/7"}]'
+    : '[]');
   process.exit(0);
 }
-if (args[0] === 'pr' && args[1] === 'create') {
+if (args[0] === 'pr' && (args[1] === 'create' || args[1] === 'edit')) {
   if (args.includes('--issue')) {
     console.error('unknown flag: --issue');
     process.exit(2);
@@ -300,5 +302,57 @@ test('PR creation links an issue in the body without passing an unsupported gh f
   assert.match(
     JSON.stringify(server.requests.map((request) => request.body)),
     /Issue hint: #123/,
+  );
+});
+
+test('PR update links an issue in the body without passing an unsupported gh flag', async (context) => {
+  const directory = createRepository(context);
+  fs.writeFileSync(
+    path.join(directory, 'package.json'),
+    JSON.stringify(
+      {
+        name: 'fixture',
+        private: true,
+        scripts: {
+          test: 'node -e "process.exit(0)"',
+          build: 'node -e "process.exit(0)"',
+        },
+      },
+      null,
+      2,
+    ),
+  );
+  git(directory, ['add', 'package.json']);
+  git(directory, ['commit', '--quiet', '-m', 'chore: add package scripts']);
+  git(directory, ['switch', '--quiet', '-c', 'feature']);
+  fs.appendFileSync(path.join(directory, 'README.md'), 'updated feature\n');
+  git(directory, ['add', 'README.md']);
+  git(directory, ['commit', '--quiet', '-m', 'feat: update fixture feature']);
+
+  const capture = path.join(directory, 'gh-capture.json');
+  const fakeBin = createFakeGh(context, capture);
+  const server = await createCompletionServer(context);
+  const env = customEnvironment(server.baseURL);
+  env.PATH = `${fakeBin}${path.delimiter}${env.PATH ?? ''}`;
+  env.GH_CAPTURE_PATH = capture;
+  env.GH_EXISTING_PR = '1';
+
+  const result = await run(
+    directory,
+    ['pr', '--base', 'main', '--issue', '456', '--create-pr', '--skip-format'],
+    env,
+  );
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const captured = JSON.parse(fs.readFileSync(capture, 'utf8')) as {
+    args: string[];
+    body: string;
+  };
+  assert.deepEqual(captured.args.slice(0, 3), ['pr', 'edit', '7']);
+  assert.equal(captured.args.includes('--issue'), false);
+  assert.match(captured.body, /(?:^|\n)Closes #456(?:\n|$)/);
+  assert.match(
+    JSON.stringify(server.requests.map((request) => request.body)),
+    /Issue hint: #456/,
   );
 });
