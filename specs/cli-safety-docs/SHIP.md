@@ -1,6 +1,6 @@
 # Ship: Diffwright 0.3.2
 
-> Status: ready for hosted CI
+> Status: shipped
 > Prepared: 2026-08-13
 
 ## Release contents
@@ -34,15 +34,27 @@
 
 ## Hosted and public verification
 
-- [ ] Push focused branch and open PR
-- [ ] Node 18 CI green
-- [ ] Node 20 CI green
-- [ ] Node 22 CI green
-- [ ] Merge to `main`
-- [ ] Publish `diffwright@0.3.2` with npm provenance/MFA
-- [ ] Verify npm latest metadata and README
-- [ ] Install from registry in a clean directory and run help/init
-- [ ] Install ChangeScribe with Diffwright and confirm root resolution
+- [x] Push focused branch and open PR ([#11](https://github.com/AndrewUlloa/diffwright/pull/11))
+- [x] Node 18 CI green
+- [x] Node 20 CI green
+- [x] Node 22 CI green
+- [x] Merge to `main` (`aebe231`)
+- [x] Publish `diffwright@0.3.2` with npm MFA
+- [x] Verify npm `latest` metadata and served README
+- [x] Install from registry in a clean directory and run help/init
+- [x] Install ChangeScribe with Diffwright and confirm root resolution
+
+## Public verification result
+
+The npm registry reports `latest` as `0.3.2` and serves the new Requirements,
+Command behavior, Troubleshooting, and Documentation sections. A clean
+temporary install executed Diffwright and ChangeScribe help, initialized all
+four project scripts, and resolved ChangeScribe's dependency to the same root
+`diffwright@0.3.2` package without a nested copy.
+
+GitHub's About panel now contains the package description, npm website, and
+focused AI/BYOK/CLI/Git discovery topics. Private vulnerability reporting
+remains enabled.
 
 ## Rollback
 
