@@ -1,7 +1,7 @@
 # Plan: CLI safety and documentation hardening
 
 > Derived from: `specs/cli-safety-docs/SPEC.md`
-> Status: implementation complete — release in progress
+> Status: complete
 > Last updated: 2026-08-13
 
 ## Overview
@@ -108,7 +108,7 @@ the patch through the existing package and CI lifecycle.
   - **Files:** package metadata, distribution tests, review/ship artifacts
   - **Size:** M
 
-- [ ] **Task 7: Review, merge, publish, and observe**
+- [x] **Task 7: Review, merge, publish, and observe**
   - **Acceptance:** Five-axis review has no blockers; PR CI passes Node
     18/20/22; npm latest is 0.3.2; registry README and clean installs verify.
   - **Verify:** GitHub checks, npm registry metadata, public CLI execution.
