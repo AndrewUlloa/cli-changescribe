@@ -1,6 +1,6 @@
 # Plan: Provider-neutral BYOK
 
-> Status: implementation complete — release in progress
+> Status: complete — released 2026-08-13
 > Spec: `specs/byok/SPEC.md`
 
 Every implementation slice follows RED → GREEN → focused test → full gate.
@@ -56,7 +56,7 @@ Every implementation slice follows RED → GREEN → focused test → full gate.
 - Run correctness/readability/architecture/security/performance review and
   resolve every release blocker.
 
-## 7. Verification and release ⏳
+## 7. Verification and release ✅
 
 - Run `npm test`, `npm run typecheck`, `npm pack --dry-run`,
   `npm audit --omit=dev`, and `git diff --check`.

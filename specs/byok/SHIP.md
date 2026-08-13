@@ -1,6 +1,6 @@
 # Ship plan: Provider-neutral BYOK
 
-> Status: release candidate
+> Status: shipped 2026-08-13
 > Target: `diffwright@0.3.0` and `cli-changescribe@0.2.3`
 
 ## Release order
@@ -25,7 +25,7 @@
 - [x] Focused Diffwright dry-run dogfood with an explicit keyless loopback profile
 - [x] Hosted CI on Node 18, 20, and 22 (PR #8)
 - [x] Local clean packed/install execution for Diffwright and the ChangeScribe bridge
-- [ ] Post-publish clean registry install verification
+- [x] Post-publish clean registry install verification
 
 Live provider smoke tests run only for credentials actually available. No
 credential is currently available, so no integration will be promoted to
@@ -62,3 +62,14 @@ monitoring therefore consists of:
 - Fresh global-style execution of `diffwright --help` and
   `changescribe --help`
 - Confirm the GitHub release branch and npm `latest` tag agree
+
+## Release evidence
+
+- PR #8 was squash-merged after all Node 18, 20, and 22 jobs passed.
+- npm `latest` points to `diffwright@0.3.0`.
+- A clean registry install passed help, offline doctor, and local wire-backed
+  `doctor --live` with the exact `/v1/chat/completions` request path.
+- npm `latest` points to `cli-changescribe@0.2.3`, whose published dependency
+  is `diffwright@^0.3.0`.
+- A separate clean registry install resolved the bridge to
+  `diffwright@0.3.0`, and `changescribe --help` delegated successfully.
