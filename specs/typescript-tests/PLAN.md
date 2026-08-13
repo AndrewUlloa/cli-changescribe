@@ -1,7 +1,7 @@
 # Plan: TypeScript test-suite migration
 
 > Derived from: `specs/typescript-tests/SPEC.md`
-> Status: approved and in progress
+> Status: done
 > Last updated: 2026-08-12
 
 ## Architecture decisions
@@ -72,7 +72,7 @@
   - Depends on: Tasks 3 and 4
   - Size: M
 
-- [ ] **Task 6: Ship through GitHub**
+- [x] **Task 6: Ship through GitHub**
   - Acceptance: focused PR merges after Node 18/20/22 CI passes.
   - Verify: GitHub checks and post-merge repository language/file inspection.
   - Depends on: Task 5
@@ -83,7 +83,7 @@
 - [x] RED observed for intended test-language contract.
 - [x] All tests compile strictly.
 - [x] Full local lifecycle is green.
-- [ ] Hosted Node matrix is green before merge.
+- [x] Hosted Node matrix is green before merge.
 
 ## Rollback
 
