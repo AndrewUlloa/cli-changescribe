@@ -80,7 +80,7 @@ test('unknown commands fail with an error and print help', () => {
   const result = runCli(['not-a-command']);
 
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /Unknown command: not-a-command/);
+  assert.match(result.stderr, /Unknown command/);
   assert.match(result.stdout, /diffwright <command>/);
 });
 

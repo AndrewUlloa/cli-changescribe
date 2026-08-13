@@ -205,7 +205,7 @@ export async function runCli(
     return 0;
   }
 
-  console.error(`Unknown command: ${command}`);
+  console.error('Unknown command. Run `diffwright --help` for usage.');
   printHelp();
   return 1;
 }

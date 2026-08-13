@@ -39,7 +39,7 @@ Diffwright in automation.
 
 - Node.js 18 or newer
 - Commit and PR workflows require a Git repository with at least one commit.
-- Commit, PR, and live doctor require an AI provider API key or a local
+- Commit, PR, and doctor require an AI provider API key or a local
   Ollama/compatible loopback endpoint.
 - GitHub CLI (`gh`) authenticated with `gh auth login` only when using
   `--create-pr`

@@ -190,6 +190,22 @@ test('argument errors redact shell credentials and normalize control characters'
   assert.match(errors.join('\n'), /Unknown commit option/);
 });
 
+test('unknown commands never echo attacker-controlled command text', async () => {
+  const secret = 'unknown-command-secret';
+  const errors: string[] = [];
+  const originalError = console.error;
+  console.error = (message?: unknown) => errors.push(String(message ?? ''));
+  try {
+    assert.equal(await runCli([`${secret}\u001b[31m`]), 1);
+  } finally {
+    console.error = originalError;
+  }
+
+  assert.doesNotMatch(errors.join('\n'), new RegExp(secret));
+  assert.doesNotMatch(errors.join('\n'), /\u001b/);
+  assert.match(errors.join('\n'), /Unknown command/);
+});
+
 test('invalid PR options fail before invoking a runner', async () => {
   const invalidInvocations = [
     ['pr', '--base'],

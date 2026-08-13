@@ -1,7 +1,7 @@
 # Plan: CLI safety and documentation hardening
 
 > Derived from: `specs/cli-safety-docs/SPEC.md`
-> Status: approved — implementation in progress
+> Status: implementation complete — release in progress
 > Last updated: 2026-08-13
 
 ## Overview
@@ -40,7 +40,7 @@ the patch through the existing package and CI lifecycle.
 
 ### Phase 1: Fail-closed command boundary
 
-- [ ] **Task 1: Reject unsafe commit and PR arguments**
+- [x] **Task 1: Reject unsafe commit and PR arguments**
   - **Acceptance:** Unknown options and missing/invalid values exit nonzero
     before Git or provider side effects; valid invocations retain behavior.
   - **Verify:** Focused CLI/security tests; strict typecheck.
@@ -49,7 +49,7 @@ the patch through the existing package and CI lifecycle.
     `src/cli.ts`, `src/commit.ts`, `src/pr-summary.ts`
   - **Size:** M
 
-- [ ] **Task 2: Make issue linking compatible with GitHub CLI**
+- [x] **Task 2: Make issue linking compatible with GitHub CLI**
   - **Acceptance:** `123` and `#123` normalize; invalid values fail; create and
     update bodies contain `Closes #123`; no `gh` argv contains `--issue`.
   - **Verify:** Focused PR integration tests with a fake `gh` boundary.
@@ -59,13 +59,13 @@ the patch through the existing package and CI lifecycle.
 
 ### Checkpoint: Command safety
 
-- [ ] Focused regression tests pass
-- [ ] Full suite and typecheck pass
-- [ ] One focused commit per completed slice
+- [x] Focused regression tests pass
+- [x] Full suite and typecheck pass
+- [x] One focused commit per completed slice
 
 ### Phase 2: Discoverable, accurate operation
 
-- [ ] **Task 3: Add command-specific help**
+- [x] **Task 3: Add command-specific help**
   - **Acceptance:** Every primary command and alias documents supported syntax,
     critical side effects, and the documentation URL; unknown options remain
     errors rather than help fallbacks.
@@ -74,7 +74,7 @@ the patch through the existing package and CI lifecycle.
   - **Files:** `src/cli.ts`, `test/cli-routing.test.ts`, `test/branding.test.ts`
   - **Size:** M
 
-- [ ] **Task 4: Publish task-oriented README and reference docs**
+- [x] **Task 4: Publish task-oriented README and reference docs**
   - **Acceptance:** Requirements, exact dry-run behavior, provider request
     counts, command effects, PR example, troubleshooting, team installs, and
     provider links are present without a GIF or exhaustive flag dump.
@@ -83,7 +83,7 @@ the patch through the existing package and CI lifecycle.
   - **Files:** `README.md`, `documentation/*.md`, `test/npm-page.test.ts`
   - **Size:** M
 
-- [ ] **Task 5: Add repository trust paths**
+- [x] **Task 5: Add repository trust paths**
   - **Acceptance:** Root security, support, and contribution files contain live
     reporting/help instructions and are linked from README; GitHub private
     vulnerability reporting is enabled.
@@ -94,13 +94,13 @@ the patch through the existing package and CI lifecycle.
 
 ### Checkpoint: Documentation integrity
 
-- [ ] Source behavior, help, README, and reference agree
-- [ ] All local links and official external links resolve
-- [ ] Full suite and pack allowlist pass
+- [x] Source behavior, help, README, and reference agree
+- [x] All local links and official external links resolve
+- [x] Full suite and pack allowlist pass
 
 ### Phase 3: Review and ship
 
-- [ ] **Task 6: Prepare and verify 0.3.2**
+- [x] **Task 6: Prepare and verify 0.3.2**
   - **Acceptance:** Metadata is 0.3.2; tarball includes intended community and
     reference files; clean Diffwright and ChangeScribe installs pass.
   - **Verify:** Typecheck, full tests, pack, audits, diff check, clean installs.

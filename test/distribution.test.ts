@@ -250,5 +250,5 @@ test('packed Diffwright and ChangeScribe install and execute end to end', (conte
     env,
   });
   assert.equal(unknown.status, 1);
-  assert.match(unknown.stderr, /Unknown command: not-a-command/);
+  assert.match(unknown.stderr, /Unknown command/);
 });
