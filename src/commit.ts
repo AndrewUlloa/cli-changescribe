@@ -1,4 +1,3 @@
-import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -14,6 +13,9 @@ import {
   type ProviderId,
   type ProviderInfo,
 } from './provider';
+import { defaultCommandRunner } from './subprocess';
+
+const execFileSync = defaultCommandRunner.exec;
 
 // Load environment variables from .env.local
 config({ path: '.env.local' });

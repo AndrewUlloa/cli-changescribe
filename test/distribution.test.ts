@@ -76,6 +76,7 @@ function expectedDiffwrightFiles(): string[] {
     'runtime-config',
     'errors',
     'transport',
+    'subprocess',
   ]) {
     files.push(`dist/${moduleName}.js`, `dist/${moduleName}.js.map`);
   }

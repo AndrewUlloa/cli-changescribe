@@ -1,4 +1,3 @@
-import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -9,6 +8,10 @@ import type {
   ChatCompletionMessageParam,
 } from 'openai/resources/chat/completions';
 import { createClient } from './provider';
+import { defaultCommandRunner } from './subprocess';
+
+const execFileSync = defaultCommandRunner.exec;
+const spawnSync = defaultCommandRunner.spawn;
 
 config({ path: '.env.local' });
 
