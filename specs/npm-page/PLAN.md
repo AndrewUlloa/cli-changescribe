@@ -1,6 +1,6 @@
 # Plan: npm package page and 0.3.1 hardening
 
-> Status: implementation complete — release candidate
+> Status: shipped 2026-08-13
 > Spec: `specs/npm-page/SPEC.md`
 
 ## 1. Base-ref security regression
@@ -31,4 +31,4 @@
 - [x] Record RED → GREEN evidence, rollback, and registry verification steps.
 - [x] Run typecheck, full tests, pack dry-run, production audit, signature audit,
   and whitespace checks.
-- [ ] Open a focused PR, pass Node 18/20/22 CI, merge, publish, and verify npm.
+- [x] Open a focused PR, pass Node 18/20/22 CI, merge, publish, and verify npm.
