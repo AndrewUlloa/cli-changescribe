@@ -1,6 +1,6 @@
 # Ship plan: npm package page and 0.3.1 hardening
 
-> Status: release candidate
+> Status: shipped 2026-08-13
 > Target: `diffwright@0.3.1`
 
 ## Release order
@@ -26,8 +26,8 @@ The ChangeScribe bridge does not need a new release: its published
 - [x] `git diff --check`
 - [x] Focused Diffwright PR dry-run dogfood with no model request
 - [x] Hosted CI on Node 18, 20, and 22 (PR #9)
-- [ ] Post-publish clean registry install verification
-- [ ] Published npm README and description verification
+- [x] Post-publish clean registry install verification
+- [x] Published npm README and description verification
 
 ## Rollback
 
@@ -46,3 +46,13 @@ Published npm versions are immutable. If a release issue appears:
   `diffwright --help` and offline `diffwright doctor`.
 - Install `cli-changescribe@0.2.3` separately and prove its resolved Diffwright
   version is 0.3.1 and `changescribe --help` delegates successfully.
+
+## Release evidence
+
+- PR #9 was squash-merged after Node 18, 20, and 22 CI passed.
+- npm `latest` points to `diffwright@0.3.1` with the reviewed description and
+  README content.
+- A clean registry install passed `diffwright --help` and offline doctor with
+  an explicit keyless loopback profile.
+- A separate clean install of `cli-changescribe@0.2.3` resolved
+  `diffwright@0.3.1`, and `changescribe --help` delegated successfully.
