@@ -120,7 +120,7 @@ test('the complete test suite is strict compiled TypeScript', () => {
   assert.match(pkg.scripts.typecheck, /tsc -p tsconfig\.test\.json --noEmit/);
   assert.equal(
     pkg.scripts.test,
-    'npm run build && npm run build:test && node --test .test-dist',
+    'npm run build && npm run build:test && node .test-dist/run-tests.js',
   );
   assert.equal(testConfig.extends, './tsconfig.json');
   assert.equal(testConfig.compilerOptions.rootDir, 'test');
@@ -129,5 +129,6 @@ test('the complete test suite is strict compiled TypeScript', () => {
   assert.equal(testFiles.length > 0, true);
   assert.equal(testFiles.every((file) => file.endsWith('.ts')), true);
   assert.equal(testFiles.some((file) => file.endsWith('.test.ts')), true);
+  assert.equal(testFiles.includes('run-tests.ts'), true);
   assert.match(gitignore, /^\.test-dist\/$/m);
 });

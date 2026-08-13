@@ -66,6 +66,14 @@ assertions remain, and one new contract test proves the test-language boundary.
 - GREEN: `npm audit --omit=dev` reports 0 vulnerabilities.
 - GREEN: `git diff --check` reports no whitespace errors.
 
+## Review finding resolved
+
+- A shell glob was not portable to Windows, while passing the compiled
+  directory directly behaved inconsistently between Node 20 and Node 22. A
+  strict TypeScript launcher now enumerates compiled `*.test.js` files and
+  passes them to `node --test` as an argument array. The launcher fails closed
+  when no tests are found and introduces no dependency or shell parsing.
+
 ## Verdict
 
 Approved. Hosted Node 18/20/22 checks remain the merge gate.
