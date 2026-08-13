@@ -1,7 +1,7 @@
 {
   "name": "diffwright",
-  "version": "0.3.0",
-  "description": "Turn Git diffs into Conventional Commit messages and PR summaries",
+  "version": "0.3.1",
+  "description": "Generate Conventional Commits and PR summaries from Git diffs with your own AI provider",
   "bin": {
     "diffwright": "bin/diffwright.js"
   },
