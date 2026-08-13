@@ -74,6 +74,8 @@ function expectedDiffwrightFiles(): string[] {
     'pr-summary',
     'provider',
     'runtime-config',
+    'errors',
+    'transport',
   ]) {
     files.push(`dist/${moduleName}.js`, `dist/${moduleName}.js.map`);
   }
