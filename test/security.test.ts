@@ -1,18 +1,43 @@
-const assert = require('node:assert/strict');
-const { execFileSync, spawnSync } = require('node:child_process');
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
-const test = require('node:test');
+import assert from 'node:assert/strict';
+import { execFileSync, spawnSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import test, { type TestContext } from 'node:test';
+
+interface Completion {
+  choices: Array<{ message: { content: string } }>;
+}
+
+interface FakeClient {
+  chat: {
+    completions: {
+      create(): Promise<Completion>;
+    };
+  };
+}
+
+interface CommitDependencies {
+  createClient(): {
+    client: FakeClient;
+    provider: 'cerebras';
+    defaultModel: string;
+  };
+}
+
+type RunCommit = (
+  argv: string[],
+  dependencies: CommitDependencies,
+) => Promise<void>;
 
 const bin = path.resolve(__dirname, '..', 'bin', 'diffwright.js');
-const { runCommit } = require('../dist/commit.js');
+const { runCommit }: { runCommit: RunCommit } = require('../dist/commit.js');
 
-function git(cwd, args) {
+function git(cwd: string, args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8' });
 }
 
-function createRepository(context) {
+function createRepository(context: TestContext): string {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'diffwright-security-'));
   context.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   git(directory, ['init', '--quiet', '--initial-branch=main']);

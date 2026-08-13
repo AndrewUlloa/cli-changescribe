@@ -1,14 +1,31 @@
-const assert = require('node:assert/strict');
-const { execFileSync, spawnSync } = require('node:child_process');
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
-const test = require('node:test');
+import assert from 'node:assert/strict';
+import { execFileSync, spawnSync, type SpawnSyncReturns } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import test from 'node:test';
 
 const repoRoot = path.resolve(__dirname, '..');
 const cliPath = path.join(repoRoot, 'bin', 'diffwright.js');
 
-function runCli(args, options = {}) {
+interface CliOptions {
+  cwd?: string;
+}
+
+interface FixturePackage {
+  name: string;
+  scripts?: Record<string, string>;
+}
+
+interface PackageManifest {
+  name: string;
+  bin: Record<string, string>;
+}
+
+function runCli(
+  args: string[],
+  options: CliOptions = {},
+): SpawnSyncReturns<string> {
   return spawnSync(process.execPath, [cliPath, ...args], {
     cwd: options.cwd ?? repoRoot,
     encoding: 'utf8',
@@ -17,7 +34,7 @@ function runCli(args, options = {}) {
 }
 
 test('package exposes the diffwright executable', () => {
-  const pkg = require('../package.json');
+  const pkg: PackageManifest = require('../package.json');
 
   assert.equal(pkg.name, 'diffwright');
   assert.deepEqual(pkg.bin, { diffwright: 'bin/diffwright.js' });
@@ -73,7 +90,7 @@ test('init adds Diffwright npm scripts', (context) => {
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /Added npm scripts/);
 
-  const fixturePackage = JSON.parse(
+  const fixturePackage: FixturePackage = JSON.parse(
     fs.readFileSync(path.join(fixtureDir, 'package.json'), 'utf8')
   );
   assert.deepEqual(fixturePackage.scripts, {
@@ -108,7 +125,7 @@ test('init migrates generated ChangeScribe scripts without replacing custom scri
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /Migrated npm scripts to Diffwright/);
 
-  const fixturePackage = JSON.parse(
+  const fixturePackage: FixturePackage = JSON.parse(
     fs.readFileSync(path.join(fixtureDir, 'package.json'), 'utf8')
   );
   assert.deepEqual(fixturePackage.scripts, {

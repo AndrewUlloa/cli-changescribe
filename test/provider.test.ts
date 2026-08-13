@@ -1,11 +1,31 @@
-const assert = require('node:assert/strict');
-const test = require('node:test');
+import assert from 'node:assert/strict';
+import test from 'node:test';
 
-const { createClient } = require('../dist/provider.js');
+interface ClientOptions {
+  apiKey: string;
+  baseURL: string;
+}
+
+interface FakeClient {
+  options: ClientOptions;
+}
+
+interface ProviderSelection {
+  client: FakeClient;
+  provider: 'cerebras' | 'groq';
+  defaultModel: string;
+}
+
+type CreateClient = (
+  env: NodeJS.ProcessEnv,
+  factory: (options: ClientOptions) => FakeClient,
+) => ProviderSelection | null;
+
+const { createClient }: { createClient: CreateClient } = require('../dist/provider.js');
 
 test('provider resolution can be tested with an isolated environment and SDK factory', () => {
-  const clients = [];
-  const factory = (options) => {
+  const clients: FakeClient[] = [];
+  const factory = (options: ClientOptions): FakeClient => {
     const client = { options };
     clients.push(client);
     return client;
@@ -19,6 +39,7 @@ test('provider resolution can be tested with an isolated environment and SDK fac
     factory,
   );
 
+  assert.ok(selected);
   assert.equal(selected.provider, 'cerebras');
   assert.equal(selected.defaultModel, 'gpt-oss-120b');
   assert.equal(selected.client, clients[0]);
@@ -29,8 +50,8 @@ test('provider resolution can be tested with an isolated environment and SDK fac
 });
 
 test('provider resolution preserves Groq fallback and null behavior', () => {
-  const calls = [];
-  const factory = (options) => {
+  const calls: ClientOptions[] = [];
+  const factory = (options: ClientOptions): FakeClient => {
     calls.push(options);
     return { options };
   };
@@ -38,6 +59,7 @@ test('provider resolution preserves Groq fallback and null behavior', () => {
   const groq = createClient({ GROQ_API_KEY: 'groq-test-key' }, factory);
   const missing = createClient({}, factory);
 
+  assert.ok(groq);
   assert.equal(groq.provider, 'groq');
   assert.equal(groq.defaultModel, 'openai/gpt-oss-120b');
   assert.deepEqual(calls, [

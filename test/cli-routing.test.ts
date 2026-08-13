@@ -1,16 +1,32 @@
-const assert = require('node:assert/strict');
-const test = require('node:test');
+import assert from 'node:assert/strict';
+import test from 'node:test';
 
-const { runCli } = require('../dist/cli.js');
+type CliCall = ['commit' | 'pr', string[]] | ['init'];
 
-function recordingRunners() {
-  const calls = [];
+interface CliRunners {
+  runCommit(args: string[]): Promise<void>;
+  runInit(): Promise<void>;
+  runPrSummary(args: string[]): Promise<void>;
+}
+
+type RunCli = (argv: string[], runners?: CliRunners) => Promise<number>;
+
+const { runCli }: { runCli: RunCli } = require('../dist/cli.js');
+
+function recordingRunners(): { calls: CliCall[]; runners: CliRunners } {
+  const calls: CliCall[] = [];
   return {
     calls,
     runners: {
-      runCommit: async (args) => calls.push(['commit', args]),
-      runInit: async () => calls.push(['init']),
-      runPrSummary: async (args) => calls.push(['pr', args]),
+      runCommit: async (args: string[]) => {
+        calls.push(['commit', args]);
+      },
+      runInit: async () => {
+        calls.push(['init']);
+      },
+      runPrSummary: async (args: string[]) => {
+        calls.push(['pr', args]);
+      },
     },
   };
 }
