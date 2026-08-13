@@ -14,7 +14,7 @@ Gateway, Cerebras, Groq, Ollama, or any compatible endpoint.</p>
 
 </div>
 
-[Quick start](#quick-start) · [Commands](#commands) · [Providers](#providers) · [Security](#security-and-privacy) · [GitHub](https://github.com/AndrewUlloa/diffwright)
+[Quick start](#quick-start) · [Commands](#commands) · [Providers](#providers) · [Security](#security-and-privacy) · [Documentation](#documentation)
 
 ```bash
 npm install -g diffwright
@@ -22,31 +22,48 @@ npm install -g diffwright
 
 ## Choose your workflow
 
-| You want to… | Preview first | Ship it |
+| You want to… | Preview or inspect | Run it |
 |---|---|---|
 | Write a Conventional Commit | `diffwright commit --dry-run` | `diffwright commit` |
 | Summarize a branch for a PR | `diffwright pr --dry-run` | `diffwright pr` |
 | Create or update the GitHub PR | — | `diffwright pr --create-pr` |
 | Check provider configuration | `diffwright doctor` | `diffwright doctor --live` |
 
-> Start with the preview commands. `commit` commits and pushes by default;
-> `--dry-run` prevents the commit and push but may stage working-tree changes
-> when the index is empty.
+`commit` commits and pushes by default. Its dry run prevents those two actions,
+but it still calls the provider and stages changes if nothing is staged. PR dry run has a
+different contract: it does not call the provider or write summaries, but it may
+fetch the base branch. See [Command behavior](#command-behavior) before running
+Diffwright in automation.
+
+## Requirements
+
+- Node.js 18 or newer
+- A Git repository with at least one commit
+- An AI provider API key, or a local Ollama/compatible loopback endpoint
+- GitHub CLI (`gh`) authenticated with `gh auth login` only when using
+  `--create-pr`
 
 ## Quick start
 
 ### 1. Install
 
+Install globally for personal use:
+
 ```bash
 npm install -g diffwright
 ```
 
-For a project-local install, use `npm install --save-dev diffwright` and run
-commands with `npx diffwright`.
+For a team, pin it in the project and run it through `npx` or npm scripts:
+
+```bash
+npm install --save-dev diffwright
+npx diffwright init
+```
 
 ### 2. Bring a provider
 
-Create `.env.local` in the repository where you run Diffwright:
+Create `.env.local` in the repository where you run Diffwright and add that file
+to `.gitignore`:
 
 ```bash
 DIFFWRIGHT_PROVIDER="openrouter"
@@ -54,15 +71,19 @@ DIFFWRIGHT_MODEL="anthropic/claude-sonnet-4"
 OPENROUTER_API_KEY="your-key-here"
 ```
 
-### 3. Check before sending a diff
+Use the exact model ID listed by your provider. The
+[provider guide](https://github.com/AndrewUlloa/diffwright/blob/main/documentation/providers.md)
+links to official key and model pages for every preset.
+
+### 3. Check configuration before sending a diff
 
 ```bash
 diffwright doctor
 ```
 
-Offline doctor validates the resolved provider, model, endpoint, and credential
-source without making a network request. Add `--live` when you want one minimal
-provider request.
+Offline doctor resolves and prints the provider, model, endpoint hostname, and
+credential source without making a network request. Add `--live` when you want
+one small provider request.
 
 ### 4. Preview your first result
 
@@ -70,36 +91,18 @@ provider request.
 git add src test
 diffwright commit --dry-run
 
-# or preview a branch summary without calling the model
+# inspect a PR range without calling the provider
 diffwright pr --base main --dry-run
 ```
 
-When the preview looks right:
+Important: a commit dry-run candidate is not reused. Running `diffwright commit`
+afterward calls the provider again, so the final text may differ.
 
-```bash
-diffwright commit
-diffwright pr --base main
-```
+## Example output
 
-### 5. Add project scripts (optional)
-
-```bash
-npx diffwright init
-```
-
-This adds Diffwright commands to the current `package.json` without replacing
-custom scripts.
-
-## From diff to ship-ready text
+Commit preview:
 
 ```text
-$ diffwright doctor
-Provider: openrouter
-Model: anthropic/claude-sonnet-4
-Endpoint: openrouter.ai
-Transport: openai-chat-completions
-Configuration check: OK (offline)
-
 $ diffwright commit --dry-run
 🔍 Analyzing all code changes...
 🤖 Generating commit message with AI (openrouter)...
@@ -111,6 +114,26 @@ feat: add provider-neutral routing
 - risk: provider-specific compatibility varies by model
 ```
 
+PR-ready output:
+
+```text
+What issue is this PR related to?
+Related: #123
+
+What change does this PR add?
+- Reject unknown CLI options before Git or provider side effects
+- Link issue 123 with a supported Closes directive
+
+How did you test your change?
+Testing: unit, wire, packed-install, and Node version matrix
+
+Anything you want reviewers to scrutinize?
+- Argument validation and GitHub CLI boundaries
+
+Other notes reviewers should know (risks + follow-ups)
+- Existing valid commands keep their previous behavior
+```
+
 ## Why Diffwright
 
 | Capability | What it gives you |
@@ -119,7 +142,7 @@ feat: add provider-neutral routing
 | Bring your own AI | Use a direct provider, a gateway, or a local OpenAI-compatible server. |
 | Deterministic routing | One invocation resolves one provider and never silently fails over to another. |
 | Local-first configuration | Keys stay in process memory and requests go directly to the resolved endpoint. |
-| Dry-run and doctor modes | Inspect Git behavior and provider resolution before creating commits or PRs. |
+| Fail-closed CLI | Unknown, incomplete, or invalid options stop before a command runner starts. |
 | Legacy compatibility | Existing Cerebras, Groq, and ChangeScribe setups continue to work. |
 
 ## Commands
@@ -128,27 +151,47 @@ feat: add provider-neutral routing
 |---|---|
 | `diffwright doctor` | Validate configuration offline; no provider request. |
 | `diffwright doctor --live` | Make one minimal request through the production transport. |
-| `diffwright commit --dry-run` | Generate and print a commit preview; no commit or push. It stages changes if nothing is staged. |
+| `diffwright commit --dry-run` | Generate and print a candidate; no commit or push. May stage all changes. |
 | `diffwright commit` | Generate a validated Conventional Commit, commit it, and push the current branch. |
-| `diffwright pr --dry-run` | Inspect the base, branch, commit count, output, provider, and model without a model call or output write. May fetch the base ref. |
-| `diffwright pr` | Generate full and slim PR summaries under `.pr-summaries/` by default. |
-| `diffwright pr --create-pr` | Run available format/test/build gates, push the branch, and create or update the GitHub PR with `gh`. |
-| `diffwright init` | Add Diffwright npm scripts to the current project. |
+| `diffwright pr --dry-run` | Fetch when possible, resolve the commit range, and print the plan; no provider call or output write. |
+| `diffwright pr` | Generate detailed and PR-ready summaries. |
+| `diffwright pr --create-pr` | Run project gates, then create or update the GitHub PR with `gh`. |
+| `diffwright init` | Add missing Diffwright npm scripts and migrate exact legacy script values. |
 
-Aliases for the generated project scripts:
+Run `diffwright <command> --help` for focused help. The
+[complete CLI reference](https://github.com/AndrewUlloa/diffwright/blob/main/documentation/cli-reference.md)
+documents every flag, default, alias, side effect, and exit behavior.
 
-```bash
-diffwright pr:summary
-diffwright feature:pr
-diffwright staging:pr
-```
+## Command behavior
 
-Use `diffwright --help` for the complete command list.
+| Command | Provider requests | Files/index | Network or repository effects |
+|---|---:|---|---|
+| `doctor` | 0 | none | none |
+| `doctor --live` | 1 | none | calls the resolved endpoint |
+| `commit --dry-run` | Usually 1; one repair request is possible | Stages all changes if the index is empty | no commit or push |
+| `commit` | Usually 1; one repair request is possible | May stage all changes; creates a commit | pushes the current branch |
+| `pr --dry-run` | 0 | no summary files | attempts `git fetch -- origin <base>`; falls back to local refs |
+| `pr` | Minimum of three provider requests | overwrites the requested file, a sibling `.final.md`, and a temporary backup | attempts to fetch the base |
+| `pr --create-pr` | Same multi-pass generation | may run format, always runs `npm test` and `npm run build`, then writes summaries | pushes only when creating a new PR; updating an existing PR does not push local commits |
+| `init` | 0 | edits `package.json` only when scripts are added or migrated | none |
+
+PR synthesis uses one first-pass request, one request per 20,000-character
+commit chunk, and one final synthesis request. A release-summary fallback can
+add one more request. `--create-pr` runs `format` only when that script exists
+unless you skip it; test and build always run. Those gates can modify files and
+run arbitrary project code before Diffwright performs its dirty-tree check.
+
+The default PR output is `.pr-summaries/PR_SUMMARY.md`; the slim GitHub body is
+`.pr-summaries/PR_SUMMARY.final.md`. A separate temporary backup is also
+created. Choose `--out` when you need another path.
+
+PR dry-run still resolves provider configuration so it can show the selected
+provider and model; it simply does not send a request.
 
 ## Providers
 
 Set `DIFFWRIGHT_PROVIDER`, the provider credential, and the exact
-`DIFFWRIGHT_MODEL`. Cerebras and Groq retain their legacy default models.
+`DIFFWRIGHT_MODEL`. Cerebras and Groq retain legacy defaults.
 
 | Provider | ID | Credential | Status |
 |---|---|---|---|
@@ -164,13 +207,13 @@ Set `DIFFWRIGHT_PROVIDER`, the provider credential, and the exact
 | Ollama | `ollama` | none | `docs-verified` |
 | Compatible endpoint | `custom` | `DIFFWRIGHT_API_KEY` | `user-defined` |
 
-`docs-verified` means Diffwright's adapter matches the provider's documented
-OpenAI Chat Completions contract. It does not mean every model was live-tested.
-Anthropic calls its compatibility API suitable for testing and comparison
-rather than a long-term native integration, so Diffwright marks it
+`docs-verified` means the adapter matches the provider's documented OpenAI
+Chat Completions contract; it does not mean every model was live-tested.
+Anthropic describes its compatibility layer as suitable for testing and
+comparison rather than a long-term native integration, so it is marked
 `experimental`.
 
-### Direct provider example
+### Direct provider
 
 ```bash
 DIFFWRIGHT_PROVIDER="openai"
@@ -187,97 +230,68 @@ AI_GATEWAY_API_KEY="your-gateway-key"
 ```
 
 Gateway authentication is required even when downstream provider BYOK is
-configured in Vercel. `AI_GATEWAY_API_KEY` wins over `VERCEL_OIDC_TOKEN`;
-OIDC is considered only when Vercel is explicitly selected.
+configured in Vercel. `AI_GATEWAY_API_KEY` wins over `VERCEL_OIDC_TOKEN`; OIDC
+is eligible only when Vercel is explicitly selected. Diffwright makes one
+outbound request and does not reroute it, but Vercel may independently route,
+retry, or use system-credit fallback. Use Vercel's BYOK key test and attempt
+observability to confirm which downstream credential was used.
 
-Diffwright sends one request and does not reroute it. Vercel may independently
-route, retry, or use system-credit fallback after receiving that request. Use
-Vercel's BYOK key test and provider-attempt observability to confirm which
-downstream credential was used.
-
-### Ollama
+### Ollama and compatible endpoints
 
 ```bash
 DIFFWRIGHT_PROVIDER="ollama"
 DIFFWRIGHT_MODEL="qwen3:8b"
 ```
 
-The Ollama preset uses `http://localhost:11434/v1` and supplies the fixed dummy
-key required by the OpenAI SDK.
+The preset uses `http://localhost:11434/v1`. Custom remote endpoints require
+HTTPS and a key; keyless HTTP is allowed only for loopback hosts.
 
-### Custom endpoint
-
-```bash
-DIFFWRIGHT_PROVIDER="custom"
-DIFFWRIGHT_BASE_URL="https://provider.example/v1"
-DIFFWRIGHT_API_KEY="your-key-here"
-DIFFWRIGHT_MODEL="provider-model-id"
-```
-
-Remote custom endpoints require HTTPS and a key. A key may be omitted only for
-HTTP loopback endpoints on `localhost`, `127.0.0.1`, or `[::1]`.
-
-### Existing Cerebras and Groq configuration
-
-This remains valid without `DIFFWRIGHT_PROVIDER`:
-
-```bash
-CEREBRAS_API_KEY="your-key-here"
-# or
-GROQ_API_KEY="your-key-here"
-```
-
-When both exist, Cerebras wins. Existing `CHANGESCRIBE_MODEL`, `GROQ_MODEL`,
-and `GROQ_PR_MODEL` overrides remain supported.
+For precedence, legacy configuration, custom URLs, and official provider setup
+links, see the [provider guide](https://github.com/AndrewUlloa/diffwright/blob/main/documentation/providers.md).
 
 ## Security and privacy
 
 Diffwright sends credentials and diff content directly from your machine to
 the resolved endpoint. It does not operate a proxy or credential vault.
 
-- One invocation resolves one provider; provider errors never cause
-  Diffwright to silently call another provider.
-- SDK retries are disabled and cross-origin HTTP redirects are rejected.
+- One invocation resolves one provider; Diffwright never fails over to another.
+- SDK retries are disabled and HTTP redirects are rejected.
 - Provider credentials are removed from environments inherited by Git hooks,
   GitHub CLI, npm, tests, builds, and formatters.
 - Exact configured provider-key values are redacted from prompts, responses,
   diagnostics, console output, and generated files.
 - Custom remote endpoints require HTTPS; keyless endpoints are loopback-only.
-- Base branches are validated as Git branch names before Git or GitHub use.
 
-**Important:** Diffwright does not scan diffs for arbitrary secrets. Review
-what is staged before calling a remote provider. A database password, private
-key, cloud token, or other credential that is not one of the configured AI
-provider keys can still be included in the diff sent to that provider.
+Diffwright does not scan diffs for arbitrary secrets. Review what is staged
+before calling a remote provider: any non-provider secret in a diff can still
+be sent. Use least-privilege keys and review each provider or gateway's
+retention, billing, fallback, and privacy policies.
 
-Add `.env.local` to the target repository's ignore rules, use least-privilege
-provider keys, and review the retention, billing, fallback, and privacy policy
-of every provider or gateway you select.
+Report vulnerabilities privately through
+[GitHub Security Advisories](https://github.com/AndrewUlloa/diffwright/security/advisories/new).
+Read the [security policy](https://github.com/AndrewUlloa/diffwright/blob/main/SECURITY.md)
+before reporting.
 
-## PR summaries and GitHub automation
+## Troubleshooting
 
-Common options:
+- Run `diffwright doctor` first; it is offline and shows which configuration won.
+- Use `diffwright doctor --live` for one request and a categorized failure.
+- A provider `404` usually means the endpoint or exact model ID is unavailable.
+- `429` is a provider quota or rate-limit response, not automatic failover.
+- If PR range fetch fails, Diffwright says so and tries local refs.
 
-```bash
-diffwright pr --base main
-diffwright pr --base main --mode release
-diffwright pr --base main --out .pr-summaries/feature.md
-diffwright pr --base main --create-pr
-diffwright pr --base main --create-pr --skip-format
-```
+The [troubleshooting guide](https://github.com/AndrewUlloa/diffwright/blob/main/documentation/troubleshooting.md)
+maps every diagnostic category to likely causes and safe information to include
+in a bug report.
 
-Environment defaults:
+## Documentation
 
-| Variable | Default |
-|---|---|
-| `PR_SUMMARY_BASE` | `main` |
-| `PR_SUMMARY_OUT` | `.pr-summaries/PR_SUMMARY.md` |
-| `PR_SUMMARY_LIMIT` | `400` |
-| `PR_SUMMARY_ISSUE` | empty |
-
-`--create-pr` requires the authenticated [GitHub CLI](https://cli.github.com/).
-If the current project has a `format` script, Diffwright runs it before the
-project's test and build gates. Use `--skip-format` or `--no-format` to opt out.
+- [CLI reference](https://github.com/AndrewUlloa/diffwright/blob/main/documentation/cli-reference.md)
+- [Provider setup](https://github.com/AndrewUlloa/diffwright/blob/main/documentation/providers.md)
+- [Troubleshooting](https://github.com/AndrewUlloa/diffwright/blob/main/documentation/troubleshooting.md)
+- [Contributing](https://github.com/AndrewUlloa/diffwright/blob/main/CONTRIBUTING.md)
+- [Support](https://github.com/AndrewUlloa/diffwright/blob/main/SUPPORT.md)
+- [Security policy](https://github.com/AndrewUlloa/diffwright/blob/main/SECURITY.md)
 
 ## Migrating from ChangeScribe
 
@@ -292,8 +306,6 @@ npm install -g diffwright
 ## Development
 
 Diffwright is strict TypeScript compiled to CommonJS for Node.js 18 and newer.
-The npm package ships compiled JavaScript and source maps, so consumers do not
-need a TypeScript runtime.
 
 ```bash
 git clone https://github.com/AndrewUlloa/diffwright.git
@@ -301,15 +313,14 @@ cd diffwright
 npm ci
 npm run typecheck
 npm test
-npm run build
 ```
 
-The application lives in `src/`; the stable npm executable remains
-`bin/diffwright.js` for package and ChangeScribe compatibility.
+The source lives in `src/`; `bin/diffwright.js` remains the stable executable
+for npm and ChangeScribe compatibility.
 
 ## Project
 
-- [Source code](https://github.com/AndrewUlloa/diffwright)
-- [Issue tracker](https://github.com/AndrewUlloa/diffwright/issues)
-- [npm package](https://www.npmjs.com/package/diffwright)
+- [Source](https://github.com/AndrewUlloa/diffwright)
+- [Issues](https://github.com/AndrewUlloa/diffwright/issues)
+- [npm](https://www.npmjs.com/package/diffwright)
 - [MIT license](https://github.com/AndrewUlloa/diffwright/blob/main/LICENSE)

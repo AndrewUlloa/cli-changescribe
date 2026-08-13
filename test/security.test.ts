@@ -97,8 +97,27 @@ test('PR rejects option-like base refs before Git can execute an upload-pack hel
   );
 
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /invalid base branch/i);
+  assert.match(result.stderr, /--base requires a value/i);
   assert.equal(fs.existsSync(marker), false);
+});
+
+test('a mistyped commit dry-run flag fails before provider, commit, or push work', (context) => {
+  const directory = createRepository(context);
+  fs.appendFileSync(path.join(directory, 'README.md'), 'uncommitted change\n');
+  const head = git(directory, ['rev-parse', 'HEAD']).trim();
+  const status = git(directory, ['status', '--porcelain']);
+
+  const result = spawnSync(bin, ['commit', '--dry-rnu'], {
+    cwd: directory,
+    encoding: 'utf8',
+    env: { ...process.env, CEREBRAS_API_KEY: 'test-key' },
+  });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Unknown commit option: --dry-rnu/);
+  assert.equal(git(directory, ['rev-parse', 'HEAD']).trim(), head);
+  assert.equal(git(directory, ['status', '--porcelain']), status);
+  assert.doesNotMatch(result.stdout, /Generating commit message|Staging all changes/);
 });
 
 test('PR dry-run inspects a valid range without API calls or output writes', (context) => {
