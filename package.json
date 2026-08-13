@@ -6,7 +6,11 @@
     "diffwright": "bin/diffwright.js"
   },
   "scripts": {
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "commit": "diffwright commit",
+    "pr:summary": "diffwright pr:summary",
+    "feature:pr": "diffwright feature:pr",
+    "staging:pr": "diffwright staging:pr"
   },
   "type": "commonjs",
   "files": [
