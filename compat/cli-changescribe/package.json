@@ -24,7 +24,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/AndrewUlloa/cli-changescribe.git"
+    "url": "git+https://github.com/AndrewUlloa/diffwright.git"
   },
   "dependencies": {
     "diffwright": "^0.2.1"
