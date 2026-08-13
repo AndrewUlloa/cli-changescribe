@@ -203,6 +203,7 @@ async function generateCommitMessage(argv) {
 
     const { client, provider, defaultModel } = providerInfo;
     const model =
+      process.env.DIFFWRIGHT_MODEL ||
       process.env.CHANGESCRIBE_MODEL ||
       process.env.GROQ_MODEL ||
       defaultModel;

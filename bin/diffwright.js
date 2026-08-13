@@ -5,7 +5,7 @@ const { runInit } = require('../src/init');
 const { runPrSummary } = require('../src/pr-summary');
 
 function printHelp() {
-  console.log(`changescribe <command> [options]
+  console.log(`diffwright <command> [options]
 
 Commands:
   commit        Generate a commit message and commit/push changes
@@ -16,11 +16,11 @@ Commands:
   staging:pr    Alias for: pr --base main --create-pr --mode release
 
 Examples:
-  changescribe init
-  changescribe commit --dry-run
-  changescribe pr --base main --mode release
-  changescribe feature:pr
-  changescribe staging:pr
+  diffwright init
+  diffwright commit --dry-run
+  diffwright pr --base main --mode release
+  diffwright feature:pr
+  diffwright staging:pr
 `);
 }
 

@@ -1,6 +1,7 @@
-# changescribe
+# Diffwright
 
-CLI to generate Conventional Commit messages and PR summaries using Cerebras or Groq.
+Turn code changes into the words that ship them. Diffwright generates
+Conventional Commit messages and PR summaries using Cerebras or Groq.
 
 ## Install
 
@@ -8,23 +9,23 @@ Pick the install command that matches your repo's package manager:
 
 ```bash
 # npm
-npm install -g cli-changescribe
+npm install -g diffwright
 # or in a repo
-npm install cli-changescribe
+npm install diffwright
 ```
 
 ```bash
 # pnpm
-pnpm add -g cli-changescribe
+pnpm add -g diffwright
 # or in a repo
-pnpm add cli-changescribe
+pnpm add diffwright
 ```
 
 ```bash
 # yarn
-yarn global add cli-changescribe
+yarn global add diffwright
 # or in a repo
-yarn add cli-changescribe
+yarn add diffwright
 ```
 
 ## Setup
@@ -40,19 +41,19 @@ GROQ_API_KEY="your-key-here"
 
 Provider priority: if both keys are set, Cerebras is used.
 
-If your repo uses `pnpm` or `yarn`, make sure you install `cli-changescribe`
+If your repo uses `pnpm` or `yarn`, make sure you install `diffwright`
 with the same package manager so the correct lockfile is updated (Vercel uses
 `frozen-lockfile` by default).
 
 ### Setup process (recommended)
 
-1. Install `cli-changescribe` (global or per repo).
+1. Install `diffwright` (global or per repo).
 2. Add `.env.local` with `CEREBRAS_API_KEY` or `GROQ_API_KEY`.
-3. Run `npx changescribe init` to add npm scripts.
+3. Run `npx diffwright init` to add npm scripts.
 4. If you plan to use `--create-pr`, install and auth GitHub CLI: `gh auth login`.
 5. Run a dry run to validate:
-   - `changescribe commit --dry-run`
-   - `changescribe pr --dry-run`
+   - `diffwright commit --dry-run`
+   - `diffwright pr --dry-run`
 
 Optional environment variables for PR summaries:
 
@@ -60,7 +61,8 @@ Optional environment variables for PR summaries:
 - `PR_SUMMARY_OUT` (default: `.pr-summaries/PR_SUMMARY.md`)
 - `PR_SUMMARY_LIMIT` (default: `400`)
 - `PR_SUMMARY_ISSUE` (default: empty)
-- `CHANGESCRIBE_MODEL` (override model name for any provider)
+- `DIFFWRIGHT_MODEL` (override model name for any provider)
+- `CHANGESCRIBE_MODEL` (legacy alias for `DIFFWRIGHT_MODEL`)
 - `GROQ_PR_MODEL` / `GROQ_MODEL` (legacy overrides, still supported)
 
 ## Usage
@@ -68,23 +70,23 @@ Optional environment variables for PR summaries:
 ### Init scripts in a repo
 
 ```bash
-npx changescribe init
+npx diffwright init
 ```
 
 ### Commit message
 
 ```bash
-changescribe commit --dry-run
-changescribe commit
+diffwright commit --dry-run
+diffwright commit
 ```
 
 ### PR summary
 
 ```bash
-changescribe pr --base main --mode release
-changescribe pr --base main --create-pr --mode release
-changescribe pr --dry-run
-changescribe pr --create-pr --skip-format
+diffwright pr --base main --mode release
+diffwright pr --base main --create-pr --mode release
+diffwright pr --dry-run
+diffwright pr --create-pr --skip-format
 ```
 
 ### Npm script parity aliases
@@ -92,15 +94,15 @@ changescribe pr --create-pr --skip-format
 These match the npm scripts in your repo:
 
 ```bash
-changescribe pr:summary
-changescribe feature:pr
-changescribe staging:pr
+diffwright pr:summary
+diffwright feature:pr
+diffwright staging:pr
 ```
 
 ## Notes
 
-- `changescribe commit` stages changes if nothing is staged and commits/pushes by default.
-- `changescribe pr` can create or update a GitHub PR when `--create-pr` is passed (requires `gh`).
+- `diffwright commit` stages changes if nothing is staged and commits/pushes by default.
+- `diffwright pr` can create or update a GitHub PR when `--create-pr` is passed (requires `gh`).
 - `feature:pr` and `staging:pr` aliases accept overrides (e.g., `--base main`).
 - `--skip-format` (or `--no-format`) skips the format step during `--create-pr`.
 - The CLI must be run inside a git repo.
@@ -109,8 +111,8 @@ changescribe staging:pr
 
 We recommend a simple main/staging/feature flow:
 
-- `feature/*` branches merge into `staging` via PRs (`changescribe feature:pr`).
-- `staging` merges into `main` for releases (`changescribe staging:pr`).
+- `feature/*` branches merge into `staging` via PRs (`diffwright feature:pr`).
+- `staging` merges into `main` for releases (`diffwright staging:pr`).
 - Use `--base main` or `--base staging` to override if your repo differs.
 
 Recommended CI checks on PRs:

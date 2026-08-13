@@ -1,0 +1,32 @@
+{
+  "name": "cli-changescribe",
+  "version": "0.2.2",
+  "description": "Compatibility bridge from ChangeScribe to Diffwright",
+  "type": "commonjs",
+  "bin": {
+    "changescribe": "bin/changescribe.js"
+  },
+  "files": [
+    "bin",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "cli",
+    "git",
+    "conventional-commits",
+    "migration",
+    "diffwright"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AndrewUlloa/cli-changescribe.git"
+  },
+  "dependencies": {
+    "diffwright": "^0.2.1"
+  }
+}

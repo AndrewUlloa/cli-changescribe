@@ -1,9 +1,12 @@
 {
-  "name": "cli-changescribe",
+  "name": "diffwright",
   "version": "0.2.1",
-  "description": "CLI for generating commit messages and PR summaries",
+  "description": "Turn Git diffs into Conventional Commit messages and PR summaries",
   "bin": {
-    "changescribe": "bin/changescribe.js"
+    "diffwright": "bin/diffwright.js"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js"
   },
   "type": "commonjs",
   "files": [
@@ -14,6 +17,8 @@
   ],
   "keywords": [
     "cli",
+    "git",
+    "diff",
     "commit",
     "conventional-commits",
     "pr",
