@@ -25,7 +25,7 @@ The ChangeScribe bridge does not need a new release: its published
 - [x] `npm audit signatures` (39 verified packages)
 - [x] `git diff --check`
 - [x] Focused Diffwright PR dry-run dogfood with no model request
-- [ ] Hosted CI on Node 18, 20, and 22
+- [x] Hosted CI on Node 18, 20, and 22 (PR #9)
 - [ ] Post-publish clean registry install verification
 - [ ] Published npm README and description verification
 
