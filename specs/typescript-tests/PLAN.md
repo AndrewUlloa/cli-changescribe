@@ -37,7 +37,7 @@
     test command, ignored output, and no JS tests.
   - Verify: targeted contract fails against the current JS suite for intended
     assertions.
-  - Files: `test/typescript-migration.test.js`
+  - Files: `test/typescript-migration.test.ts`
   - Size: S
 
 - [x] **Task 2: Add compiler and package plumbing**
@@ -65,7 +65,7 @@
   - Size: S
 
 - [x] **Task 5: Verify and review**
-  - Acceptance: 25 tests pass, strict app/test typecheck passes, audit clean,
+  - Acceptance: 26 tests pass, strict app/test typecheck passes, audit clean,
     exact publish dry-run unchanged, and five-axis review has no required issue.
   - Verify: all commands in the spec plus independent diff review.
   - Files: `specs/typescript-tests/REVIEW.md`, `SHIP.md`
