@@ -84,12 +84,13 @@ export function runInit(cwd = process.cwd()): void {
 
   const pkg = readPackageJson(packagePath);
   const { added, migrated } = ensureScripts(pkg);
-  writePackageJson(packagePath, pkg);
 
   if (added.length === 0 && migrated.length === 0) {
     console.log('✅ Scripts already present; no changes made.');
     return;
   }
+
+  writePackageJson(packagePath, pkg);
 
   if (added.length > 0) {
     console.log(`✅ Added npm scripts: ${added.join(', ')}`);

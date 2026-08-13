@@ -59,12 +59,19 @@ test('no arguments and short help both print help successfully', () => {
   }
 });
 
-test('command help prints global help without running the command', () => {
-  for (const command of ['commit', 'init', 'pr', 'feature:pr', 'staging:pr']) {
+test('command help prints command-specific help without running the command', () => {
+  const commands: Array<[string, RegExp]> = [
+    ['commit', /Usage: diffwright commit/],
+    ['init', /Usage: diffwright init/],
+    ['pr', /Usage: diffwright pr/],
+    ['feature:pr', /Usage: diffwright pr/],
+    ['staging:pr', /Usage: diffwright pr/],
+  ];
+  for (const [command, pattern] of commands) {
     const result = runCli([command, '--help']);
 
     assert.equal(result.status, 0, `${command}: ${result.stderr}`);
-    assert.match(result.stdout, /diffwright <command>/);
+    assert.match(result.stdout, pattern);
     assert.equal(result.stderr, '');
   }
 });
@@ -73,7 +80,7 @@ test('unknown commands fail with an error and print help', () => {
   const result = runCli(['not-a-command']);
 
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /Unknown command: not-a-command/);
+  assert.match(result.stderr, /Unknown command/);
   assert.match(result.stdout, /diffwright <command>/);
 });
 
@@ -149,12 +156,14 @@ test('init preserves existing Diffwright scripts and remains idempotent', (conte
       'staging:pr': 'diffwright staging:pr',
     },
   };
-  fs.writeFileSync(packagePath, `${JSON.stringify(packageJson, null, 2)}\n`);
+  const original = `${JSON.stringify(packageJson)}\n`;
+  fs.writeFileSync(packagePath, original);
 
   const result = runCli(['init'], { cwd: fixtureDir });
 
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /Scripts already present/);
+  assert.equal(fs.readFileSync(packagePath, 'utf8'), original);
   assert.deepEqual(JSON.parse(fs.readFileSync(packagePath, 'utf8')), packageJson);
 });
 

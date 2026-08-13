@@ -12,6 +12,7 @@ import {
   type CompleteChatInput,
   type ParsedCompletion,
 } from './transport';
+import { validateDoctorArguments } from './arguments';
 
 const DOCTOR_OUTPUT_LIMIT = 1024;
 
@@ -31,15 +32,8 @@ const defaultDependencies: DoctorDependencies = {
 };
 
 function parseDoctorArgs(argv: string[]): { live: boolean } {
-  let live = false;
-  for (const argument of argv) {
-    if (argument === '--live') {
-      live = true;
-    } else {
-      throw new Error(`Unknown doctor option: ${argument}`);
-    }
-  }
-  return { live };
+  validateDoctorArguments(argv);
+  return { live: argv.includes('--live') };
 }
 
 function printProfile(resolved: ResolvedProvider): void {

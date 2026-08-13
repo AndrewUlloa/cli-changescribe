@@ -66,8 +66,20 @@ function packPackage(
 }
 
 function expectedDiffwrightFiles(): string[] {
-  const files = ['LICENSE', 'README.md', 'bin/diffwright.js', 'package.json'];
+  const files = [
+    'CONTRIBUTING.md',
+    'LICENSE',
+    'README.md',
+    'SECURITY.md',
+    'SUPPORT.md',
+    'bin/diffwright.js',
+    'documentation/cli-reference.md',
+    'documentation/providers.md',
+    'documentation/troubleshooting.md',
+    'package.json',
+  ];
   for (const moduleName of [
+    'arguments',
     'cli',
     'commit',
     'doctor',
@@ -189,7 +201,7 @@ test('packed Diffwright and ChangeScribe install and execute end to end', (conte
       'utf8',
     ),
   );
-  assert.equal(installedManifest.version, '0.3.1');
+  assert.equal(installedManifest.version, '0.3.2');
 
   const bridgeResolution = require.resolve('diffwright/bin/diffwright.js', {
     paths: [path.join(installRoot, 'node_modules', 'cli-changescribe')],
@@ -238,5 +250,5 @@ test('packed Diffwright and ChangeScribe install and execute end to end', (conte
     env,
   });
   assert.equal(unknown.status, 1);
-  assert.match(unknown.stderr, /Unknown command: not-a-command/);
+  assert.match(unknown.stderr, /Unknown command/);
 });

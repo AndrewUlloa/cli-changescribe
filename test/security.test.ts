@@ -97,8 +97,27 @@ test('PR rejects option-like base refs before Git can execute an upload-pack hel
   );
 
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /invalid base branch/i);
+  assert.match(result.stderr, /--base requires a value/i);
   assert.equal(fs.existsSync(marker), false);
+});
+
+test('a mistyped commit dry-run flag fails before provider, commit, or push work', (context) => {
+  const directory = createRepository(context);
+  fs.appendFileSync(path.join(directory, 'README.md'), 'uncommitted change\n');
+  const head = git(directory, ['rev-parse', 'HEAD']).trim();
+  const status = git(directory, ['status', '--porcelain']);
+
+  const result = spawnSync(bin, ['commit', '--dry-rnu'], {
+    cwd: directory,
+    encoding: 'utf8',
+    env: { ...process.env, CEREBRAS_API_KEY: 'test-key' },
+  });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Unknown commit option/);
+  assert.equal(git(directory, ['rev-parse', 'HEAD']).trim(), head);
+  assert.equal(git(directory, ['status', '--porcelain']), status);
+  assert.doesNotMatch(result.stdout, /Generating commit message|Staging all changes/);
 });
 
 test('PR dry-run inspects a valid range without API calls or output writes', (context) => {
@@ -122,6 +141,32 @@ test('PR dry-run inspects a valid range without API calls or output writes', (co
   assert.match(result.stdout, /Model: gpt-oss-120b/);
   assert.equal(fs.existsSync(output), false);
   assert.equal(git(directory, ['rev-parse', 'HEAD']).trim(), headBefore);
+});
+
+test('invalid PR_SUMMARY_LIMIT fails instead of removing the commit cap', (context) => {
+  const directory = createRepository(context);
+  const output = path.join(directory, 'summary.md');
+
+  for (const limit of ['abc', '0', '-1', '999999999999999999999999999']) {
+    const result = spawnSync(
+      bin,
+      ['pr', '--dry-run', '--base', 'main', '--out', output],
+      {
+        cwd: directory,
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          CEREBRAS_API_KEY: 'test-key',
+          PR_SUMMARY_LIMIT: limit,
+        },
+      },
+    );
+
+    assert.equal(result.status, 1, limit);
+    assert.match(result.stderr, /PR_SUMMARY_LIMIT must be a positive safe integer/);
+    assert.equal(fs.existsSync(output), false);
+    assert.doesNotMatch(result.stdout, /Fetching base branch|Collecting/);
+  }
 });
 
 test('commit dry-run treats staged filenames as data and never commits', async (context) => {

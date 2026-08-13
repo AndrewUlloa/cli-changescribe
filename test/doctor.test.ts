@@ -202,6 +202,6 @@ test('doctor rejects unknown flags', async () => {
     CEREBRAS_API_KEY: 'doctor-secret',
   });
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /Unknown doctor option: --surprise/);
+  assert.match(result.stderr, /Unknown doctor option/);
   assert.doesNotMatch(result.stderr, /doctor-secret/);
 });

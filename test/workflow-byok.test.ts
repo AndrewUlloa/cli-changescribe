@@ -123,6 +123,48 @@ function customEnvironment(baseURL: string): NodeJS.ProcessEnv {
   };
 }
 
+function createFakeGh(
+  context: TestContext,
+  capturePath: string,
+): string {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'diffwright-gh-'));
+  context.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const executable = path.join(directory, 'gh');
+  fs.writeFileSync(
+    executable,
+    `#!/usr/bin/env node
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+if (args[0] === '--version') {
+  console.log('gh version fixture');
+  process.exit(0);
+}
+if (args[0] === 'pr' && args[1] === 'list') {
+  console.log(process.env.GH_EXISTING_PR === '1'
+    ? '[{"number":7,"title":"Existing","url":"https://github.com/example/repo/pull/7"}]'
+    : '[]');
+  process.exit(0);
+}
+if (args[0] === 'pr' && (args[1] === 'create' || args[1] === 'edit')) {
+  if (args.includes('--issue')) {
+    console.error('unknown flag: --issue');
+    process.exit(2);
+  }
+  const bodyIndex = args.indexOf('--body-file');
+  const body = fs.readFileSync(args[bodyIndex + 1], 'utf8');
+  fs.writeFileSync(process.env.GH_CAPTURE_PATH, JSON.stringify({ args, body }));
+  console.log('https://github.com/example/repo/pull/1');
+  process.exit(0);
+}
+console.error('unexpected gh invocation: ' + args.join(' '));
+process.exit(2);
+`,
+    'utf8',
+  );
+  fs.chmodSync(executable, 0o755);
+  return directory;
+}
+
 test('commit workflow uses explicit custom provider through the shared transport', async (context) => {
   const directory = createRepository(context);
   fs.appendFileSync(
@@ -193,5 +235,124 @@ test('PR workflow uses explicit custom provider for every synthesis pass', async
   assert.doesNotMatch(
     fs.readFileSync(output, 'utf8'),
     /workflow-secret|ambient-secret/,
+  );
+});
+
+test('PR creation links an issue in the body without passing an unsupported gh flag', async (context) => {
+  const directory = createRepository(context);
+  fs.writeFileSync(
+    path.join(directory, 'package.json'),
+    JSON.stringify(
+      {
+        name: 'fixture',
+        private: true,
+        scripts: {
+          test: 'node -e "process.exit(0)"',
+          build: 'node -e "process.exit(0)"',
+        },
+      },
+      null,
+      2,
+    ),
+  );
+  git(directory, ['add', 'package.json']);
+  git(directory, ['commit', '--quiet', '-m', 'chore: add package scripts']);
+
+  const remote = fs.mkdtempSync(path.join(os.tmpdir(), 'diffwright-remote-'));
+  context.after(() => fs.rmSync(remote, { recursive: true, force: true }));
+  git(remote, ['init', '--quiet', '--bare']);
+  git(directory, ['remote', 'add', 'origin', remote]);
+  git(directory, ['push', '--quiet', '-u', 'origin', 'main']);
+  git(directory, ['switch', '--quiet', '-c', 'feature']);
+  fs.appendFileSync(path.join(directory, 'README.md'), 'issue-linked feature\n');
+  git(directory, ['add', 'README.md']);
+  git(directory, ['commit', '--quiet', '-m', 'feat: add linked feature']);
+
+  const output = path.join(directory, 'summary.md');
+  const capture = path.join(directory, 'gh-capture.json');
+  const fakeBin = createFakeGh(context, capture);
+  const server = await createCompletionServer(context);
+  const env = customEnvironment(server.baseURL);
+  env.PATH = `${fakeBin}${path.delimiter}${env.PATH ?? ''}`;
+  env.GH_CAPTURE_PATH = capture;
+
+  const result = await run(
+    directory,
+    [
+      'pr',
+      '--base',
+      'main',
+      '--out',
+      output,
+      '--issue',
+      '#123',
+      '--create-pr',
+      '--skip-format',
+    ],
+    env,
+  );
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const captured = JSON.parse(fs.readFileSync(capture, 'utf8')) as {
+    args: string[];
+    body: string;
+  };
+  assert.equal(captured.args.includes('--issue'), false);
+  assert.match(captured.body, /(?:^|\n)Closes #123(?:\n|$)/);
+  assert.match(
+    JSON.stringify(server.requests.map((request) => request.body)),
+    /Issue hint: #123/,
+  );
+});
+
+test('PR update links an issue in the body without passing an unsupported gh flag', async (context) => {
+  const directory = createRepository(context);
+  fs.writeFileSync(
+    path.join(directory, 'package.json'),
+    JSON.stringify(
+      {
+        name: 'fixture',
+        private: true,
+        scripts: {
+          test: 'node -e "process.exit(0)"',
+          build: 'node -e "process.exit(0)"',
+        },
+      },
+      null,
+      2,
+    ),
+  );
+  git(directory, ['add', 'package.json']);
+  git(directory, ['commit', '--quiet', '-m', 'chore: add package scripts']);
+  git(directory, ['switch', '--quiet', '-c', 'feature']);
+  fs.appendFileSync(path.join(directory, 'README.md'), 'updated feature\n');
+  git(directory, ['add', 'README.md']);
+  git(directory, ['commit', '--quiet', '-m', 'feat: update fixture feature']);
+
+  const capture = path.join(directory, 'gh-capture.json');
+  const fakeBin = createFakeGh(context, capture);
+  const server = await createCompletionServer(context);
+  const env = customEnvironment(server.baseURL);
+  env.PATH = `${fakeBin}${path.delimiter}${env.PATH ?? ''}`;
+  env.GH_CAPTURE_PATH = capture;
+  env.GH_EXISTING_PR = '1';
+
+  const result = await run(
+    directory,
+    ['pr', '--base', 'main', '--issue', '456', '--create-pr', '--skip-format'],
+    env,
+  );
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const captured = JSON.parse(fs.readFileSync(capture, 'utf8')) as {
+    args: string[];
+    body: string;
+  };
+  assert.deepEqual(captured.args.slice(0, 3), ['pr', 'edit', '7']);
+  assert.equal(captured.args.includes('--issue'), false);
+  assert.match(captured.body, /(?:^|\n)Closes #456(?:\n|$)/);
+  assert.match(
+    JSON.stringify(server.requests.map((request) => request.body)),
+    /Issue hint: #456/,
   );
 });

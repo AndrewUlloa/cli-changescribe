@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-type CliCall = ['commit' | 'pr', string[]] | ['init'];
+type CliCall = ['commit' | 'doctor' | 'pr', string[]] | ['init'];
 
 interface CliRunners {
   runCommit(args: string[]): Promise<void>;
+  runDoctor(args: string[]): Promise<void>;
   runInit(): Promise<void>;
   runPrSummary(args: string[]): Promise<void>;
 }
@@ -20,6 +21,9 @@ function recordingRunners(): { calls: CliCall[]; runners: CliRunners } {
     runners: {
       runCommit: async (args: string[]) => {
         calls.push(['commit', args]);
+      },
+      runDoctor: async (args: string[]) => {
+        calls.push(['doctor', args]);
       },
       runInit: async () => {
         calls.push(['init']);
@@ -94,4 +98,180 @@ test('help does not invoke a command runner', async () => {
 
   assert.equal(await runCli(['commit', '--help'], runners), 0);
   assert.deepEqual(calls, []);
+});
+
+test('each command exposes focused help with its real options and side effects', async () => {
+  const cases = [
+    {
+      invocation: ['commit', '--help'],
+      expected: [/Usage: diffwright commit/, /--dry-run/, /stages all changes/i],
+    },
+    {
+      invocation: ['pr', '--help'],
+      expected: [/Usage: diffwright pr/, /--create-pr/, /--issue <number>/],
+    },
+    {
+      invocation: ['doctor', '--help'],
+      expected: [/Usage: diffwright doctor/, /--live/, /one provider request/i],
+    },
+    {
+      invocation: ['init', '--help'],
+      expected: [/Usage: diffwright init/, /package\.json/, /accepts no options/i],
+    },
+  ];
+
+  for (const { invocation, expected } of cases) {
+    const { calls, runners } = recordingRunners();
+    const output: string[] = [];
+    const originalLog = console.log;
+    console.log = (message?: unknown) => output.push(String(message ?? ''));
+    try {
+      assert.equal(await runCli(invocation, runners), 0);
+    } finally {
+      console.log = originalLog;
+    }
+    assert.deepEqual(calls, []);
+    for (const pattern of expected) {
+      assert.match(output.join('\n'), pattern, invocation.join(' '));
+    }
+  }
+});
+
+test('global help links to the complete CLI reference', async () => {
+  const output: string[] = [];
+  const originalLog = console.log;
+  console.log = (message?: unknown) => output.push(String(message ?? ''));
+  try {
+    assert.equal(await runCli(['--help']), 0);
+  } finally {
+    console.log = originalLog;
+  }
+
+  assert.match(
+    output.join('\n'),
+    /github\.com\/AndrewUlloa\/diffwright\/blob\/main\/documentation\/cli-reference\.md/,
+  );
+});
+
+test('unknown commit, doctor, and init options fail before invoking a runner', async () => {
+  const { calls, runners } = recordingRunners();
+
+  assert.equal(await runCli(['commit', '--dry-rnu'], runners), 1);
+  assert.equal(await runCli(['commit', '--dry-run', 'extra'], runners), 1);
+  assert.equal(await runCli(['doctor', '--network'], runners), 1);
+  assert.equal(await runCli(['init', '--force'], runners), 1);
+
+  assert.deepEqual(calls, []);
+});
+
+test('argument errors redact shell credentials and normalize control characters', async () => {
+  const { calls, runners } = recordingRunners();
+  const secretName = 'OPENAI_API_KEY';
+  const originalSecret = process.env[secretName];
+  const secret = 'argument-secret';
+  const errors: string[] = [];
+  const originalError = console.error;
+  process.env[secretName] = secret;
+  console.error = (message?: unknown) => errors.push(String(message ?? ''));
+  try {
+    assert.equal(await runCli(['commit', `${secret}\nnext-line`], runners), 1);
+  } finally {
+    console.error = originalError;
+    if (originalSecret === undefined) {
+      delete process.env[secretName];
+    } else {
+      process.env[secretName] = originalSecret;
+    }
+  }
+
+  assert.deepEqual(calls, []);
+  assert.doesNotMatch(errors.join('\n'), new RegExp(secret));
+  assert.doesNotMatch(errors.join('\n'), /\nnext-line/);
+  assert.match(errors.join('\n'), /Unknown commit option/);
+});
+
+test('unknown commands never echo attacker-controlled command text', async () => {
+  const secret = 'unknown-command-secret';
+  const errors: string[] = [];
+  const originalError = console.error;
+  console.error = (message?: unknown) => errors.push(String(message ?? ''));
+  try {
+    assert.equal(await runCli([`${secret}\u001b[31m`]), 1);
+  } finally {
+    console.error = originalError;
+  }
+
+  assert.doesNotMatch(errors.join('\n'), new RegExp(secret));
+  assert.doesNotMatch(errors.join('\n'), /\u001b/);
+  assert.match(errors.join('\n'), /Unknown command/);
+});
+
+test('invalid PR options fail before invoking a runner', async () => {
+  const invalidInvocations = [
+    ['pr', '--base'],
+    ['pr', '--out', '--dry-run'],
+    ['pr', '--limit', '0'],
+    ['pr', '--limit', 'abc'],
+    ['pr', '--limit', '999999999999999999999999999999999999999'],
+    ['pr', '--mode', 'other'],
+    ['pr', '--issue', '#0'],
+    ['pr', '--issue', 'abc'],
+    ['pr', '--wat'],
+  ];
+
+  for (const invocation of invalidInvocations) {
+    const { calls, runners } = recordingRunners();
+    assert.equal(await runCli(invocation, runners), 1, invocation.join(' '));
+    assert.deepEqual(calls, [], invocation.join(' '));
+  }
+});
+
+test('valid doctor and PR options still reach their runners unchanged', async () => {
+  const { calls, runners } = recordingRunners();
+
+  assert.equal(await runCli(['doctor', '--live'], runners), 0);
+  assert.equal(
+    await runCli(
+      [
+        'pr',
+        '--base',
+        'develop',
+        '--out',
+        'summary.md',
+        '--limit',
+        '12',
+        '--issue',
+        '#34',
+        '--mode',
+        'feature',
+        '--dry-run',
+        '--create-pr',
+        '--skip-format',
+      ],
+      runners,
+    ),
+    0,
+  );
+
+  assert.deepEqual(calls, [
+    ['doctor', ['--live']],
+    [
+      'pr',
+      [
+        '--base',
+        'develop',
+        '--out',
+        'summary.md',
+        '--limit',
+        '12',
+        '--issue',
+        '#34',
+        '--mode',
+        'feature',
+        '--dry-run',
+        '--create-pr',
+        '--skip-format',
+      ],
+    ],
+  ]);
 });

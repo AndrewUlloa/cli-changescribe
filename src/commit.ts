@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
+import { validateCommitArguments } from './arguments';
 import {
   resolveProvider,
   type ResolveProviderOptions,
@@ -737,5 +738,6 @@ export async function runCommit(
   argv = process.argv.slice(2),
   dependencies: CommitDependencies = defaultDependencies,
 ): Promise<void> {
+  validateCommitArguments(argv);
   await generateCommitMessage(argv, dependencies);
 }

@@ -31,7 +31,16 @@ test('package defines a compiled TypeScript lifecycle', () => {
   );
   assert.equal(pkg.scripts.prepack, 'npm run build');
   assert.match(pkg.scripts.test, /npm run build/);
-  assert.deepEqual(pkg.files, ['bin', 'dist', 'README.md', 'LICENSE']);
+  assert.deepEqual(pkg.files, [
+    'bin',
+    'dist',
+    'documentation',
+    'README.md',
+    'SECURITY.md',
+    'SUPPORT.md',
+    'CONTRIBUTING.md',
+    'LICENSE',
+  ]);
   assert.equal(typeof pkg.devDependencies.typescript, 'string');
   assert.equal(typeof pkg.devDependencies['@types/node'], 'string');
 });
@@ -54,6 +63,7 @@ test('compiler contract is strict CommonJS for Node 18', () => {
 
 test('all application sources are TypeScript and compiled output exists', () => {
   const expectedModules = [
+    'arguments',
     'cli',
     'commit',
     'doctor',
