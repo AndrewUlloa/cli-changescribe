@@ -67,6 +67,23 @@ diffwright init [options]
 | `--credential-source <source>` | Use `existing` configuration or select `file` storage. In deterministic mode the file credential must already exist. This is a source selector, never a credential value. |
 | `--live` | After offline doctor succeeds, make one provider request. Incompatible with `--dry-run`. |
 
+### Package runners
+
+Launch guided setup with the package runner already used by the project:
+
+| Package runner | Command |
+|---|---|
+| pnpm | `pnpm dlx diffwright@latest init` |
+| npm | `npx diffwright@latest init` |
+| Yarn 2+ | `yarn dlx diffwright@latest init` |
+| Bun | `bunx diffwright@latest init` |
+
+Yarn Classic does not include `yarn dlx`; use the `npx` launcher there. The
+launcher and the detected project package manager are separate: after startup,
+Diffwright reads the `packageManager` declaration and lockfile and uses the
+detected npm, pnpm, Yarn, or Bun command for the exact local pin and project
+scripts. Add `--dry-run` to any launcher command for a redacted project preview.
+
 ### Init modes
 
 **Guided TTY.** With no deterministic configuration option and with stdin and stdout
@@ -96,8 +113,9 @@ setup. No option accepts a credential value.
 **Preview.** `--dry-run` may collect interactive answers and perform in-memory
 validation, but performs no project dependency install, target-project file
 write, or live provider request. `--live` and `--dry-run` cannot be combined.
-When the command is launched with `npx`, npm may still resolve or download the
-CLI into its own cache before Diffwright receives `--dry-run`.
+When the command is launched with `pnpm dlx`, `npx`, `yarn dlx`, or `bunx`, the
+runner may still resolve or download the CLI into its own cache or temporary
+environment before Diffwright receives `--dry-run`.
 
 ### Init plan and side effects
 

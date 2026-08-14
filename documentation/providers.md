@@ -7,11 +7,17 @@ documentation.
 
 ## Guided provider setup
 
-Run the guided init from the project that will use Diffwright:
+Run guided init from the project that will use Diffwright:
 
-```bash
-npx diffwright@latest init
-```
+| Package runner | Command |
+|---|---|
+| pnpm | `pnpm dlx diffwright@latest init` |
+| npm | `npx diffwright@latest init` |
+| Yarn 2+ | `yarn dlx diffwright@latest init` |
+| Bun | `bunx diffwright@latest init` |
+
+For Yarn Classic, use the `npx` launcher; the wizard still detects and uses
+Yarn for the project's local installation and scripts.
 
 In an interactive TTY, the wizard asks for a provider, its exact model ID, and
 where the credential already comes from or should be stored. Existing resolved

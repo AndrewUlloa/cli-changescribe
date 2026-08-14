@@ -4,6 +4,18 @@
 > Status: published
 > Prepared: 2026-08-14
 
+## Package-runner follow-up
+
+The 0.4.1 patch presents guided setup consistently for pnpm (`pnpm dlx`), npm
+(`npx`), Yarn 2+ (`yarn dlx`), and Bun (`bunx`). The launcher is explicitly
+separated from the project manager that Diffwright detects for its exact local
+pin, lockfile, and generated scripts. Yarn Classic users launch with `npx` and
+still receive Yarn-managed project setup. Published documentation tests require
+all four commands so the quick start cannot regress to an npm-only surface.
+Diffwright 0.4.1 is published under the npm `latest` tag. Clean public-registry
+projects ran `init --dry-run` through all four launchers, detected the matching
+project manager, and preserved their manifests byte-for-byte.
+
 ## Release summary
 
 Diffwright now provides a shadcn-style `npx diffwright@latest init` walkthrough

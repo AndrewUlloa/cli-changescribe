@@ -5,6 +5,12 @@ import test from 'node:test';
 
 const repoRoot = path.resolve(__dirname, '..');
 const readme = fs.readFileSync(path.join(repoRoot, 'README.md'), 'utf8');
+const packageRunnerCommands = [
+  'pnpm dlx diffwright@latest init',
+  'npx diffwright@latest init',
+  'yarn dlx diffwright@latest init',
+  'bunx diffwright@latest init',
+] as const;
 
 function repositoryFile(file: string): string {
   return fs.readFileSync(path.join(repoRoot, file), 'utf8');
@@ -21,13 +27,14 @@ test('published README leads with product identity and a one-minute quick start'
   assert.match(firstSection, /diffwright doctor/);
   assert.match(firstSection, /diffwright commit --dry-run/);
   assert.match(firstSection, /diffwright pr --dry-run/);
+  for (const command of packageRunnerCommands) {
+    assert.ok(firstSection.includes(command), command);
+  }
 });
 
 test('published README leads setup with the guided init contract', () => {
-  const guidedCommand = 'npx diffwright@latest init';
-  const firstCommand = readme.match(/```bash\n([^\n]+)/)?.[1];
-
-  assert.equal(firstCommand, guidedCommand);
+  assert.match(readme, /package runner.*packageManager.*lockfile/is);
+  assert.match(readme, /Yarn Classic.*npx.*yarn\.lock/is);
   assert.match(
     readme,
     /interactive.*provider.*exact model.*credential.*branch.*gate.*Claude.*Codex/is,
@@ -41,6 +48,21 @@ test('published README leads setup with the guided init contract', () => {
   assert.match(readme, /managed.*CLAUDE\.md.*AGENTS\.md/is);
   assert.match(readme, /offline doctor.*after.*setup/is);
   assert.match(readme, /live.*one.*provider request/is);
+});
+
+test('published setup docs advertise every supported package runner', () => {
+  for (const file of [
+    'README.md',
+    'documentation/cli-reference.md',
+    'documentation/providers.md',
+    'documentation/troubleshooting.md',
+  ]) {
+    const contents = repositoryFile(file);
+    for (const command of packageRunnerCommands) {
+      assert.ok(contents.includes(command), `${file}: ${command}`);
+    }
+    assert.match(contents, /Yarn Classic.*npx/is, file);
+  }
 });
 
 test('published README preserves provider, command, and security reference material', () => {

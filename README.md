@@ -16,15 +16,24 @@ Gateway, Cerebras, Groq, Ollama, or any compatible endpoint.</p>
 
 [Quick start](#quick-start) · [Commands](#commands) · [Providers](#providers) · [Security](#security-and-privacy) · [Documentation](#documentation)
 
-```bash
-npx diffwright@latest init
-```
+Run guided setup with the package runner already used by your project:
+
+| Package runner | Command |
+|---|---|
+| pnpm | `pnpm dlx diffwright@latest init` |
+| npm | `npx diffwright@latest init` |
+| Yarn 2+ | `yarn dlx diffwright@latest init` |
+| Bun | `bunx diffwright@latest init` |
+
+Yarn Classic does not provide `yarn dlx`. Launch the wizard with `npx` in a
+Yarn Classic project; Diffwright still detects `yarn.lock` and uses Yarn for
+the exact local installation and generated scripts.
 
 ## Choose your workflow
 
 | You want to… | Preview or inspect | Run it |
 |---|---|---|
-| Configure a project | `npx diffwright@latest init --dry-run` | `npx diffwright@latest init` |
+| Configure a project | Use the matching `init --dry-run` command in [Quick start](#quick-start) | Use the matching guided setup command in [Quick start](#quick-start) |
 | Write a Conventional Commit | `diffwright commit --dry-run` | `diffwright commit` |
 | Summarize a branch for a PR | `diffwright pr --dry-run` | `diffwright pr` |
 | Create or update the GitHub PR | — | `diffwright pr --create-pr` |
@@ -51,9 +60,17 @@ Diffwright in automation.
 
 From the project you want to configure:
 
-```bash
-npx diffwright@latest init
-```
+| Package runner | Preview without project writes | Guided setup |
+|---|---|---|
+| pnpm | `pnpm dlx diffwright@latest init --dry-run` | `pnpm dlx diffwright@latest init` |
+| npm | `npx diffwright@latest init --dry-run` | `npx diffwright@latest init` |
+| Yarn 2+ | `yarn dlx diffwright@latest init --dry-run` | `yarn dlx diffwright@latest init` |
+| Bun | `bunx diffwright@latest init --dry-run` | `bunx diffwright@latest init` |
+
+These commands only choose the temporary package runner. The wizard separately
+detects the target project's `packageManager` declaration and lockfile, then
+uses npm, pnpm, Yarn, or Bun for the permanent exact-version development
+dependency, lockfile update, and generated project commands.
 
 When stdin and stdout are an interactive TTY, `init` walks through the provider,
 exact model, credential source, feature-branch base, existing lint/typecheck/test/
@@ -132,9 +149,10 @@ source flags select deterministic setup without putting any credential in argv.
 See the [CLI reference](https://github.com/AndrewUlloa/diffwright/blob/main/documentation/cli-reference.md)
 for every combination.
 
-When launched as `npx diffwright@latest`, npm may first download Diffwright to
-its own cache. `--dry-run` prevents a dependency install or file write in the
-target project; it cannot prevent `npx` from resolving the command itself.
+When launched through `pnpm dlx`, `npx`, `yarn dlx`, or `bunx`, the package
+runner may first download Diffwright to its own cache or temporary environment.
+`--dry-run` prevents a dependency install or file write in the target project;
+it cannot prevent the selected runner from resolving the CLI itself.
 
 Global installation remains available for personal use, but project scripts
 created by guided setup use the exact local pin instead of a global executable:

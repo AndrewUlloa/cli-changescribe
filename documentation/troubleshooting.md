@@ -19,9 +19,19 @@ no-argument non-TTY invocation intentionally uses the legacy script-only path.
 `--yes` and the provider/model/base/agents/credential-source options are also
 deterministic and never prompt.
 
-Use `npx diffwright@latest init` in a terminal for the walkthrough. Use
-`--dry-run` when you want the same redacted plan without an install, write, or
-live provider request. Declining the final confirmation or pressing Ctrl-C
+Use one of these commands in a terminal for the walkthrough:
+
+| Package runner | Command |
+|---|---|
+| pnpm | `pnpm dlx diffwright@latest init` |
+| npm | `npx diffwright@latest init` |
+| Yarn 2+ | `yarn dlx diffwright@latest init` |
+| Bun | `bunx diffwright@latest init` |
+
+Yarn Classic does not include `yarn dlx`; use the `npx` launcher and Diffwright
+will still detect `yarn.lock` for the local installation. Add `--dry-run` to
+any launcher when you want the same redacted plan without an install, write,
+or live provider request. Declining the final confirmation or pressing Ctrl-C
 before it produces no writes or provider calls.
 
 ### Local installation failed
@@ -30,8 +40,8 @@ Guided setup installs the exact running Diffwright version with the detected
 package manager and disables install lifecycle scripts. If installation fails,
 Diffwright reports that phase separately and never falls back to a global
 executable. Check the package-manager/registry error and any `package.json` or
-lockfile change left by the package manager, then rerun
-`npx diffwright@latest init`; setup transforms are idempotent.
+lockfile change left by the package manager, then rerun the same `pnpm dlx`,
+`npx`, `yarn dlx`, or `bunx` init command; setup transforms are idempotent.
 
 Conflicting lockfiles or a `packageManager` declaration that disagrees with the
 lockfile must be resolved before retrying. For a local pin check, use the
