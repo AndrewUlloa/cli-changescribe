@@ -165,6 +165,163 @@ process.exit(2);
   return directory;
 }
 
+type PackageManagerName = 'npm' | 'pnpm' | 'yarn' | 'bun';
+
+interface PackageManagerInvocation {
+  args: string[];
+  leakedCredential: string | null;
+}
+
+function createFakePackageManager(
+  context: TestContext,
+  manager: PackageManagerName,
+): string {
+  const directory = fs.mkdtempSync(
+    path.join(os.tmpdir(), 'diffwright-manager-bin-'),
+  );
+  context.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const executable = path.join(directory, manager);
+  fs.writeFileSync(
+    executable,
+    `#!/usr/bin/env node
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+const script = args[0] === 'test' ? 'test' : (args[0] === 'run' ? args[1] : '');
+fs.appendFileSync(process.env.PACKAGE_MANAGER_CAPTURE_PATH, JSON.stringify({
+  args,
+  leakedCredential: process.env.DIFFWRIGHT_API_KEY || null,
+}) + '\\n');
+if (script === process.env.PACKAGE_MANAGER_FAIL_SCRIPT) process.exit(17);
+process.exit(0);
+`,
+    'utf8',
+  );
+  fs.chmodSync(executable, 0o755);
+  return directory;
+}
+
+function addPackageManagerFixture(
+  directory: string,
+  manager: PackageManagerName,
+): void {
+  fs.writeFileSync(
+    path.join(directory, 'package.json'),
+    `${JSON.stringify(
+      {
+        name: 'fixture',
+        private: true,
+        packageManager: `${manager}@1.0.0`,
+        scripts: {
+          format: 'fixture-format',
+          test: 'fixture-test',
+          build: 'fixture-build',
+        },
+      },
+      null,
+      2,
+    )}\n`,
+  );
+  git(directory, ['add', 'package.json']);
+  git(directory, ['commit', '--quiet', '-m', 'chore: add package scripts']);
+  git(directory, ['switch', '--quiet', '-c', 'feature']);
+  fs.appendFileSync(path.join(directory, 'README.md'), `${manager} feature\n`);
+  git(directory, ['add', 'README.md']);
+  git(directory, ['commit', '--quiet', '-m', 'feat: add manager fixture']);
+}
+
+function readPackageManagerInvocations(
+  capturePath: string,
+): PackageManagerInvocation[] {
+  return fs
+    .readFileSync(capturePath, 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line) as PackageManagerInvocation);
+}
+
+for (const manager of ['npm', 'pnpm', 'yarn', 'bun'] as const) {
+  test(
+    `PR project gates use fixed ${manager} argv and a sanitized environment`,
+    async (context) => {
+      const directory = createRepository(context);
+      addPackageManagerFixture(directory, manager);
+      const managerCapture = path.join(directory, 'manager-capture.jsonl');
+      const ghCapture = path.join(directory, 'gh-capture.json');
+      const fakeManagerBin = createFakePackageManager(context, manager);
+      const fakeGhBin = createFakeGh(context, ghCapture);
+      const env = customEnvironment('http://127.0.0.1:9/v1');
+      env.PATH = [fakeManagerBin, fakeGhBin, env.PATH ?? ''].join(
+        path.delimiter,
+      );
+      env.PACKAGE_MANAGER_CAPTURE_PATH = managerCapture;
+      env.PACKAGE_MANAGER_FAIL_SCRIPT = 'build';
+      env.GH_CAPTURE_PATH = ghCapture;
+      env.GH_EXISTING_PR = '1';
+
+      const result = await run(
+        directory,
+        ['pr', '--base', 'main', '--out', 'summary.md', '--create-pr'],
+        env,
+      );
+
+      assert.equal(result.status, 1, result.stderr || result.stdout);
+      const invocations = readPackageManagerInvocations(managerCapture);
+      assert.deepEqual(
+        invocations.map(({ args }) => args),
+        manager === 'npm'
+          ? [['run', 'format'], ['test'], ['run', 'build']]
+          : [['run', 'format'], ['run', 'test'], ['run', 'build']],
+      );
+      assert.equal(
+        invocations.every(({ leakedCredential }) => leakedCredential === null),
+        true,
+      );
+      const testDisplay =
+        manager === 'npm' ? 'npm test' : `${manager} run test`;
+      assert.match(
+        result.stdout,
+        new RegExp(`Running ${testDisplay} before PR creation`),
+      );
+      assert.match(
+        result.stderr,
+        new RegExp(`${manager} run build failed; fix build errors first`),
+      );
+    },
+  );
+}
+
+test(
+  'npm gate failures preserve the established command and error message',
+  async (context) => {
+    const directory = createRepository(context);
+    addPackageManagerFixture(directory, 'npm');
+    const managerCapture = path.join(directory, 'manager-capture.jsonl');
+    const ghCapture = path.join(directory, 'gh-capture.json');
+    const fakeManagerBin = createFakePackageManager(context, 'npm');
+    const fakeGhBin = createFakeGh(context, ghCapture);
+    const env = customEnvironment('http://127.0.0.1:9/v1');
+    env.PATH = [fakeManagerBin, fakeGhBin, env.PATH ?? ''].join(path.delimiter);
+    env.PACKAGE_MANAGER_CAPTURE_PATH = managerCapture;
+    env.PACKAGE_MANAGER_FAIL_SCRIPT = 'test';
+    env.GH_CAPTURE_PATH = ghCapture;
+    env.GH_EXISTING_PR = '1';
+
+    const result = await run(
+      directory,
+      ['pr', '--base', 'main', '--create-pr'],
+      env,
+    );
+
+    assert.equal(result.status, 1);
+    assert.match(result.stdout, /Running npm test before PR creation/);
+    assert.match(result.stderr, /npm test failed; fix test failures first/);
+    assert.deepEqual(
+      readPackageManagerInvocations(managerCapture).map(({ args }) => args),
+      [['run', 'format'], ['test']],
+    );
+  },
+);
+
 test('commit workflow uses explicit custom provider through the shared transport', async (context) => {
   const directory = createRepository(context);
   fs.appendFileSync(

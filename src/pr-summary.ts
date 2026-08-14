@@ -7,6 +7,12 @@ import {
   parsePositiveSafeInteger,
   validatePrArguments,
 } from './arguments';
+import {
+  buildRunScriptCommand,
+  detectPackageManager,
+  type PackageCommand,
+  type PackageManagerName,
+} from './package-manager';
 import { resolveProvider, type ResolvedProvider } from './provider';
 import {
   knownSecretValues,
@@ -620,22 +626,63 @@ function checkExistingPr(base: string, head: string): ExistingPr | null {
   }
 }
 
-function hasNpmScript(scriptName: string, cwd = process.cwd()): boolean {
+function readProjectPackage(cwd = process.cwd()): object | null {
   try {
     const packagePath = path.join(cwd, 'package.json');
     const raw = fs.readFileSync(packagePath, 'utf8');
     const parsed: unknown = JSON.parse(raw);
     if (typeof parsed !== 'object' || parsed === null) {
-      return false;
+      return null;
     }
-    const scripts: unknown = Reflect.get(parsed, 'scripts');
-    return Boolean(
-      typeof scripts === 'object' &&
-        scripts !== null &&
-        Reflect.get(scripts, scriptName),
-    );
+    return parsed;
   } catch {
+    return null;
+  }
+}
+
+function hasPackageScript(
+  projectPackage: object | null,
+  scriptName: string,
+): boolean {
+  if (projectPackage === null) {
     return false;
+  }
+  const scripts: unknown = Reflect.get(projectPackage, 'scripts');
+  return Boolean(
+    typeof scripts === 'object' &&
+      scripts !== null &&
+      Reflect.get(scripts, scriptName),
+  );
+}
+
+function projectGateCommand(
+  manager: PackageManagerName,
+  scriptName: string,
+): PackageCommand {
+  if (manager === 'npm' && scriptName === 'test') {
+    return Object.freeze({
+      file: 'npm',
+      args: Object.freeze(['test']),
+      display: 'npm test',
+    });
+  }
+  return buildRunScriptCommand(manager, scriptName);
+}
+
+function runProjectGate(
+  manager: PackageManagerName,
+  scriptName: string,
+  failureGuidance: string,
+): void {
+  const command = projectGateCommand(manager, scriptName);
+  step(`Running ${command.display} before PR creation...`);
+  try {
+    execFileSync(command.file, command.args, {
+      encoding: 'utf8',
+      stdio: 'inherit',
+    });
+  } catch (_error) {
+    throw new Error(`${command.display} failed; ${failureGuidance}`);
   }
 }
 
@@ -947,38 +994,26 @@ async function main(argv: string[]): Promise<void> {
 
   // Safety checks before creating PR
   if (args.createPr) {
+    const projectPackage = readProjectPackage();
+    const manager = detectPackageManager(
+      process.cwd(),
+      projectPackage === null
+        ? undefined
+        : Reflect.get(projectPackage, 'packageManager'),
+    );
+
     if (args.skipFormat) {
       warn('Skipping format step (flagged)');
-    } else if (!hasNpmScript('format')) {
-      warn('Skipping format step (no npm script named "format")');
+    } else if (!hasPackageScript(projectPackage, 'format')) {
+      const scriptKind =
+        manager === 'npm' ? 'npm script' : 'package.json script';
+      warn(`Skipping format step (no ${scriptKind} named "format")`);
     } else {
-      step('Running npm run format before PR creation...');
-      try {
-        execFileSync('npm', ['run', 'format'], {
-          encoding: 'utf8',
-          stdio: 'inherit',
-        });
-      } catch (_error) {
-        throw new Error('npm run format failed; fix formatting errors first.');
-      }
+      runProjectGate(manager, 'format', 'fix formatting errors first.');
     }
 
-    step('Running npm test before PR creation...');
-    try {
-      execFileSync('npm', ['test'], { encoding: 'utf8', stdio: 'inherit' });
-    } catch (_error) {
-      throw new Error('npm test failed; fix test failures first.');
-    }
-
-    step('Running npm run build before PR creation...');
-    try {
-      execFileSync('npm', ['run', 'build'], {
-        encoding: 'utf8',
-        stdio: 'inherit',
-      });
-    } catch (_error) {
-      throw new Error('npm run build failed; fix build errors first.');
-    }
+    runProjectGate(manager, 'test', 'fix test failures first.');
+    runProjectGate(manager, 'build', 'fix build errors first.');
 
     if (checkUncommittedChanges()) {
       throw new Error(

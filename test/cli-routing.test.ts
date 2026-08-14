@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-type CliCall = ['commit' | 'doctor' | 'pr', string[]] | ['init'];
+type CliCall = ['commit' | 'doctor' | 'init' | 'pr', string[]];
 
 interface CliRunners {
   runCommit(args: string[]): Promise<void>;
   runDoctor(args: string[]): Promise<void>;
-  runInit(): Promise<void>;
+  runInit(args: string[]): Promise<void>;
   runPrSummary(args: string[]): Promise<void>;
 }
 
@@ -25,8 +25,8 @@ function recordingRunners(): { calls: CliCall[]; runners: CliRunners } {
       runDoctor: async (args: string[]) => {
         calls.push(['doctor', args]);
       },
-      runInit: async () => {
-        calls.push(['init']);
+      runInit: async (args: string[]) => {
+        calls.push(['init', args]);
       },
       runPrSummary: async (args: string[]) => {
         calls.push(['pr', args]);
@@ -45,7 +45,7 @@ test('CLI routes primary commands and the PR alias', async () => {
 
   assert.deepEqual(calls, [
     ['commit', ['--dry-run']],
-    ['init'],
+    ['init', []],
     ['pr', ['--base', 'develop']],
     ['pr', ['--dry-run']],
   ]);
@@ -116,7 +116,16 @@ test('each command exposes focused help with its real options and side effects',
     },
     {
       invocation: ['init', '--help'],
-      expected: [/Usage: diffwright init/, /package\.json/, /accepts no options/i],
+      expected: [
+        /Usage: diffwright init/,
+        /interactive TTY/i,
+        /headless/i,
+        /--provider <id>/,
+        /install.*Diffwright/i,
+        /write.*package\.json/i,
+        /offline doctor/i,
+        /--live.*provider request/i,
+      ],
     },
   ];
 
@@ -162,6 +171,103 @@ test('unknown commit, doctor, and init options fail before invoking a runner', a
   assert.equal(await runCli(['init', '--force'], runners), 1);
 
   assert.deepEqual(calls, []);
+});
+
+test('valid init options reach the runner unchanged', async () => {
+  const { calls, runners } = recordingRunners();
+  const args = [
+    '--yes',
+    '--provider',
+    'openrouter',
+    '--model',
+    'anthropic/claude-sonnet-4',
+    '--base',
+    'develop',
+    '--agents',
+    'codex,claude',
+    '--credential-source',
+    'file',
+    '--live',
+  ];
+
+  assert.equal(await runCli(['init', ...args], runners), 0);
+  assert.deepEqual(calls, [['init', args]]);
+});
+
+test('init accepts every supported provider id', async () => {
+  for (const provider of [
+    'openai',
+    'anthropic',
+    'google',
+    'xai',
+    'deepseek',
+    'openrouter',
+    'vercel',
+    'cerebras',
+    'groq',
+    'ollama',
+    'custom',
+  ]) {
+    const { calls, runners } = recordingRunners();
+    assert.equal(await runCli(['init', '--provider', provider], runners), 0);
+    assert.deepEqual(calls, [['init', ['--provider', provider]]]);
+  }
+});
+
+test('init accepts each documented agent and credential-source selection', async () => {
+  for (const agents of [
+    'claude',
+    'codex',
+    'claude,codex',
+    'codex,claude',
+    'none',
+  ]) {
+    for (const source of ['existing', 'file']) {
+      const { calls, runners } = recordingRunners();
+      const args = [
+        '--dry-run',
+        '--agents',
+        agents,
+        '--credential-source',
+        source,
+      ];
+      assert.equal(await runCli(['init', ...args], runners), 0);
+      assert.deepEqual(calls, [['init', args]]);
+    }
+  }
+});
+
+test('invalid init values fail before invoking the runner', async () => {
+  const invalidInvocations = [
+    ['init', '--provider'],
+    ['init', '--provider', '--yes'],
+    ['init', '--provider', 'mystery'],
+    ['init', '--model'],
+    ['init', '--model', '   '],
+    ['init', '--base'],
+    ['init', '--base', '--yes'],
+    ['init', '--base', 'feature branch'],
+    ['init', '--base', 'main\nnext'],
+    ['init', '--agents'],
+    ['init', '--agents', 'claude,none'],
+    ['init', '--agents', 'copilot'],
+    ['init', '--credential-source'],
+    ['init', '--credential-source', 'shell'],
+    ['init', '--provider', 'openai', '--provider', 'groq'],
+    ['init', '--model', 'model-a', '--model', 'model-b'],
+    ['init', '--base', 'main', '--base', 'staging'],
+    ['init', '--agents', 'claude', '--agents', 'codex'],
+    ['init', '--credential-source', 'existing', '--credential-source', 'file'],
+    ['init', '--live', '--dry-run'],
+    ['init', '--dry-run', '--live'],
+    ['init', '--wat'],
+  ];
+
+  for (const invocation of invalidInvocations) {
+    const { calls, runners } = recordingRunners();
+    assert.equal(await runCli(invocation, runners), 1, invocation.join(' '));
+    assert.deepEqual(calls, [], invocation.join(' '));
+  }
 });
 
 test('argument errors redact shell credentials and normalize control characters', async () => {
