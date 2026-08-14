@@ -14,6 +14,12 @@ const packageRunnerCommands = [
 const packageRunnerPreviewCommands = packageRunnerCommands.map(
   (command) => `${command} --dry-run`,
 );
+const readmeBadgeUrls = [
+  'https://img.shields.io/npm/v/diffwright?style=flat-square',
+  'https://img.shields.io/npm/dw/diffwright?style=flat-square',
+  'https://img.shields.io/github/stars/AndrewUlloa/diffwright?style=flat-square',
+  'https://img.shields.io/npm/l/diffwright?style=flat-square',
+] as const;
 
 function repositoryFile(file: string): string {
   return fs.readFileSync(path.join(repoRoot, file), 'utf8');
@@ -30,6 +36,10 @@ test('published README leads with product identity and a one-minute quick start'
   assert.match(firstSection, /diffwright doctor/);
   assert.match(firstSection, /diffwright commit --dry-run/);
   assert.match(firstSection, /diffwright pr --dry-run/);
+  for (const badgeUrl of readmeBadgeUrls) {
+    assert.ok(firstSection.includes(badgeUrl), badgeUrl);
+  }
+  assert.doesNotMatch(firstSection, /shieldcn\.dev/);
   for (const command of packageRunnerCommands) {
     assert.ok(firstSection.includes(command), command);
   }
