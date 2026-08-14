@@ -7,10 +7,10 @@
 <p>Bring OpenAI, Anthropic, Gemini, xAI, DeepSeek, OpenRouter, Vercel AI<br>
 Gateway, Cerebras, Groq, Ollama, or any compatible endpoint.</p>
 
-<a href="https://www.npmjs.com/package/diffwright"><img alt="npm version" src="https://shieldcn.dev/npm/diffwright.svg?variant=outline"></a>
-<a href="https://www.npmjs.com/package/diffwright"><img alt="npm downloads" src="https://shieldcn.dev/npm/dw/diffwright.svg?variant=outline"></a>
-<a href="https://github.com/AndrewUlloa/diffwright"><img alt="GitHub stars" src="https://shieldcn.dev/github/stars/AndrewUlloa/diffwright.svg?variant=outline"></a>
-<a href="https://github.com/AndrewUlloa/diffwright/blob/main/LICENSE"><img alt="MIT license" src="https://shieldcn.dev/npm/license/diffwright.svg?variant=outline"></a>
+<a href="https://www.npmjs.com/package/diffwright"><img alt="npm version" src="https://img.shields.io/npm/v/diffwright?style=flat-square"></a>
+<a href="https://www.npmjs.com/package/diffwright"><img alt="npm downloads" src="https://img.shields.io/npm/dw/diffwright?style=flat-square"></a>
+<a href="https://github.com/AndrewUlloa/diffwright/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/AndrewUlloa/diffwright?style=flat-square"></a>
+<a href="https://github.com/AndrewUlloa/diffwright/blob/main/LICENSE"><img alt="MIT license" src="https://img.shields.io/npm/l/diffwright?style=flat-square"></a>
 
 </div>
 
