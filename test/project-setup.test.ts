@@ -249,6 +249,24 @@ test('builds explicit staging and self-hosted scripts', () => {
   );
 });
 
+test('does not generate a release script when staging exists but is not selected', () => {
+  const plan = setup.buildScriptPlan({
+    manifest: {
+      scripts: {
+        'staging:pr': 'diffwright staging:pr',
+      },
+    },
+    manager: 'npm',
+    baseBranch: 'main',
+    hasStaging: true,
+    selectedGates: [],
+    selfHosted: false,
+  });
+
+  assert.equal(plan.effective.stagingPr, null);
+  assert.equal('staging:pr' in plan.scripts, false);
+});
+
 test('targets the detected release branch in a staging topology', () => {
   const plan = setup.buildScriptPlan({
     manifest: { scripts: {} },

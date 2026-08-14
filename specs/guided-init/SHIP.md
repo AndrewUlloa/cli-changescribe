@@ -16,13 +16,16 @@ Diffwright 0.4.1 is published under the npm `latest` tag. Clean public-registry
 projects ran `init --dry-run` through all four launchers, detected the matching
 project manager, and preserved their manifests byte-for-byte.
 
-Diffwright 0.4.2 is also published under the npm `latest` tag. This follow-up
+Diffwright 0.4.2 was also published under the npm `latest` tag. This follow-up
 hardens Diffwright's own PR synthesis after the release PR exposed ungrounded
 CLI/behavior claims and a SHA-prefixed generated title. Pass 2 and pass 3 now
 require direct evidence for options, behavior, tests, risks, and migrations; the
 PR template supplies a distinct `Overall:` branch summary for title derivation.
 The workflow transport and captured GitHub arguments have focused regression
-coverage, and the public executable reports version 0.4.2.
+coverage, and the public executable reports version 0.4.2. The final 0.4.3
+patch adds a defense-in-depth staging-topology guard and complete preview-command
+coverage for every documented launcher. Diffwright 0.4.3 is published under the
+npm `latest` tag after all 177 tests passed.
 
 ## Release summary
 
@@ -43,15 +46,17 @@ pull requests through `npm run commit` and `npm run feature:pr`. Root
    range after the main package was live.
 3. Installed both public packages in a clean npm project and verified the
    bridge deduplicated to `diffwright@0.4.0`.
-4. Ran the public executable version checks and a zero-write guided-init dry
-   run with a keyless Ollama profile.
-5. Smoke one credentialed hosted provider with offline doctor first and one
-   explicitly approved live doctor request.
-6. Continue monitoring the ChangeScribe bridge and legacy non-TTY init path.
+4. Published 0.4.1 and ran zero-write guided-init dry runs through pnpm, npm,
+   Yarn, and Bun launchers in matching clean projects.
+5. Published 0.4.2, verified the public executable, and exercised the hosted
+   Groq provider through Diffwright's enforced commit and PR workflows.
+6. Published 0.4.3 after the final review fixes; repeat the public executable
+   check against the registry.
+7. Continue monitoring the ChangeScribe bridge and legacy non-TTY init path.
 
-Registry publication and the clean-install smoke are complete. A hosted
-provider live request remains an operational follow-up because no provider
-credential was available in the release shell.
+Registry publication, clean-install smoke, and a hosted provider workflow are
+complete. A separately consented `doctor --live` request remains optional and
+is not required for package publication.
 
 ## Rollback
 
@@ -72,13 +77,13 @@ credential was available in the release shell.
 - All gates listed in `REVIEW.md` pass on the final implementation snapshot.
 - The CI contract covers Node 18, 20, and 22; the local final run used the
   workspace's current Node runtime.
-- The release candidate is versioned as `diffwright@0.4.0`. Its first publish
-  dry run caught and prevented a stale ChangeScribe bridge resolution; the
-  bridge is now versioned as `cli-changescribe@0.2.4` with a compatible
-  pre-1.0 Diffwright range.
-- Final publication reran the complete 175-test suite successfully. Registry
-  checks confirmed `latest` points to Diffwright 0.4.0 and the compatibility
-  bridge cleanly resolves that exact public version.
+- The release lineage began at `diffwright@0.4.0`. Its first publish dry run
+  caught and prevented a stale ChangeScribe bridge resolution; the bridge is
+  versioned as `cli-changescribe@0.2.4` with a compatible pre-1.0 Diffwright
+  range.
+- The 0.4.3 publication reran the complete 177-test suite successfully.
+  Registry and public-executable checks confirm the npm `latest` tag and CLI
+  version for each final release candidate.
 - Package-manager installs intentionally disable lifecycle scripts. Generated
   npm/pnpm/Bun workflows use an explicit local file path; Yarn uses a
   delimiter-safe local resolver.

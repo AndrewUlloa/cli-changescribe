@@ -21,12 +21,12 @@ deterministic and never prompt.
 
 Use one of these commands in a terminal for the walkthrough:
 
-| Package runner | Command |
-|---|---|
-| pnpm | `pnpm dlx diffwright@latest init` |
-| npm | `npx diffwright@latest init` |
-| Yarn 2+ | `yarn dlx diffwright@latest init` |
-| Bun | `bunx diffwright@latest init` |
+| Package runner | Preview without project writes | Guided setup |
+|---|---|---|
+| pnpm | `pnpm dlx diffwright@latest init --dry-run` | `pnpm dlx diffwright@latest init` |
+| npm | `npx diffwright@latest init --dry-run` | `npx diffwright@latest init` |
+| Yarn 2+ | `yarn dlx diffwright@latest init --dry-run` | `yarn dlx diffwright@latest init` |
+| Bun | `bunx diffwright@latest init --dry-run` | `bunx diffwright@latest init` |
 
 Yarn Classic does not include `yarn dlx`; use the `npx` launcher and Diffwright
 will still detect `yarn.lock` for the local installation. Add `--dry-run` to

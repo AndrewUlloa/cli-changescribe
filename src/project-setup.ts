@@ -343,7 +343,7 @@ export function buildScriptPlan(options: {
   );
 
   let stagingPr: string | null = null;
-  if (options.hasStaging) {
+  if (options.hasStaging && options.baseBranch === 'staging') {
     stagingPr = setManagedScript(
       scripts,
       'staging:pr',

@@ -11,6 +11,9 @@ const packageRunnerCommands = [
   'yarn dlx diffwright@latest init',
   'bunx diffwright@latest init',
 ] as const;
+const packageRunnerPreviewCommands = packageRunnerCommands.map(
+  (command) => `${command} --dry-run`,
+);
 
 function repositoryFile(file: string): string {
   return fs.readFileSync(path.join(repoRoot, file), 'utf8');
@@ -28,6 +31,9 @@ test('published README leads with product identity and a one-minute quick start'
   assert.match(firstSection, /diffwright commit --dry-run/);
   assert.match(firstSection, /diffwright pr --dry-run/);
   for (const command of packageRunnerCommands) {
+    assert.ok(firstSection.includes(command), command);
+  }
+  for (const command of packageRunnerPreviewCommands) {
     assert.ok(firstSection.includes(command), command);
   }
 });
@@ -59,6 +65,9 @@ test('published setup docs advertise every supported package runner', () => {
   ]) {
     const contents = repositoryFile(file);
     for (const command of packageRunnerCommands) {
+      assert.ok(contents.includes(command), `${file}: ${command}`);
+    }
+    for (const command of packageRunnerPreviewCommands) {
       assert.ok(contents.includes(command), `${file}: ${command}`);
     }
     assert.match(contents, /Yarn Classic.*npx/is, file);
