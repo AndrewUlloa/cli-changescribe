@@ -23,9 +23,23 @@ interface ResolvedProvider {
   }>;
 }
 
+type KeylessAllowance = 'never' | 'always' | 'loopback-only';
+
+interface ProviderSetupMetadata {
+  readonly id: string;
+  readonly displayName: string;
+  readonly credentialEnvs: readonly string[];
+  readonly defaultModel?: string;
+  readonly fixedBaseURL: string | null;
+  readonly requiresBaseURL: boolean;
+  readonly keylessAllowance: KeylessAllowance;
+}
+
 interface ProviderModule {
   SUPPORTED_PROVIDER_IDS: readonly string[];
+  PROVIDER_SETUP_METADATA: Readonly<Record<string, ProviderSetupMetadata>>;
   ProviderConfigError: new (...args: never[]) => Error;
+  getProviderSetupMetadata(id: string): ProviderSetupMetadata;
   resolveProvider(options: {
     env: NodeJS.ProcessEnv;
     sources?: Readonly<Record<string, 'shell' | '.env.local'>>;
@@ -34,6 +48,115 @@ interface ProviderModule {
 }
 
 const provider: ProviderModule = require('../dist/provider.js');
+
+test('exports immutable non-secret setup metadata for every provider', () => {
+  const expected: Readonly<Record<string, ProviderSetupMetadata>> = {
+    openai: {
+      id: 'openai',
+      displayName: 'OpenAI',
+      credentialEnvs: ['OPENAI_API_KEY'],
+      fixedBaseURL: 'https://api.openai.com/v1',
+      requiresBaseURL: false,
+      keylessAllowance: 'never',
+    },
+    anthropic: {
+      id: 'anthropic',
+      displayName: 'Anthropic',
+      credentialEnvs: ['ANTHROPIC_API_KEY'],
+      fixedBaseURL: 'https://api.anthropic.com/v1',
+      requiresBaseURL: false,
+      keylessAllowance: 'never',
+    },
+    google: {
+      id: 'google',
+      displayName: 'Google Gemini',
+      credentialEnvs: ['GEMINI_API_KEY'],
+      fixedBaseURL: 'https://generativelanguage.googleapis.com/v1beta/openai',
+      requiresBaseURL: false,
+      keylessAllowance: 'never',
+    },
+    xai: {
+      id: 'xai',
+      displayName: 'xAI',
+      credentialEnvs: ['XAI_API_KEY'],
+      fixedBaseURL: 'https://api.x.ai/v1',
+      requiresBaseURL: false,
+      keylessAllowance: 'never',
+    },
+    deepseek: {
+      id: 'deepseek',
+      displayName: 'DeepSeek',
+      credentialEnvs: ['DEEPSEEK_API_KEY'],
+      fixedBaseURL: 'https://api.deepseek.com',
+      requiresBaseURL: false,
+      keylessAllowance: 'never',
+    },
+    openrouter: {
+      id: 'openrouter',
+      displayName: 'OpenRouter',
+      credentialEnvs: ['OPENROUTER_API_KEY'],
+      fixedBaseURL: 'https://openrouter.ai/api/v1',
+      requiresBaseURL: false,
+      keylessAllowance: 'never',
+    },
+    vercel: {
+      id: 'vercel',
+      displayName: 'Vercel AI Gateway',
+      credentialEnvs: ['AI_GATEWAY_API_KEY', 'VERCEL_OIDC_TOKEN'],
+      fixedBaseURL: 'https://ai-gateway.vercel.sh/v1',
+      requiresBaseURL: false,
+      keylessAllowance: 'never',
+    },
+    cerebras: {
+      id: 'cerebras',
+      displayName: 'Cerebras',
+      credentialEnvs: ['CEREBRAS_API_KEY'],
+      defaultModel: 'gpt-oss-120b',
+      fixedBaseURL: 'https://api.cerebras.ai/v1',
+      requiresBaseURL: false,
+      keylessAllowance: 'never',
+    },
+    groq: {
+      id: 'groq',
+      displayName: 'Groq',
+      credentialEnvs: ['GROQ_API_KEY'],
+      defaultModel: 'openai/gpt-oss-120b',
+      fixedBaseURL: 'https://api.groq.com/openai/v1',
+      requiresBaseURL: false,
+      keylessAllowance: 'never',
+    },
+    ollama: {
+      id: 'ollama',
+      displayName: 'Ollama',
+      credentialEnvs: [],
+      fixedBaseURL: 'http://localhost:11434/v1',
+      requiresBaseURL: false,
+      keylessAllowance: 'always',
+    },
+    custom: {
+      id: 'custom',
+      displayName: 'Custom OpenAI-compatible endpoint',
+      credentialEnvs: ['DIFFWRIGHT_API_KEY'],
+      fixedBaseURL: null,
+      requiresBaseURL: true,
+      keylessAllowance: 'loopback-only',
+    },
+  };
+
+  assert.deepEqual(Object.keys(provider.PROVIDER_SETUP_METADATA), [
+    ...provider.SUPPORTED_PROVIDER_IDS,
+  ]);
+  assert.deepEqual(provider.PROVIDER_SETUP_METADATA, expected);
+  assert.equal(Object.isFrozen(provider.PROVIDER_SETUP_METADATA), true);
+
+  for (const id of provider.SUPPORTED_PROVIDER_IDS) {
+    const metadata = provider.getProviderSetupMetadata(id);
+    assert.equal(metadata, provider.PROVIDER_SETUP_METADATA[id]);
+    assert.equal(Object.isFrozen(metadata), true, id);
+    assert.equal(Object.isFrozen(metadata.credentialEnvs), true, id);
+    assert.doesNotMatch(JSON.stringify(metadata), /secret|api[_-]?key[-:=]/i);
+  }
+});
 
 const cases = [
   ['openai', 'OPENAI_API_KEY', 'https://api.openai.com/v1', 'max_completion_tokens', 'docs-verified'],

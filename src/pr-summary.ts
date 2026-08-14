@@ -7,6 +7,12 @@ import {
   parsePositiveSafeInteger,
   validatePrArguments,
 } from './arguments';
+import {
+  buildRunScriptCommand,
+  detectPackageManager,
+  type PackageCommand,
+  type PackageManagerName,
+} from './package-manager';
 import { resolveProvider, type ResolvedProvider } from './provider';
 import {
   knownSecretValues,
@@ -382,7 +388,7 @@ function buildPass2Messages(
     {
       role: 'system',
       content:
-        'You are producing compact, high-signal summaries per commit. Use the diff and file stats to understand exactly what changed in the code. Produce 2-3 bullets each (change, rationale, risk/test note). Flag any breaking changes or migrations. IMPORTANT: Only reference technologies, frameworks, and patterns that are explicitly visible in the diff or file names. Do not infer or guess technologies that are not shown (e.g., do not mention GraphQL unless you see .graphql files or GraphQL client imports in the diff).',
+        'You are producing compact, high-signal summaries per commit. Use the diff and file stats to understand exactly what changed in the code. Produce 2-3 bullets each (change, rationale, risk/test note). Flag breaking changes or migrations only when directly evidenced. IMPORTANT: Only reference technologies, frameworks, patterns, CLI options, behavior, tests, risks, and migrations that are explicitly visible in the supplied diff or commit body. Omit uncertain claims instead of inferring them. A filename such as package-manager.ts is not evidence that a --package-manager CLI option exists.',
     },
     {
       role: 'user',
@@ -411,7 +417,7 @@ function buildPass3Messages(
     {
       role: 'system',
       content:
-        'You write PR summaries that are easy to review. Be concise, specific, and action-oriented. Do not include markdown fences. Only reference technologies and patterns that appear in the commit summaries provided. Never fabricate or assume technologies not explicitly mentioned (e.g., do not mention GraphQL, Apollo, Relay, or similar unless the summaries explicitly reference them).',
+        'You write PR summaries that are easy to review. Be concise, specific, and action-oriented. Do not include markdown fences. Use only facts explicitly present in the supplied summaries, snapshot, and commit titles. Never invent CLI options, files, functions, behavior, test results, risks, migrations, or technologies. Omit a claim when the inputs do not prove it.',
     },
     {
       role: 'user',
@@ -438,7 +444,9 @@ function buildPass3Messages(
         'Rules:',
         '- If the issue is unknown, write: "Related: (not provided)".',
         '- If testing is unknown, write: "Testing: (not provided)".',
+        '- The first bullet under "What change does this PR add?" must be one concise branch-level summary formatted exactly as "- Overall: <summary>" with no commit SHA.',
         '- Every commit must appear as its own bullet under "What change does this PR add?". Do not group commits under "miscellaneous" or similar catch-all labels.',
+        '- Do not introduce a CLI option, behavior, test result, risk, or migration unless that exact fact appears in the inputs.',
         '- Be thorough and specific. Reference actual file names, functions, and architectural changes.',
         '- Prefer bullets.',
         '',
@@ -460,7 +468,7 @@ function buildReleaseMessages(
     {
       role: 'system',
       content:
-        'You write release PR summaries for QA to production. Be concise, concrete, and action-oriented. Do not include markdown fences. Only reference technologies and patterns that appear in the commit summaries provided. Never fabricate or assume technologies not explicitly mentioned.',
+        'You write release PR summaries for QA to production. Be concise, concrete, and action-oriented. Do not include markdown fences. Use only facts explicitly present in the supplied summaries, snapshot, and commit titles. Never invent CLI options, files, functions, behavior, test results, risks, migrations, or technologies. Omit a claim when the inputs do not prove it.',
     },
     {
       role: 'user',
@@ -487,7 +495,9 @@ function buildReleaseMessages(
         '',
         'Rules:',
         '- If unknown, write: "Unknown".',
+        '- The first bullet under "Release summary" must be one concise branch-level summary formatted exactly as "- Overall: <summary>" with no commit SHA.',
         '- Every commit must appear as its own bullet. Do not group commits under catch-all labels like "miscellaneous".',
+        '- Do not introduce a CLI option, behavior, test result, risk, or migration unless that exact fact appears in the inputs.',
         '- Be thorough and specific. Reference actual changes from the commit summaries.',
         '- Prefer bullets.',
         '',
@@ -620,22 +630,63 @@ function checkExistingPr(base: string, head: string): ExistingPr | null {
   }
 }
 
-function hasNpmScript(scriptName: string, cwd = process.cwd()): boolean {
+function readProjectPackage(cwd = process.cwd()): object | null {
   try {
     const packagePath = path.join(cwd, 'package.json');
     const raw = fs.readFileSync(packagePath, 'utf8');
     const parsed: unknown = JSON.parse(raw);
     if (typeof parsed !== 'object' || parsed === null) {
-      return false;
+      return null;
     }
-    const scripts: unknown = Reflect.get(parsed, 'scripts');
-    return Boolean(
-      typeof scripts === 'object' &&
-        scripts !== null &&
-        Reflect.get(scripts, scriptName),
-    );
+    return parsed;
   } catch {
+    return null;
+  }
+}
+
+function hasPackageScript(
+  projectPackage: object | null,
+  scriptName: string,
+): boolean {
+  if (projectPackage === null) {
     return false;
+  }
+  const scripts: unknown = Reflect.get(projectPackage, 'scripts');
+  return Boolean(
+    typeof scripts === 'object' &&
+      scripts !== null &&
+      Reflect.get(scripts, scriptName),
+  );
+}
+
+function projectGateCommand(
+  manager: PackageManagerName,
+  scriptName: string,
+): PackageCommand {
+  if (manager === 'npm' && scriptName === 'test') {
+    return Object.freeze({
+      file: 'npm',
+      args: Object.freeze(['test']),
+      display: 'npm test',
+    });
+  }
+  return buildRunScriptCommand(manager, scriptName);
+}
+
+function runProjectGate(
+  manager: PackageManagerName,
+  scriptName: string,
+  failureGuidance: string,
+): void {
+  const command = projectGateCommand(manager, scriptName);
+  step(`Running ${command.display} before PR creation...`);
+  try {
+    execFileSync(command.file, command.args, {
+      encoding: 'utf8',
+      stdio: 'inherit',
+    });
+  } catch (_error) {
+    throw new Error(`${command.display} failed; ${failureGuidance}`);
   }
 }
 
@@ -662,6 +713,8 @@ function extractPrTitle(summary: string, mode: string): string | null {
         .replace(/`([^`]+)`/g, '$1')
         .replace(/\*\*([^*]+)\*\*/g, '$1')
         .replace(/\*([^*]+)\*/g, '$1')
+        .replace(/^Overall:\s*/i, '')
+        .replace(/^[0-9a-f]{7,40}\s*[–—:-]\s*/i, '')
         .slice(0, 100);
       if (clean.length > 10) {
         return clean;
@@ -947,38 +1000,26 @@ async function main(argv: string[]): Promise<void> {
 
   // Safety checks before creating PR
   if (args.createPr) {
+    const projectPackage = readProjectPackage();
+    const manager = detectPackageManager(
+      process.cwd(),
+      projectPackage === null
+        ? undefined
+        : Reflect.get(projectPackage, 'packageManager'),
+    );
+
     if (args.skipFormat) {
       warn('Skipping format step (flagged)');
-    } else if (!hasNpmScript('format')) {
-      warn('Skipping format step (no npm script named "format")');
+    } else if (!hasPackageScript(projectPackage, 'format')) {
+      const scriptKind =
+        manager === 'npm' ? 'npm script' : 'package.json script';
+      warn(`Skipping format step (no ${scriptKind} named "format")`);
     } else {
-      step('Running npm run format before PR creation...');
-      try {
-        execFileSync('npm', ['run', 'format'], {
-          encoding: 'utf8',
-          stdio: 'inherit',
-        });
-      } catch (_error) {
-        throw new Error('npm run format failed; fix formatting errors first.');
-      }
+      runProjectGate(manager, 'format', 'fix formatting errors first.');
     }
 
-    step('Running npm test before PR creation...');
-    try {
-      execFileSync('npm', ['test'], { encoding: 'utf8', stdio: 'inherit' });
-    } catch (_error) {
-      throw new Error('npm test failed; fix test failures first.');
-    }
-
-    step('Running npm run build before PR creation...');
-    try {
-      execFileSync('npm', ['run', 'build'], {
-        encoding: 'utf8',
-        stdio: 'inherit',
-      });
-    } catch (_error) {
-      throw new Error('npm run build failed; fix build errors first.');
-    }
+    runProjectGate(manager, 'test', 'fix test failures first.');
+    runProjectGate(manager, 'build', 'fix build errors first.');
 
     if (checkUncommittedChanges()) {
       throw new Error(

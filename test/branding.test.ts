@@ -49,6 +49,15 @@ test('help uses the Diffwright command name', () => {
   assert.doesNotMatch(output, /changescribe <command>/i);
 });
 
+test('version reports the running package version for local provenance checks', () => {
+  const pkg: { version: string } = require('../package.json');
+  for (const flag of ['--version', '-v']) {
+    const result = runCli([flag]);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout.trim(), pkg.version);
+  }
+});
+
 test('no arguments and short help both print help successfully', () => {
   for (const args of [[], ['-h']]) {
     const result = runCli(args);
@@ -175,4 +184,19 @@ test('init reports a missing package.json with exit code 1', (context) => {
 
   assert.equal(result.status, 1);
   assert.match(result.stderr, /No package\.json found/);
+});
+
+test('legacy non-TTY init refuses a symlinked package.json', (context) => {
+  const fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), 'diffwright-link-'));
+  context.after(() => fs.rmSync(fixtureDir, { recursive: true, force: true }));
+  const externalPath = path.join(fixtureDir, 'external.json');
+  const original = `${JSON.stringify({ name: 'external' })}\n`;
+  fs.writeFileSync(externalPath, original);
+  fs.symlinkSync(externalPath, path.join(fixtureDir, 'package.json'));
+
+  const result = runCli(['init'], { cwd: fixtureDir });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /regular, unlinked file|symbolic link/i);
+  assert.equal(fs.readFileSync(externalPath, 'utf8'), original);
 });

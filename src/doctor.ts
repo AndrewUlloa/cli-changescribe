@@ -48,6 +48,30 @@ function printProfile(resolved: ResolvedProvider): void {
   console.log(`Status: ${profile.status}`);
 }
 
+export async function runResolvedDoctor(
+  resolved: ResolvedProvider,
+  live: boolean,
+  complete: DoctorDependencies['completeChat'] = completeChat,
+): Promise<void> {
+  printProfile(resolved);
+  if (!live) {
+    console.log('Configuration check: OK (offline)');
+    return;
+  }
+
+  await complete(resolved, {
+    messages: [
+      {
+        role: 'user',
+        content: 'Reply with exactly OK and no other text.',
+      },
+    ],
+    outputLimit: DOCTOR_OUTPUT_LIMIT,
+    intent: 'doctor',
+  });
+  console.log('Live check: OK');
+}
+
 export async function runDoctor(
   argv: string[] = process.argv.slice(2),
   dependencies: DoctorDependencies = defaultDependencies,
@@ -65,21 +89,5 @@ export async function runDoctor(
     );
   }
 
-  printProfile(resolved);
-  if (!args.live) {
-    console.log('Configuration check: OK (offline)');
-    return;
-  }
-
-  await dependencies.completeChat(resolved, {
-    messages: [
-      {
-        role: 'user',
-        content: 'Reply with exactly OK and no other text.',
-      },
-    ],
-    outputLimit: DOCTOR_OUTPUT_LIMIT,
-    intent: 'doctor',
-  });
-  console.log('Live check: OK');
+  await runResolvedDoctor(resolved, args.live, dependencies.completeChat);
 }

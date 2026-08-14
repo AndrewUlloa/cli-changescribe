@@ -1,3 +1,5 @@
+import { SUPPORTED_PROVIDER_IDS } from './provider';
+
 export class CliArgumentError extends Error {
   constructor(message: string) {
     super(message);
@@ -36,8 +38,76 @@ export function validateDoctorArguments(argv: string[]): void {
 }
 
 export function validateInitArguments(argv: string[]): void {
-  if (argv.length > 0) {
-    rejectUnknown('init', argv[0]);
+  const valueOptions = new Set([
+    '--provider',
+    '--model',
+    '--base',
+    '--agents',
+    '--credential-source',
+  ]);
+  const booleanOptions = new Set(['--yes', '--dry-run', '--live']);
+  const supportedProviders = new Set<string>(SUPPORTED_PROVIDER_IDS);
+  const agentSelections = new Set([
+    'claude',
+    'codex',
+    'claude,codex',
+    'codex,claude',
+    'none',
+  ]);
+  const credentialSources = new Set(['existing', 'file']);
+  const seenValues = new Map<string, string>();
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const option = argv[index];
+    if (!option) {
+      continue;
+    }
+    if (booleanOptions.has(option)) {
+      continue;
+    }
+    if (!valueOptions.has(option)) {
+      rejectUnknown('init', option);
+    }
+
+    const value = requireValue(argv, index, option);
+    const previousValue = seenValues.get(option);
+    if (previousValue !== undefined && previousValue !== value) {
+      throw new CliArgumentError(
+        `${option} cannot be supplied with conflicting values.`,
+      );
+    }
+    seenValues.set(option, value);
+    if (option === '--provider' && !supportedProviders.has(value)) {
+      throw new CliArgumentError(
+        `--provider must be one of: ${SUPPORTED_PROVIDER_IDS.join(', ')}.`,
+      );
+    }
+    if (option === '--model' && value.trim().length === 0) {
+      throw new CliArgumentError('--model requires a nonempty value.');
+    }
+    if (
+      option === '--base' &&
+      (value.trim().length === 0 || /[\s\u0000-\u001f\u007f]/u.test(value))
+    ) {
+      throw new CliArgumentError(
+        '--base must be a nonempty branch name without whitespace or control characters.',
+      );
+    }
+    if (option === '--agents' && !agentSelections.has(value)) {
+      throw new CliArgumentError(
+        '--agents must be claude, codex, claude,codex, codex,claude, or none.',
+      );
+    }
+    if (option === '--credential-source' && !credentialSources.has(value)) {
+      throw new CliArgumentError(
+        '--credential-source must be either existing or file.',
+      );
+    }
+    index += 1;
+  }
+
+  if (argv.includes('--live') && argv.includes('--dry-run')) {
+    throw new CliArgumentError('--live cannot be combined with --dry-run.');
   }
 }
 

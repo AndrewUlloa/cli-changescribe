@@ -28,6 +28,9 @@ interface PackedPackage {
 
 const repoRoot = path.resolve(__dirname, '..');
 const bridgeRoot = path.join(repoRoot, 'compat', 'cli-changescribe');
+const currentVersion: string = JSON.parse(
+  fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'),
+).version;
 
 function writePackage(
   directory: string,
@@ -84,12 +87,16 @@ function expectedDiffwrightFiles(): string[] {
     'commit',
     'doctor',
     'init',
+    'package-manager',
+    'project-setup',
+    'prompts',
     'pr-summary',
     'provider',
     'runtime-config',
     'errors',
     'transport',
     'subprocess',
+    'setup-files',
   ]) {
     files.push(`dist/${moduleName}.js`, `dist/${moduleName}.js.map`);
   }
@@ -201,7 +208,53 @@ test('packed Diffwright and ChangeScribe install and execute end to end', (conte
       'utf8',
     ),
   );
-  assert.equal(installedManifest.version, '0.3.2');
+  assert.equal(installedManifest.version, currentVersion);
+
+  const installManifestPath = path.join(installRoot, 'package.json');
+  const installManifest = JSON.parse(
+    fs.readFileSync(installManifestPath, 'utf8'),
+  );
+  installManifest.devDependencies = {
+    ...(installManifest.devDependencies ?? {}),
+    diffwright: installedManifest.version,
+  };
+  fs.writeFileSync(
+    installManifestPath,
+    `${JSON.stringify(installManifest, null, 2)}\n`,
+  );
+
+  execFileSync(
+    diffwrightBin,
+    [
+      'init',
+      '--yes',
+      '--provider',
+      'ollama',
+      '--model',
+      'llama3.2',
+      '--agents',
+      'none',
+    ],
+    { cwd: installRoot, encoding: 'utf8', env },
+  );
+  const guidedManifest: FixturePackage = JSON.parse(
+    fs.readFileSync(installManifestPath, 'utf8'),
+  );
+  assert.equal(
+    guidedManifest.scripts?.commit,
+    'node ./node_modules/diffwright/bin/diffwright.js commit',
+  );
+  assert.equal(
+    guidedManifest.scripts?.['feature:pr'],
+    'node ./node_modules/diffwright/bin/diffwright.js pr --base main --create-pr --mode feature',
+  );
+  assert.equal(guidedManifest.scripts?.['staging:pr'], undefined);
+  const localScriptHelp = execFileSync(
+    'npm',
+    ['run', 'commit', '--', '--help'],
+    { cwd: installRoot, encoding: 'utf8', env },
+  );
+  assert.match(localScriptHelp, /Usage: diffwright commit/);
 
   const bridgeResolution = require.resolve('diffwright/bin/diffwright.js', {
     paths: [path.join(installRoot, 'node_modules', 'cli-changescribe')],

@@ -26,6 +26,17 @@ export type OutputTokenField =
   | 'max_completion_tokens'
   | null;
 export type CredentialSource = ConfigSource | 'dummy';
+export type KeylessAllowance = 'never' | 'always' | 'loopback-only';
+
+export interface ProviderSetupMetadata {
+  readonly id: ProviderId;
+  readonly displayName: string;
+  readonly credentialEnvs: readonly string[];
+  readonly defaultModel?: string;
+  readonly fixedBaseURL: string | null;
+  readonly requiresBaseURL: boolean;
+  readonly keylessAllowance: KeylessAllowance;
+}
 
 export interface PublicProviderProfile {
   readonly id: ProviderId;
@@ -57,6 +68,9 @@ interface Preset {
   readonly defaultModel?: string;
   readonly defaultHeaders?: Readonly<Record<string, string>>;
 }
+
+const CUSTOM_CREDENTIAL_ENV = 'DIFFWRIGHT_API_KEY';
+const OLLAMA_BASE_URL = 'http://localhost:11434/v1';
 
 const PRESETS: Readonly<
   Record<Exclude<ProviderId, 'custom' | 'ollama'>, Preset>
@@ -127,6 +141,65 @@ const PRESETS: Readonly<
     defaultModel: 'openai/gpt-oss-120b',
   },
 });
+
+function freezeSetupMetadata(
+  metadata: ProviderSetupMetadata,
+): Readonly<ProviderSetupMetadata> {
+  Object.freeze(metadata.credentialEnvs);
+  return Object.freeze(metadata);
+}
+
+function presetSetupMetadata(
+  id: Preset['id'],
+  displayName: string,
+): Readonly<ProviderSetupMetadata> {
+  const preset = PRESETS[id];
+  return freezeSetupMetadata({
+    id,
+    displayName,
+    credentialEnvs: [...preset.credentialEnvs],
+    ...(preset.defaultModel ? { defaultModel: preset.defaultModel } : {}),
+    fixedBaseURL: preset.baseURL,
+    requiresBaseURL: false,
+    keylessAllowance: 'never',
+  });
+}
+
+export const PROVIDER_SETUP_METADATA: Readonly<
+  Record<ProviderId, Readonly<ProviderSetupMetadata>>
+> = Object.freeze({
+  openai: presetSetupMetadata('openai', 'OpenAI'),
+  anthropic: presetSetupMetadata('anthropic', 'Anthropic'),
+  google: presetSetupMetadata('google', 'Google Gemini'),
+  xai: presetSetupMetadata('xai', 'xAI'),
+  deepseek: presetSetupMetadata('deepseek', 'DeepSeek'),
+  openrouter: presetSetupMetadata('openrouter', 'OpenRouter'),
+  vercel: presetSetupMetadata('vercel', 'Vercel AI Gateway'),
+  cerebras: presetSetupMetadata('cerebras', 'Cerebras'),
+  groq: presetSetupMetadata('groq', 'Groq'),
+  ollama: freezeSetupMetadata({
+    id: 'ollama',
+    displayName: 'Ollama',
+    credentialEnvs: [],
+    fixedBaseURL: OLLAMA_BASE_URL,
+    requiresBaseURL: false,
+    keylessAllowance: 'always',
+  }),
+  custom: freezeSetupMetadata({
+    id: 'custom',
+    displayName: 'Custom OpenAI-compatible endpoint',
+    credentialEnvs: [CUSTOM_CREDENTIAL_ENV],
+    fixedBaseURL: null,
+    requiresBaseURL: true,
+    keylessAllowance: 'loopback-only',
+  }),
+});
+
+export function getProviderSetupMetadata(
+  id: ProviderId,
+): Readonly<ProviderSetupMetadata> {
+  return PROVIDER_SETUP_METADATA[id];
+}
 
 export class ProviderConfigError extends Error {
   readonly code = 'provider_configuration';
@@ -264,10 +337,10 @@ function resolveCustom(
   }
 
   const normalized = normalizeCustomBaseURL(rawBaseURL);
-  const hasKey = present(env.DIFFWRIGHT_API_KEY);
+  const hasKey = present(env[CUSTOM_CREDENTIAL_ENV]);
   const missing = [
     ...(present(rawModel) ? [] : ['DIFFWRIGHT_MODEL']),
-    ...(!hasKey && !normalized.keylessAllowed ? ['DIFFWRIGHT_API_KEY'] : []),
+    ...(!hasKey && !normalized.keylessAllowed ? [CUSTOM_CREDENTIAL_ENV] : []),
   ];
   if (missing.length > 0) {
     throw new ProviderConfigError(`custom requires ${missing.join(', ')}`);
@@ -281,7 +354,7 @@ function resolveCustom(
     id: 'custom',
     baseURL: normalized.baseURL,
     model: rawModel,
-    credentialEnv: hasKey ? 'DIFFWRIGHT_API_KEY' : null,
+    credentialEnv: hasKey ? CUSTOM_CREDENTIAL_ENV : null,
     transport: 'openai-chat-completions',
     status: 'user-defined',
     outputTokenField: null,
@@ -289,8 +362,8 @@ function resolveCustom(
   const credential = Object.freeze(
     hasKey
       ? {
-          value: env.DIFFWRIGHT_API_KEY as string,
-          source: credentialSource(sources, 'DIFFWRIGHT_API_KEY'),
+          value: env[CUSTOM_CREDENTIAL_ENV] as string,
+          source: credentialSource(sources, CUSTOM_CREDENTIAL_ENV),
         }
       : { value: 'diffwright-local', source: 'dummy' as const },
   );
@@ -304,7 +377,7 @@ function resolveOllama(env: NodeJS.ProcessEnv): ResolvedProvider {
   return Object.freeze({
     profile: freezeProfile({
       id: 'ollama',
-      baseURL: 'http://localhost:11434/v1',
+      baseURL: OLLAMA_BASE_URL,
       model: env.DIFFWRIGHT_MODEL,
       credentialEnv: null,
       transport: 'openai-chat-completions',

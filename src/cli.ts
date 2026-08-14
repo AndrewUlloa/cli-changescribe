@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { runCommit } from './commit';
 import { runDoctor } from './doctor';
 import { CliArgumentError, validateCommandArguments } from './arguments';
@@ -9,7 +11,7 @@ import { knownSecretValues, loadRuntimeConfig } from './runtime-config';
 interface CliRunners {
   runCommit(args: string[]): Promise<void>;
   runDoctor(args: string[]): Promise<void>;
-  runInit(): void | Promise<void>;
+  runInit(args: string[]): void | Promise<void>;
   runPrSummary(args: string[]): Promise<void>;
 }
 
@@ -23,6 +25,19 @@ const defaultRunners: CliRunners = {
 const CLI_REFERENCE =
   'https://github.com/AndrewUlloa/diffwright/blob/main/documentation/cli-reference.md';
 
+function printVersion(): void {
+  const packagePath = path.resolve(__dirname, '..', 'package.json');
+  const parsed: unknown = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error('Unable to read the Diffwright package version.');
+  }
+  const version: unknown = Reflect.get(parsed, 'version');
+  if (typeof version !== 'string' || version.length === 0) {
+    throw new Error('Unable to read the Diffwright package version.');
+  }
+  console.log(version);
+}
+
 function printHelp(): void {
   console.log(`diffwright <command> [options]
 
@@ -30,10 +45,13 @@ Commands:
   commit        Generate a commit message and commit/push changes
   pr            Generate a PR summary (optionally create/update PR)
   doctor        Validate provider configuration (add --live for one request)
-  init          Add npm scripts to the current repo
+  init          Interactively configure Diffwright in the current repo
   pr:summary    Alias for pr
   feature:pr    Alias for: pr --base staging --create-pr --mode feature
   staging:pr    Alias for: pr --base main --create-pr --mode release
+
+Global options:
+  --version, -v  Print the installed Diffwright version
 
 Examples:
   diffwright init
@@ -77,7 +95,7 @@ Options:
   --mode <mode>       Summary mode: feature or release
   --dry-run           Show the range and plan without provider calls or output files
   --create-pr         Run project gates and create or update a PR with gh
-  --skip-format       Skip the optional npm format script
+  --skip-format       Skip the optional package-manager format script
   --no-format         Alias for --skip-format
 
 Dry runs may fetch the base branch. Normal runs call the provider at least three
@@ -100,12 +118,30 @@ Complete reference: ${CLI_REFERENCE}
 }
 
 function printInitHelp(): void {
-  console.log(`Usage: diffwright init
+  console.log(`Usage: diffwright init [options]
 
-Add missing Diffwright scripts to the current package.json and migrate exact
-legacy ChangeScribe script values. Existing custom scripts are preserved.
+Configure Diffwright in an existing project. When both input and output are an
+interactive TTY, init starts a guided setup and previews proposed changes.
+Without a TTY, with --yes, or with a configuration option, init runs headlessly
+using supplied options and detected defaults.
 
-This command accepts no options.
+Options:
+  --yes                          Accept defaults and skip interactive prompts
+  --dry-run                      Preview without installs, writes, or live provider requests
+  --provider <id>                Provider: openai, anthropic, google, xai,
+                                 deepseek, openrouter, vercel, cerebras, groq,
+                                 ollama, or custom
+  --model <id>                   Exact provider model ID
+  --base <branch>                Pull-request base branch
+  --agents <selection>           claude, codex, claude,codex, codex,claude, or none
+  --credential-source <source>   existing or file; never a credential value
+  --live                         Make one provider request after the offline doctor check
+
+After guided confirmation or deterministic invocation, init may install the exact Diffwright
+version and write package.json, .env.local, .gitignore,
+CLAUDE.md, or AGENTS.md. Existing custom package scripts
+and file content are preserved. The offline doctor check runs after setup;
+--live opts into one additional provider request.
 
 Complete reference: ${CLI_REFERENCE}
 `);
@@ -130,6 +166,10 @@ export async function runCli(
   const [command, ...rest] = argv;
   if (!command || command === '-h' || command === '--help') {
     printHelp();
+    return 0;
+  }
+  if (command === '-v' || command === '--version') {
+    printVersion();
     return 0;
   }
 
@@ -172,7 +212,7 @@ export async function runCli(
   }
 
   if (command === 'init') {
-    await runners.runInit();
+    await runners.runInit(rest);
     return 0;
   }
 

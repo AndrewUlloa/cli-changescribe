@@ -5,6 +5,42 @@ with `DIFFWRIGHT_PROVIDER`, set the exact `DIFFWRIGHT_MODEL`, and provide the
 credential listed below. These links point to provider-owned setup and model
 documentation.
 
+## Guided provider setup
+
+Run guided init from the project that will use Diffwright:
+
+| Package runner | Preview without project writes | Guided setup |
+|---|---|---|
+| pnpm | `pnpm dlx diffwright@latest init --dry-run` | `pnpm dlx diffwright@latest init` |
+| npm | `npx diffwright@latest init --dry-run` | `npx diffwright@latest init` |
+| Yarn 2+ | `yarn dlx diffwright@latest init --dry-run` | `yarn dlx diffwright@latest init` |
+| Bun | `bunx diffwright@latest init --dry-run` | `bunx diffwright@latest init` |
+
+For Yarn Classic, use the `npx` launcher; the wizard still detects and uses
+Yarn for the project's local installation and scripts.
+
+In an interactive TTY, the wizard asks for a provider, its exact model ID, and
+where the credential already comes from or should be stored. Existing resolved
+configuration is preferred. The setup preview names variables and sources but
+redacts credential values.
+
+Choose an existing credential to keep using a shell or `.env.local` value
+without copying it. If a required key is missing, guided init can accept it in
+a masked prompt that echoes no characters—not even placeholder stars—and stage
+it for `.env.local`. The wizard first requires that file to be untracked and
+protected by `.gitignore`; a new credential file is owner-readable and writable.
+
+Shell values, including explicitly empty values, override `.env.local`. If an
+empty exported variable unexpectedly masks a file value, unset it before
+running Diffwright. Deterministic/non-TTY setup never asks for a key and fails
+with corrective guidance when the selected provider lacks a credential. There
+is intentionally no command-line credential option.
+
+After confirmed setup, offline doctor validates the resolved provider, model,
+endpoint hostname, and credential source without a network call. The wizard
+offers the live doctor separately; accepting it makes exactly one provider
+request and may incur provider cost.
+
 | Provider | ID | Credential | Official key/auth setup | Official model/API reference |
 |---|---|---|---|---|
 | OpenAI | `openai` | `OPENAI_API_KEY` | [API keys](https://platform.openai.com/api-keys) | [Models](https://developers.openai.com/api/docs/models) |
@@ -91,9 +127,10 @@ defaults.
 ## Credential handling
 
 Diffwright reads `.env.local` at invocation time without modifying
-`process.env`; shell variables win. Credentials stay in process memory and are
-sent only to the resolved endpoint. Known provider credentials are stripped
-from child-process environments and redacted from prompts and generated text.
+`process.env`; shell variables, including explicitly empty values, override
+`.env.local`. Credentials stay in process memory and are sent only to the
+resolved endpoint. Known provider credentials are stripped from child-process
+environments and redacted from prompts and generated text.
 
-Add `.env.local` to `.gitignore`. Do not put credentials on the command line,
-in committed configuration, or in bug reports.
+Add `.env.local` to `.gitignore` and confirm it is not tracked. Do not put
+credentials on the command line, in committed configuration, or in bug reports.

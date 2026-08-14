@@ -68,12 +68,16 @@ test('all application sources are TypeScript and compiled output exists', () => 
     'commit',
     'doctor',
     'init',
+    'package-manager',
+    'project-setup',
+    'prompts',
     'pr-summary',
     'provider',
     'runtime-config',
     'errors',
     'transport',
     'subprocess',
+    'setup-files',
   ];
   const sourceFiles = fs.readdirSync(path.join(repoRoot, 'src')).sort();
 

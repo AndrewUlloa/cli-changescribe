@@ -16,14 +16,24 @@ Gateway, Cerebras, Groq, Ollama, or any compatible endpoint.</p>
 
 [Quick start](#quick-start) · [Commands](#commands) · [Providers](#providers) · [Security](#security-and-privacy) · [Documentation](#documentation)
 
-```bash
-npm install -g diffwright
-```
+Run guided setup with the package runner already used by your project:
+
+| Package runner | Command |
+|---|---|
+| pnpm | `pnpm dlx diffwright@latest init` |
+| npm | `npx diffwright@latest init` |
+| Yarn 2+ | `yarn dlx diffwright@latest init` |
+| Bun | `bunx diffwright@latest init` |
+
+Yarn Classic does not provide `yarn dlx`. Launch the wizard with `npx` in a
+Yarn Classic project; Diffwright still detects `yarn.lock` and uses Yarn for
+the exact local installation and generated scripts.
 
 ## Choose your workflow
 
 | You want to… | Preview or inspect | Run it |
 |---|---|---|
+| Configure a project | Use the matching `init --dry-run` command in [Quick start](#quick-start) | Use the matching guided setup command in [Quick start](#quick-start) |
 | Write a Conventional Commit | `diffwright commit --dry-run` | `diffwright commit` |
 | Summarize a branch for a PR | `diffwright pr --dry-run` | `diffwright pr` |
 | Create or update the GitHub PR | — | `diffwright pr --create-pr` |
@@ -46,25 +56,54 @@ Diffwright in automation.
 
 ## Quick start
 
-### 1. Install
+### 1. Run guided setup
 
-Install globally for personal use:
+From the project you want to configure:
 
-```bash
-npm install -g diffwright
-```
+| Package runner | Preview without project writes | Guided setup |
+|---|---|---|
+| pnpm | `pnpm dlx diffwright@latest init --dry-run` | `pnpm dlx diffwright@latest init` |
+| npm | `npx diffwright@latest init --dry-run` | `npx diffwright@latest init` |
+| Yarn 2+ | `yarn dlx diffwright@latest init --dry-run` | `yarn dlx diffwright@latest init` |
+| Bun | `bunx diffwright@latest init --dry-run` | `bunx diffwright@latest init` |
 
-For a team, pin it in the project and run it through `npx` or npm scripts:
+These commands only choose the temporary package runner. The wizard separately
+detects the target project's `packageManager` declaration and lockfile, then
+uses npm, pnpm, Yarn, or Bun for the permanent exact-version development
+dependency, lockfile update, and generated project commands.
 
-```bash
-npm install --save-dev diffwright
-npx diffwright init
-```
+When stdin and stdout are an interactive TTY, `init` walks through the provider,
+exact model, credential source, feature-branch base, existing lint/typecheck/test/
+build gates, and optional Claude Code or Codex guardrails. It detects npm, pnpm,
+Yarn, or Bun and whether the repository uses a `staging` branch.
 
-### 2. Bring a provider
+Before changing anything, the wizard shows one redacted preview and asks for
+confirmation. It never prints a credential. Declining or pressing Ctrl-C before
+confirmation exits without writes or provider calls.
 
-Create `.env.local` in the repository where you run Diffwright and add that file
-to `.gitignore`:
+For an external project, confirmed setup pins the exact running Diffwright
+version as a local development dependency and updates the detected lockfile;
+install lifecycle scripts are disabled. In Diffwright's own validated checkout,
+the self-hosted workflow does not create a self-dependency: generated scripts
+build and invoke `node ./bin/diffwright.js` directly.
+
+The wizard can add branch-aware, gate-aware package scripts and one managed block
+to selected `CLAUDE.md` and/or `AGENTS.md` files. Text outside those marked
+blocks and custom package scripts are preserved.
+
+### 2. Configure your provider
+
+The wizard prefers existing configuration. A shell credential can be reused
+without copying it. In an interactive TTY, you may instead enter a credential
+with no character echo for storage in `.env.local`; Diffwright protects the file
+with `.gitignore` before writing the key. Shell values—including explicitly
+empty values—override `.env.local`.
+
+You can also choose **Configure later**. The wizard applies only nonsecret
+workflow/configuration files, skips doctor, and clearly reports that setup is
+incomplete until you add the credential and pass the offline check.
+
+For manual setup, the equivalent configuration is:
 
 ```bash
 DIFFWRIGHT_PROVIDER="openrouter"
@@ -76,28 +115,51 @@ Use the exact model ID listed by your provider. The
 [provider guide](https://github.com/AndrewUlloa/diffwright/blob/main/documentation/providers.md)
 links to official key and model pages for every preset.
 
-### 3. Check configuration before sending a diff
+### 3. Validate and preview
+
+After setup, `init` runs the offline doctor: it resolves and prints the provider,
+model, endpoint hostname, and credential source without making a network
+request. A live check is a separate opt-in and makes exactly one provider
+request.
+
+The wizard prints commands for the detected package manager. For npm projects:
 
 ```bash
-diffwright doctor
-```
-
-Offline doctor resolves and prints the provider, model, endpoint hostname, and
-credential source without making a network request. Add `--live` when you want
-one small provider request.
-
-### 4. Preview your first result
-
-```bash
-git add src test
-diffwright commit --dry-run
-
-# inspect a PR range without calling the provider
-diffwright pr --base main --dry-run
+npm run commit -- --dry-run
+npm run feature:pr -- --dry-run
 ```
 
 Important: a commit dry-run candidate is not reused. Running `diffwright commit`
 afterward calls the provider again, so the final text may differ.
+
+### Headless and automation modes
+
+A no-argument, non-TTY `diffwright init` retains the legacy behavior: it only
+adds the four generic Diffwright scripts or migrates exact ChangeScribe values.
+It does not prompt, install a package, write credentials or agent rules, or run
+doctor.
+
+`--yes` never prompts. It uses supplied choices and safe detected defaults, but
+it cannot invent a missing credential and does not install agent rules unless
+`--agents` names them. `--live` is never implied by `--yes`.
+
+`--dry-run` computes and prints the same redacted setup plan with no installs,
+writes, or live provider request. Provider, model, base, agent, and credential-
+source flags select deterministic setup without putting any credential in argv.
+See the [CLI reference](https://github.com/AndrewUlloa/diffwright/blob/main/documentation/cli-reference.md)
+for every combination.
+
+When launched through `pnpm dlx`, `npx`, `yarn dlx`, or `bunx`, the package
+runner may first download Diffwright to its own cache or temporary environment.
+`--dry-run` prevents a dependency install or file write in the target project;
+it cannot prevent the selected runner from resolving the CLI itself.
+
+Global installation remains available for personal use, but project scripts
+created by guided setup use the exact local pin instead of a global executable:
+
+```bash
+npm install -g diffwright
+```
 
 ## Example output
 
@@ -143,6 +205,7 @@ Other notes reviewers should know (risks + follow-ups)
 | Bring your own AI | Use a direct provider, a gateway, or a local OpenAI-compatible server. |
 | Deterministic routing | One invocation resolves one provider and never silently fails over to another. |
 | Local-first configuration | Keys stay in process memory and requests go directly to the resolved endpoint. |
+| Guided project setup | Detect package manager, branches, gates, and agent harnesses, then preview before writing. |
 | Fail-closed CLI | Unknown options, missing values, and invalid limit/issue/mode values stop before workflow side effects. |
 | Legacy compatibility | Existing Cerebras, Groq, and ChangeScribe setups continue to work. |
 
@@ -157,7 +220,8 @@ Other notes reviewers should know (risks + follow-ups)
 | `diffwright pr --dry-run` | Fetch when possible, resolve the commit range, and print the plan; no provider call or output write. |
 | `diffwright pr` | Generate detailed and PR-ready summaries. |
 | `diffwright pr --create-pr` | Run project gates, then create or update the GitHub PR with `gh`. |
-| `diffwright init` | Add missing Diffwright npm scripts and migrate exact legacy script values. |
+| `diffwright init` | Guide an interactive TTY through project setup; preserve legacy script-only behavior in a no-argument non-TTY. |
+| `diffwright --version` | Print the exact installed Diffwright version. |
 
 Run `diffwright <command> --help` for focused help. The
 [complete CLI reference](https://github.com/AndrewUlloa/diffwright/blob/main/documentation/cli-reference.md)
@@ -173,14 +237,18 @@ documents every flag, default, alias, side effect, and exit behavior.
 | `commit` | Usually 1; one repair request is possible | May stage all changes; creates a commit | pushes the current branch |
 | `pr --dry-run` | 0 | no summary files | attempts `git fetch -- origin <base>`; falls back to local refs |
 | `pr` | Minimum of three provider requests | overwrites the requested file, a sibling `.final.md`, and a temporary backup | attempts to fetch the base |
-| `pr --create-pr` | Same multi-pass generation | may run format, always runs `npm test` and `npm run build`, then writes summaries | pushes only when creating a new PR; updating an existing PR does not push local commits |
-| `init` | 0 | edits `package.json` only when scripts are added or migrated | none |
+| `pr --create-pr` | Same multi-pass generation | may run format, always runs the detected package manager's test/build scripts (`npm test` and `npm run build` for npm), then writes summaries | pushes only when creating a new PR; updating an existing PR does not push local commits |
+| `init --dry-run` | 0 | none | previews the redacted setup plan; no install or live request |
+| no-argument non-TTY `init` | 0 | edits `package.json` only when generic scripts are added or migrated | none |
+| guided or `--yes` `init` | 0 by default; 1 only with explicit live consent | may update `package.json`, a lockfile, `.gitignore`, `.env.local`, `CLAUDE.md`, and `AGENTS.md` after interactive confirmation or deterministic `--yes` planning | may install the exact local package; runs offline doctor; live doctor is separately explicit |
 
 PR synthesis uses one first-pass request, one request per 20,000-character
 commit chunk, and one final synthesis request. A release-summary fallback can
-add one more request. `--create-pr` runs `format` only when that script exists
-unless you skip it; test and build always run. Those gates can modify files and
-run arbitrary project code before Diffwright performs its dirty-tree check.
+add one more request. `--create-pr` uses the detected package manager. It runs
+`format` only when that script exists unless you skip it; test and build always
+run (`npm test` and `npm run build` in an npm project). Those gates can modify
+files and run arbitrary project code before Diffwright performs its dirty-tree
+check.
 
 The default PR output is `.pr-summaries/PR_SUMMARY.md`; the slim GitHub body is
 `.pr-summaries/PR_SUMMARY.final.md`. A separate temporary backup is also

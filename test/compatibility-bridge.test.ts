@@ -23,11 +23,11 @@ test('legacy package delegates to Diffwright without install hooks', () => {
   );
 
   assert.equal(manifest.name, 'cli-changescribe');
-  assert.equal(manifest.version, '0.2.3');
+  assert.equal(manifest.version, '0.2.4');
   assert.deepEqual(manifest.bin, {
     changescribe: 'bin/changescribe.js',
   });
-  assert.equal(manifest.dependencies.diffwright, '^0.3.0');
+  assert.equal(manifest.dependencies.diffwright, '>=0.3.0 <1');
   assert.equal(manifest.scripts, undefined);
 
   assert.match(wrapper, /diffwright\/bin\/diffwright\.js/);

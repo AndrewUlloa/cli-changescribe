@@ -15,7 +15,8 @@ Branch names are validated before fetch or GitHub use. Invalid invocations do
 not stage files, fetch, call a model, write output, commit, or push.
 
 `-h` and `--help` are supported globally and as the only option after a known
-command.
+command. `-v` and `--version` print the exact installed Diffwright version and
+exit without running a workflow.
 
 ## `commit`
 
@@ -52,13 +53,110 @@ transport, compatibility status, and offline success.
 ## `init`
 
 ```text
-diffwright init
+diffwright init [options]
 ```
 
-`init` accepts no options. It adds missing `commit`, `pr:summary`, `feature:pr`,
-and `staging:pr` scripts to the current `package.json`. It migrates exact
-ChangeScribe-generated values, preserves custom script values, and does not
-rewrite the file when no changes are needed.
+| Option | Meaning |
+|---|---|
+| `--yes` | Accept supplied choices and safe detected defaults without prompts. |
+| `--dry-run` | Show the redacted plan without installs, writes, or a live request. |
+| `--provider <id>` | Select `openai`, `anthropic`, `google`, `xai`, `deepseek`, `openrouter`, `vercel`, `cerebras`, `groq`, `ollama`, or `custom`. |
+| `--model <id>` | Set the provider's exact model identifier. |
+| `--base <branch>` | Set the feature pull-request base. |
+| `--agents <targets>` | Install managed rules for `claude`, `codex`, both as `claude,codex`/`codex,claude`, or `none`. |
+| `--credential-source <source>` | Use `existing` configuration or select `file` storage. In deterministic mode the file credential must already exist. This is a source selector, never a credential value. |
+| `--live` | After offline doctor succeeds, make one provider request. Incompatible with `--dry-run`. |
+
+### Package runners
+
+Launch guided setup with the package runner already used by the project:
+
+| Package runner | Preview without project writes | Guided setup |
+|---|---|---|
+| pnpm | `pnpm dlx diffwright@latest init --dry-run` | `pnpm dlx diffwright@latest init` |
+| npm | `npx diffwright@latest init --dry-run` | `npx diffwright@latest init` |
+| Yarn 2+ | `yarn dlx diffwright@latest init --dry-run` | `yarn dlx diffwright@latest init` |
+| Bun | `bunx diffwright@latest init --dry-run` | `bunx diffwright@latest init` |
+
+Yarn Classic does not include `yarn dlx`; use the `npx` launcher there. The
+launcher and the detected project package manager are separate: after startup,
+Diffwright reads the `packageManager` declaration and lockfile and uses the
+detected npm, pnpm, Yarn, or Bun command for the exact local pin and project
+scripts. Add `--dry-run` to any launcher command for a redacted project preview.
+
+### Init modes
+
+**Guided TTY.** With no deterministic configuration option and with stdin and stdout
+attached to an interactive TTY, `init` starts the wizard. It detects
+the package manager, Git branch topology, existing gates, configuration, and
+agent files; then it asks for provider, exact model, credential source, PR base,
+commit gates, and optional agent guardrails. It renders a redacted plan before
+asking for confirmation.
+
+The credential step also offers **Configure later**. That choice writes only
+the nonsecret setup, skips doctor, and ends with an incomplete-setup message
+and the exact offline-doctor command to run after adding the credential.
+
+**Legacy non-TTY.** A no-argument, non-TTY invocation preserves the original
+script-only contract. It adds missing `commit`, `pr:summary`, `feature:pr`, and
+`staging:pr` values, migrates exact ChangeScribe-generated values, preserves
+custom scripts, and does nothing else. It never prompts, installs, writes
+credentials or agent files, or runs doctor.
+
+**Deterministic.** `--yes` never prompts. It uses supplied choices and safe
+detected defaults, but a provider that lacks required existing credentials
+fails with corrective guidance. It does not add agent guardrails unless
+`--agents` names them, and `--live` is never implied. Supplying `--provider`,
+`--model`, `--base`, `--agents`, or `--credential-source` also selects headless
+setup. No option accepts a credential value.
+
+**Preview.** `--dry-run` may collect interactive answers and perform in-memory
+validation, but performs no project dependency install, target-project file
+write, or live provider request. `--live` and `--dry-run` cannot be combined.
+When the command is launched with `pnpm dlx`, `npx`, `yarn dlx`, or `bunx`, the
+runner may still resolve or download the CLI into its own cache or temporary
+environment before Diffwright receives `--dry-run`.
+
+### Init plan and side effects
+
+The guided plan can:
+
+1. Pin the running Diffwright version exactly as a local development dependency
+   through the detected npm, pnpm, Yarn, or Bun command, with install lifecycle
+   scripts disabled. This updates the applicable manifest and lockfile.
+2. Add branch-aware `commit`, `pr:summary`, and feature/release PR scripts.
+   Selected existing `lint`, `typecheck`, `test`, and `build` scripts run before
+   commit generation. A feature PR targets `staging` only when that branch is
+   present and selected; otherwise it targets the detected default branch.
+3. Reuse an existing provider/model/credential, or write selected Diffwright
+   variables to `.env.local`. A file credential is accepted only through the
+   no-echo secret prompt in an interactive TTY. `.env.local` must be untracked
+   and protected by `.gitignore` before a credential is written.
+4. Add one marker-delimited managed block to selected root `CLAUDE.md` and/or
+   `AGENTS.md` files. The block names the actual generated scripts and forbids
+   raw Git/GitHub mutation for shipping work. Text outside the block is
+   preserved.
+
+Custom package scripts are not replaced. Exact managed Diffwright or
+ChangeScribe values may be migrated; a custom collision receives a
+`diffwright:*` fallback when that fallback is free. The preview names the
+effective scripts.
+
+An external project uses the exact local version rather than a global binary.
+When the current project is Diffwright's own validated checkout, setup never
+adds a self-dependency: it builds the current source and invokes
+`node ./bin/diffwright.js`.
+
+In guided mode, nothing above is applied until the user confirms the redacted
+plan. Declining or pressing Ctrl-C before confirmation exits without writes or
+provider calls. A deterministic invocation applies without an extra prompt;
+use `--dry-run` first when automation needs a separate preview step.
+After a successful apply, `init` runs doctor offline. The live check is a
+separate explicit consent step and makes exactly one request to the resolved
+provider. An install, offline-doctor, or live-doctor failure exits nonzero and
+reports which phase failed; successfully applied files are not disguised as a
+rollback. Recovery is documented in
+[troubleshooting](https://github.com/AndrewUlloa/diffwright/blob/main/documentation/troubleshooting.md).
 
 ## `pr`
 
@@ -89,9 +187,10 @@ uses local refs if fetch fails. It does not call the provider or write output.
 ### `--create-pr` order
 
 1. Confirm `gh` is installed.
-2. Run `npm run format` when that script exists, unless format was skipped.
-3. Always run `npm test`.
-4. Always run `npm run build`.
+2. Detect the project package manager and run its `format` script when present,
+   unless format was skipped (`npm run format` for npm).
+3. Always run its test script (`npm test` for npm).
+4. Always run its build script (`npm run build` for npm).
 5. Reject a dirty working tree.
 6. Generate and write summaries.
 7. Update an existing PR, or push the current branch and create a PR.
@@ -114,8 +213,8 @@ Explicit options placed after an alias override its prepended defaults.
 ## Configuration precedence
 
 Diffwright reads `.env.local` from the current working directory at command
-invocation. Shell variables override file values, including explicitly empty
-shell values. See the [provider guide](https://github.com/AndrewUlloa/diffwright/blob/main/documentation/providers.md)
+invocation. Shell values, including explicitly empty values, override
+`.env.local`. See the [provider guide](https://github.com/AndrewUlloa/diffwright/blob/main/documentation/providers.md)
 for provider activation and legacy precedence.
 
 ## Exit behavior
