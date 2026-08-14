@@ -16,6 +16,14 @@ Diffwright 0.4.1 is published under the npm `latest` tag. Clean public-registry
 projects ran `init --dry-run` through all four launchers, detected the matching
 project manager, and preserved their manifests byte-for-byte.
 
+Diffwright 0.4.2 is also published under the npm `latest` tag. This follow-up
+hardens Diffwright's own PR synthesis after the release PR exposed ungrounded
+CLI/behavior claims and a SHA-prefixed generated title. Pass 2 and pass 3 now
+require direct evidence for options, behavior, tests, risks, and migrations; the
+PR template supplies a distinct `Overall:` branch summary for title derivation.
+The workflow transport and captured GitHub arguments have focused regression
+coverage, and the public executable reports version 0.4.2.
+
 ## Release summary
 
 Diffwright now provides a shadcn-style `npx diffwright@latest init` walkthrough

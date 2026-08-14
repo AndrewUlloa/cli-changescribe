@@ -1,6 +1,6 @@
 {
   "name": "diffwright",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Generate Conventional Commits and PR summaries from Git diffs with your own AI provider",
   "bin": {
     "diffwright": "bin/diffwright.js"

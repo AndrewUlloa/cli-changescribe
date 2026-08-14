@@ -68,7 +68,7 @@ async function createCompletionServer(context: TestContext): Promise<{
                   '- why: let users bring their own provider\n' +
                   '- risk: workflow-secret ambient-secret\n\n' +
                   'What issue is this PR related to?\nRelated: (not provided)\n\n' +
-                  'What change does this PR add?\n- Add provider-neutral completion routing\n\n' +
+                  'What change does this PR add?\n- Overall: Add provider-neutral completion routing\n\n' +
                   'How did you test your change?\nTesting: local wire test\n\n' +
                   'Anything you want reviewers to scrutinize?\n- Provider precedence\n\n' +
                   'Other notes reviewers should know (risks + follow-ups)\n- None',
@@ -388,6 +388,14 @@ test('PR workflow uses explicit custom provider for every synthesis pass', async
     );
     assert.deepEqual(Object.keys(request.body).sort(), ['messages', 'model']);
   }
+  assert.match(
+    JSON.stringify(server.requests[1].body),
+    /CLI options.*explicitly visible.*diff/is,
+  );
+  assert.match(
+    JSON.stringify(server.requests[2].body),
+    /Overall: <summary>.*no commit SHA/is,
+  );
   assert.match(fs.readFileSync(output, 'utf8'), /What change does this PR add\?/);
   assert.doesNotMatch(
     fs.readFileSync(output, 'utf8'),
@@ -455,6 +463,10 @@ test('PR creation links an issue in the body without passing an unsupported gh f
     body: string;
   };
   assert.equal(captured.args.includes('--issue'), false);
+  assert.equal(
+    captured.args[captured.args.indexOf('--title') + 1],
+    'Add provider-neutral completion routing',
+  );
   assert.match(captured.body, /(?:^|\n)Closes #123(?:\n|$)/);
   assert.match(
     JSON.stringify(server.requests.map((request) => request.body)),

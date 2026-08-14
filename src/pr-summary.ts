@@ -388,7 +388,7 @@ function buildPass2Messages(
     {
       role: 'system',
       content:
-        'You are producing compact, high-signal summaries per commit. Use the diff and file stats to understand exactly what changed in the code. Produce 2-3 bullets each (change, rationale, risk/test note). Flag any breaking changes or migrations. IMPORTANT: Only reference technologies, frameworks, and patterns that are explicitly visible in the diff or file names. Do not infer or guess technologies that are not shown (e.g., do not mention GraphQL unless you see .graphql files or GraphQL client imports in the diff).',
+        'You are producing compact, high-signal summaries per commit. Use the diff and file stats to understand exactly what changed in the code. Produce 2-3 bullets each (change, rationale, risk/test note). Flag breaking changes or migrations only when directly evidenced. IMPORTANT: Only reference technologies, frameworks, patterns, CLI options, behavior, tests, risks, and migrations that are explicitly visible in the supplied diff or commit body. Omit uncertain claims instead of inferring them. A filename such as package-manager.ts is not evidence that a --package-manager CLI option exists.',
     },
     {
       role: 'user',
@@ -417,7 +417,7 @@ function buildPass3Messages(
     {
       role: 'system',
       content:
-        'You write PR summaries that are easy to review. Be concise, specific, and action-oriented. Do not include markdown fences. Only reference technologies and patterns that appear in the commit summaries provided. Never fabricate or assume technologies not explicitly mentioned (e.g., do not mention GraphQL, Apollo, Relay, or similar unless the summaries explicitly reference them).',
+        'You write PR summaries that are easy to review. Be concise, specific, and action-oriented. Do not include markdown fences. Use only facts explicitly present in the supplied summaries, snapshot, and commit titles. Never invent CLI options, files, functions, behavior, test results, risks, migrations, or technologies. Omit a claim when the inputs do not prove it.',
     },
     {
       role: 'user',
@@ -444,7 +444,9 @@ function buildPass3Messages(
         'Rules:',
         '- If the issue is unknown, write: "Related: (not provided)".',
         '- If testing is unknown, write: "Testing: (not provided)".',
+        '- The first bullet under "What change does this PR add?" must be one concise branch-level summary formatted exactly as "- Overall: <summary>" with no commit SHA.',
         '- Every commit must appear as its own bullet under "What change does this PR add?". Do not group commits under "miscellaneous" or similar catch-all labels.',
+        '- Do not introduce a CLI option, behavior, test result, risk, or migration unless that exact fact appears in the inputs.',
         '- Be thorough and specific. Reference actual file names, functions, and architectural changes.',
         '- Prefer bullets.',
         '',
@@ -466,7 +468,7 @@ function buildReleaseMessages(
     {
       role: 'system',
       content:
-        'You write release PR summaries for QA to production. Be concise, concrete, and action-oriented. Do not include markdown fences. Only reference technologies and patterns that appear in the commit summaries provided. Never fabricate or assume technologies not explicitly mentioned.',
+        'You write release PR summaries for QA to production. Be concise, concrete, and action-oriented. Do not include markdown fences. Use only facts explicitly present in the supplied summaries, snapshot, and commit titles. Never invent CLI options, files, functions, behavior, test results, risks, migrations, or technologies. Omit a claim when the inputs do not prove it.',
     },
     {
       role: 'user',
@@ -493,7 +495,9 @@ function buildReleaseMessages(
         '',
         'Rules:',
         '- If unknown, write: "Unknown".',
+        '- The first bullet under "Release summary" must be one concise branch-level summary formatted exactly as "- Overall: <summary>" with no commit SHA.',
         '- Every commit must appear as its own bullet. Do not group commits under catch-all labels like "miscellaneous".',
+        '- Do not introduce a CLI option, behavior, test result, risk, or migration unless that exact fact appears in the inputs.',
         '- Be thorough and specific. Reference actual changes from the commit summaries.',
         '- Prefer bullets.',
         '',
@@ -709,6 +713,8 @@ function extractPrTitle(summary: string, mode: string): string | null {
         .replace(/`([^`]+)`/g, '$1')
         .replace(/\*\*([^*]+)\*\*/g, '$1')
         .replace(/\*([^*]+)\*/g, '$1')
+        .replace(/^Overall:\s*/i, '')
+        .replace(/^[0-9a-f]{7,40}\s*[–—:-]\s*/i, '')
         .slice(0, 100);
       if (clean.length > 10) {
         return clean;
