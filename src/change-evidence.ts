@@ -160,6 +160,7 @@ const MAX_LOCATOR_CHARS = 2_048;
 const MAX_TEXT_CHARS = 65_536;
 const MAX_PATCH_CHARS = 2 * 1024 * 1024;
 const MAX_BUNDLE_CHARS = 8 * 1024 * 1024;
+const MAX_CONSTRAINT_ARRAY_ITEMS = 256;
 
 export function createEvidenceBundle(
   input: EvidenceBundleInput,
@@ -337,6 +338,7 @@ function validateEvidenceItem(
 
   if (item.kind === 'constraint') {
     validateText(item.payload.name, 'Constraint name', 128);
+    validateConstraintValue(item.payload.value);
     return;
   }
 
@@ -493,6 +495,40 @@ function validateCount(value: number | null, label: string): void {
   if (value !== null && (!Number.isSafeInteger(value) || value < 0)) {
     throw new Error(`${label} must be null or a safe nonnegative integer.`);
   }
+}
+
+function validateConstraintValue(value: ConstraintValue): void {
+  if (typeof value === 'string') {
+    validateText(value, 'Constraint value', MAX_TEXT_CHARS, true);
+    return;
+  }
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) {
+      throw new Error('Constraint value number must be finite.');
+    }
+    return;
+  }
+  if (typeof value === 'boolean' || value === null) {
+    return;
+  }
+  if (Array.isArray(value)) {
+    if (value.length > MAX_CONSTRAINT_ARRAY_ITEMS) {
+      throw new Error('Constraint value array exceeds its supported size.');
+    }
+    for (const item of value) {
+      if (typeof item !== 'string') {
+        throw new Error('Constraint value array item must be a string.');
+      }
+      validateText(
+        item,
+        'Constraint value array item',
+        MAX_TEXT_CHARS,
+        true,
+      );
+    }
+    return;
+  }
+  throw new Error('Constraint value type is invalid.');
 }
 
 function validateText(
