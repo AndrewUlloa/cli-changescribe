@@ -394,6 +394,29 @@ test('renders adaptive PR sections and exact receipts, not model test prose', ()
   assert.doesNotMatch(artifact.body, /## Changes|## Why|## Follow-ups/);
 });
 
+test('renders authoritative receipts without requiring model verification prose', () => {
+  const evidence = bundle();
+  const draft = artifactDraft.parseArtifactDraft(
+    draftJson({ includeVerification: false }),
+    evidence,
+  );
+  const artifact = renderer.renderPullRequestArtifact(draft, evidence);
+
+  assert.match(artifact.body, /## Verification\n\n- Passed: `npm test`/);
+});
+
+test('renders only authoritative receipts in a PR verification section', () => {
+  const evidence = bundle();
+  const draft = artifactDraft.parseArtifactDraft(draftJson(), evidence);
+  const artifact = renderer.renderPullRequestArtifact(draft, evidence);
+
+  assert.match(
+    artifact.body,
+    /## Verification\n\n- Passed: `npm test`(?:\n|$)/,
+  );
+  assert.doesNotMatch(artifact.body, /Tests passed somehow/);
+});
+
 test('never renders a failed or skipped receipt as passed', () => {
   for (const status of ['failed', 'skipped'] as const) {
     const evidence = bundle(status);
