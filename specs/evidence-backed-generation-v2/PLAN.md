@@ -147,44 +147,46 @@ Non-decisions:
     `test/typescript-migration.test.ts`, `test/distribution.test.ts`
   - **Size:** M
 
-- [ ] **Task 5: Replace the PR summary chain with evidence-linked synthesis**
+- [x] **Task 5: Replace the PR summary chain with evidence-linked synthesis**
   - **Description:** Remove 5Cs and model-summary chaining. Extract structured
     claims from original evidence, merge them deterministically, and render
     adaptive reviewer-oriented sections.
   - **Acceptance:**
-    - [ ] No model-authored summary is treated as original evidence.
-    - [ ] Empty optional sections disappear.
-    - [ ] Every material generated claim references recognized evidence.
+    - [x] No model-authored summary is treated as original evidence.
+    - [x] Empty optional sections disappear.
+    - [x] Every material generated claim references recognized evidence.
   - **Verify:**
     - `node --test .test-dist/pr-summary-v2.test.js`
     - `npm test`
   - **Depends on:** Task 4
-  - **Files:** `src/pr-summary.ts`, `test/pr-summary-v2.test.ts`,
+  - **Files:** `src/pr-summary.ts`, `src/pr-workflow.ts`,
+    `src/artifact-draft.ts`, `src/artifact-renderer.ts`,
     `test/workflow-byok.test.ts`
   - **Size:** M
 
-- [ ] **Task 6: Record gate receipts and preserve squash-title policy**
+- [x] **Task 6: Record gate receipts and preserve squash-title policy**
   - **Description:** Capture exact package-manager gate outcomes, render
     verification deterministically, and validate PR titles with the shared
     Conventional Commit header policy.
   - **Acceptance:**
-    - [ ] Passing claims contain exact executed commands.
-    - [ ] Failed/unrun gates cannot be rendered as passed.
-    - [ ] Generated PR titles remain valid squash-merge subjects.
+    - [x] Passing claims contain exact executed commands.
+    - [x] Failed/unrun gates cannot be rendered as passed.
+    - [x] Generated PR titles remain valid squash-merge subjects.
   - **Verify:**
     - `node --test .test-dist/workflow-byok.test.js`
     - `node --test .test-dist/pr-summary-v2.test.js`
   - **Depends on:** Task 5
-  - **Files:** `src/pr-summary.ts`, `src/change-evidence.ts`,
-    `test/workflow-byok.test.ts`, `test/pr-summary-v2.test.ts`
+  - **Files:** `src/gate-receipts.ts`, `src/pr-workflow.ts`,
+    `src/artifact-renderer.ts`, `test/gate-receipts.test.ts`,
+    `test/workflow-byok.test.ts`
   - **Size:** M
 
 ### Checkpoint: PR Correctness
 
-- [ ] Net-diff adversarial fixtures pass
-- [ ] Gate receipts are deterministic
-- [ ] No 5Cs or mandatory per-commit ledger remains
-- [ ] Full suite remains green
+- [x] Net-diff adversarial fixtures pass
+- [x] Gate receipts are deterministic
+- [x] No 5Cs or mandatory per-commit ledger remains
+- [x] Full suite remains green
 
 ### Phase 4: Commit Generation v2
 

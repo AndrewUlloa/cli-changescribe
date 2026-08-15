@@ -99,6 +99,7 @@ function expectedDiffwrightFiles(): string[] {
     'project-setup',
     'prompts',
     'pr-summary',
+    'pr-workflow',
     'provider',
     'runtime-config',
     'errors',

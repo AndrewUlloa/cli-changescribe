@@ -196,6 +196,19 @@ export function collectPullRequestEvidence(
   });
 }
 
+export function assertEvidenceSnapshotCurrent(
+  snapshot: EvidenceBundle['snapshot'],
+  cwd = process.cwd(),
+  runner: CommandRunner = defaultCommandRunner,
+): void {
+  const currentHead = revParse('HEAD^{commit}', cwd, runner, 'HEAD');
+  if (currentHead !== snapshot.headSha) {
+    throw new Error(
+      'Repository HEAD changed after evidence collection. Regenerate the artifact before mutation.',
+    );
+  }
+}
+
 function validateBaseBranch(
   value: string,
   cwd: string,

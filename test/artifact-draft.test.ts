@@ -151,6 +151,19 @@ test('rejects free-form markdown, unknown fields, and unknown evidence ids', () 
   );
 });
 
+test('requires explicit evidence before rendering a breaking title', () => {
+  const candidate = validDraft();
+  (candidate.title as Record<string, unknown>).breaking = true;
+  assert.throws(
+    () =>
+      artifactDraft.parseArtifactDraft(
+        JSON.stringify(candidate),
+        evidenceBundle(),
+      ),
+    /explicit breaking-change constraint/,
+  );
+});
+
 test('rejects unsupported rationale and risk instead of accepting plausible prose', () => {
   for (const kind of ['rationale', 'risk']) {
     const candidate = validDraft();
