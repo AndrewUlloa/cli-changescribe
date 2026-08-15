@@ -41,6 +41,12 @@ export interface RenderedPullRequest {
   readonly warnings: readonly string[];
 }
 
+export interface RenderedCommit {
+  readonly title: string;
+  readonly message: string;
+  readonly warnings: readonly string[];
+}
+
 const SECTION_ORDER: readonly ArtifactSectionKind[] = [
   'summary',
   'changes',
@@ -147,6 +153,136 @@ export function renderPullRequestArtifact(
     body: `${bodySections.join('\n\n')}\n`,
     warnings: renderedTitle.warnings,
   });
+}
+
+export function renderCommitArtifact(
+  draft: ArtifactDraft,
+  evidence: EvidenceBundle,
+  policy: ConventionalTitlePolicy = {},
+): RenderedCommit {
+  if (!evidence.coverage.complete) {
+    throw new Error(
+      'Commit evidence is incomplete. Split the change or resolve the reported coverage gaps and retry.',
+    );
+  }
+  const renderedTitle = renderConventionalTitle(draft.title, policy);
+  const renderable = selectRenderableClaims(evidence, draft.claims);
+  const renderableById = new Map(renderable.map((claim) => [claim.id, claim]));
+  const sectionsByKind = new Map(
+    draft.sections.map((section) => [section.kind, section]),
+  );
+  const bodyBlocks: string[] = [];
+
+  const changeClaims = ['summary', 'changes']
+    .flatMap(
+      (kind) => sectionsByKind.get(kind as ArtifactSectionKind)?.claimIds ?? [],
+    )
+    .map((claimId) => renderableById.get(claimId))
+    .filter(
+      (claim): claim is DraftClaim =>
+        claim !== undefined && claim.significance !== 'primary',
+    );
+  if (changeClaims.length === 1) {
+    bodyBlocks.push(wrapParagraph(changeClaims[0].text));
+  } else if (changeClaims.length > 1) {
+    bodyBlocks.push(
+      changeClaims
+        .map((claim) => wrapParagraph(claim.text, '- ', '  '))
+        .join('\n'),
+    );
+  }
+
+  for (const claim of sectionClaims(
+    sectionsByKind,
+    renderableById,
+    'rationale',
+  )) {
+    bodyBlocks.push(wrapParagraph(claim.text));
+  }
+
+  const passedReceipts =
+    (sectionsByKind.get('verification')?.claimIds.length ?? 0) > 0
+      ? evidence.receipts.filter((receipt) => receipt.status === 'passed')
+      : [];
+  if (passedReceipts.length > 0) {
+    bodyBlocks.push(
+      passedReceipts
+        .map((receipt) =>
+          wrapParagraph(`Verified: ${receipt.command.display}`),
+        )
+        .join('\n'),
+    );
+  }
+
+  for (const claim of sectionClaims(
+    sectionsByKind,
+    renderableById,
+    'risks',
+  )) {
+    bodyBlocks.push(wrapParagraph(`Risk: ${claim.text}`));
+  }
+  for (const claim of sectionClaims(
+    sectionsByKind,
+    renderableById,
+    'follow-ups',
+  )) {
+    bodyBlocks.push(wrapParagraph(`Follow-up: ${claim.text}`));
+  }
+
+  const trailerBlock = draft.trailers
+    .map((trailer) => wrapParagraph(`${trailer.token}: ${trailer.value}`))
+    .join('\n');
+  const message = [
+    renderedTitle.header,
+    ...bodyBlocks,
+    ...(trailerBlock.length === 0 ? [] : [trailerBlock]),
+  ].join('\n\n');
+  return Object.freeze({
+    title: renderedTitle.header,
+    message,
+    warnings: renderedTitle.warnings,
+  });
+}
+
+function sectionClaims(
+  sectionsByKind: ReadonlyMap<ArtifactSectionKind, ArtifactDraft['sections'][number]>,
+  renderableById: ReadonlyMap<string, DraftClaim>,
+  kind: ArtifactSectionKind,
+): DraftClaim[] {
+  return (sectionsByKind.get(kind)?.claimIds ?? []).flatMap((claimId) => {
+    const claim = renderableById.get(claimId);
+    return claim === undefined ? [] : [claim];
+  });
+}
+
+function wrapParagraph(
+  text: string,
+  firstPrefix = '',
+  continuationPrefix = '',
+  width = 72,
+): string {
+  const words = text.trim().split(/\s+/u).filter(Boolean);
+  if (words.length === 0) {
+    return firstPrefix.trimEnd();
+  }
+  const lines: string[] = [];
+  let prefix = firstPrefix;
+  let line = prefix;
+  for (const word of words) {
+    const separator = line.length === prefix.length ? '' : ' ';
+    if (
+      line.length > prefix.length &&
+      line.length + separator.length + word.length > width
+    ) {
+      lines.push(line);
+      prefix = continuationPrefix;
+      line = `${prefix}${word}`;
+    } else {
+      line += `${separator}${word}`;
+    }
+  }
+  lines.push(line);
+  return lines.join('\n');
 }
 
 function renderClaimSection(

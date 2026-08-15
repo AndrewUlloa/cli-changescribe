@@ -14,6 +14,10 @@ interface RendererModule {
     draft: unknown,
     evidence: unknown,
   ): { title: string; body: string; warnings: readonly string[] };
+  renderCommitArtifact(
+    draft: unknown,
+    evidence: unknown,
+  ): { title: string; message: string; warnings: readonly string[] };
 }
 
 interface ArtifactDraftModule {
@@ -57,6 +61,22 @@ function bundle(
         basis: 'observed',
         source: { kind: 'project-gate', locator: 'npm test' },
         payload: { receiptId: 'gate-test' },
+      },
+      {
+        id: 'intent-1',
+        kind: 'intent',
+        basis: 'provided',
+        source: { kind: 'user-intent', locator: 'test-fixture' },
+        payload: {
+          text: 'Keep empty input compatible with existing parser callers.',
+        },
+      },
+      {
+        id: 'constraint-issue',
+        kind: 'constraint',
+        basis: 'provided',
+        source: { kind: 'workflow', locator: 'issue-reference' },
+        payload: { name: 'issue-reference', value: '#123' },
       },
     ],
     receipts: [
@@ -148,6 +168,76 @@ test('renders standard, scoped, and breaking Conventional Commit titles', () => 
       subject: 'remove legacy endpoint',
     }).header,
     'feat(api)!: remove legacy endpoint',
+  );
+});
+
+test('renders an adaptive wrapped commit without forced filler', () => {
+  const evidence = bundle();
+  const draft = artifactDraft.parseArtifactDraft(
+    JSON.stringify({
+      schemaVersion: 1,
+      title: {
+        type: 'fix',
+        scope: 'parser',
+        breaking: false,
+        subject: 'handle empty tokens',
+      },
+      claims: [
+        {
+          id: 'claim-change',
+          kind: 'change',
+          text: 'Handle empty tokens without throwing from the parser.',
+          evidenceIds: ['change-1'],
+          basis: 'observed',
+          significance: 'primary',
+        },
+        {
+          id: 'claim-rationale',
+          kind: 'rationale',
+          text: 'Keep empty input compatible with existing parser callers.',
+          evidenceIds: ['intent-1'],
+          basis: 'provided',
+          significance: 'supporting',
+        },
+      ],
+      sections: [
+        { kind: 'summary', claimIds: ['claim-change'] },
+        { kind: 'rationale', claimIds: ['claim-rationale'] },
+      ],
+      trailers: [
+        { token: 'Refs', value: '#123', evidenceIds: ['constraint-issue'] },
+      ],
+    }),
+    evidence,
+  );
+  const artifact = renderer.renderCommitArtifact(draft, evidence);
+
+  assert.equal(artifact.title, 'fix(parser): handle empty tokens');
+  assert.equal(
+    artifact.message,
+    [
+      'fix(parser): handle empty tokens',
+      '',
+      'Keep empty input compatible with existing parser callers.',
+      '',
+      'Refs: #123',
+    ].join('\n'),
+  );
+  assert.doesNotMatch(artifact.message, /not provided|risk:/i);
+  for (const line of artifact.message.split('\n')) {
+    assert.ok(line.length <= 72, line);
+  }
+});
+
+test('uses a subject-only commit when no durable body context is supported', () => {
+  const evidence = bundle();
+  const draft = artifactDraft.parseArtifactDraft(
+    draftJson({ includeVerification: false }),
+    evidence,
+  );
+  assert.equal(
+    renderer.renderCommitArtifact(draft, evidence).message,
+    'fix(parser): handle empty tokens',
   );
 });
 

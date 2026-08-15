@@ -28,6 +28,7 @@ export interface ArtifactSectionDraft {
 export interface ArtifactTrailerDraft {
   token: string;
   value: string;
+  evidenceIds: readonly string[];
 }
 
 export interface ArtifactDraft {
@@ -160,7 +161,10 @@ export function parseArtifactDraft(
   }
 
   const rawTrailers = boundedArray(root.trailers, 'Artifact trailers', 64);
-  const trailers = rawTrailers.map(parseTrailer);
+  const evidenceById = new Map(evidence.items.map((item) => [item.id, item]));
+  const trailers = rawTrailers.map((value) =>
+    parseTrailer(value, evidenceById),
+  );
   return deepFreeze({
     schemaVersion: 1,
     title,
@@ -298,9 +302,12 @@ function parseSection(
   };
 }
 
-function parseTrailer(value: unknown): ArtifactTrailerDraft {
+function parseTrailer(
+  value: unknown,
+  evidenceById: ReadonlyMap<string, EvidenceBundle['items'][number]>,
+): ArtifactTrailerDraft {
   const trailer = objectRecord(value, 'Artifact trailer');
-  requireExactKeys(trailer, ['token', 'value']);
+  requireExactKeys(trailer, ['token', 'value', 'evidenceIds']);
   const token = boundedString(trailer.token, 'Artifact trailer token', 64);
   if (!TRAILER_TOKEN_RE.test(token)) {
     throw new Error('Artifact trailer token is invalid.');
@@ -310,7 +317,24 @@ function parseTrailer(value: unknown): ArtifactTrailerDraft {
     'Artifact trailer value',
     MAX_TRAILER_VALUE_CHARS,
   );
-  return { token, value: trailerValue };
+  const trailerEvidenceIds = boundedArray(
+    trailer.evidenceIds,
+    'Artifact trailer evidence',
+    64,
+  ).map((evidenceId) => {
+    const id = boundedString(evidenceId, 'Artifact trailer evidence id', 64);
+    if (!ID_RE.test(id) || evidenceById.get(id)?.basis !== 'provided') {
+      throw new Error('Artifact trailer evidence is invalid.');
+    }
+    return id;
+  });
+  if (
+    trailerEvidenceIds.length === 0 ||
+    new Set(trailerEvidenceIds).size !== trailerEvidenceIds.length
+  ) {
+    throw new Error('Artifact trailer evidence is invalid.');
+  }
+  return { token, value: trailerValue, evidenceIds: trailerEvidenceIds };
 }
 
 function objectRecord(value: unknown, label: string): Record<string, unknown> {
