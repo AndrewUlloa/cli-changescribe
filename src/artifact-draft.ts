@@ -118,6 +118,26 @@ export function parseArtifactDraft(
     throw new Error('Artifact draft contains duplicate claim ids.');
   }
   assertSupportedClaims(evidence, claims);
+  if (
+    title.breaking &&
+    !evidence.items.some(
+      (item) =>
+        item.kind === 'constraint' &&
+        item.payload.name === 'breaking-change' &&
+        item.payload.value === true,
+    )
+  ) {
+    throw new Error(
+      'A breaking title requires an explicit breaking-change constraint.',
+    );
+  }
+  if (
+    !claims.some(
+      (claim) => claim.kind === 'change' && claim.significance === 'primary',
+    )
+  ) {
+    throw new Error('Artifact draft requires a primary change claim.');
+  }
 
   const rawSections = boundedArray(root.sections, 'Artifact sections', 7);
   const claimKinds = new Map(claims.map((claim) => [claim.id, claim.kind]));

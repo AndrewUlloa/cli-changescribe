@@ -33,7 +33,10 @@ async function body(request: IncomingMessage): Promise<Record<string, unknown>> 
   return JSON.parse(Buffer.concat(chunks).toString('utf8'));
 }
 
-async function createCompletionServer(context: TestContext): Promise<{
+async function createCompletionServer(
+  context: TestContext,
+  options: { invalidArtifactResponses?: number } = {},
+): Promise<{
   baseURL: string;
   requests: Array<{ url: string; authorization: string; body: Record<string, unknown> }>;
 }> {
@@ -50,6 +53,10 @@ async function createCompletionServer(context: TestContext): Promise<{
         body: parsed,
       });
       response.writeHead(200, { 'content-type': 'application/json' });
+      const serializedRequest = JSON.stringify(parsed);
+      const isArtifactDraft = serializedRequest.includes(
+        'Produce one evidence-linked draft',
+      );
       response.end(
         JSON.stringify({
           id: `chatcmpl_${requests.length}`,
@@ -62,16 +69,45 @@ async function createCompletionServer(context: TestContext): Promise<{
               finish_reason: 'stop',
               message: {
                 role: 'assistant',
-                content:
-                  'fix: support provider-neutral configuration\n\n' +
-                  '- change: route completions through the selected endpoint\n' +
-                  '- why: let users bring their own provider\n' +
-                  '- risk: workflow-secret ambient-secret\n\n' +
-                  'What issue is this PR related to?\nRelated: (not provided)\n\n' +
-                  'What change does this PR add?\n- Overall: Add provider-neutral completion routing\n\n' +
-                  'How did you test your change?\nTesting: local wire test\n\n' +
-                  'Anything you want reviewers to scrutinize?\n- Provider precedence\n\n' +
-                  'Other notes reviewers should know (risks + follow-ups)\n- None',
+                content: isArtifactDraft &&
+                  requests.filter((item) =>
+                    JSON.stringify(item.body).includes(
+                      'Produce one evidence-linked draft',
+                    ) || JSON.stringify(item.body).includes(
+                      'previous response failed deterministic validation',
+                    ),
+                  ).length <= (options.invalidArtifactResponses ?? 0)
+                  ? 'not valid artifact json'
+                  : isArtifactDraft || serializedRequest.includes(
+                      'previous response failed deterministic validation',
+                    )
+                  ? JSON.stringify({
+                      schemaVersion: 1,
+                      title: {
+                        type: 'fix',
+                        breaking: false,
+                        subject: 'route provider-neutral completions',
+                      },
+                      claims: [
+                        {
+                          id: 'claim-change',
+                          kind: 'change',
+                          text: 'Route completions through provider-neutral configuration.',
+                          evidenceIds: ['change-1'],
+                          basis: 'observed',
+                          significance: 'primary',
+                        },
+                      ],
+                      sections: [
+                        { kind: 'summary', claimIds: ['claim-change'] },
+                      ],
+                      trailers: [],
+                    })
+                  :
+                      'fix: support provider-neutral configuration\n\n' +
+                      '- change: route completions through the selected endpoint\n' +
+                      '- why: let users bring their own provider\n' +
+                      '- risk: workflow-secret ambient-secret',
               },
             },
           ],
@@ -357,7 +393,7 @@ test('commit workflow uses explicit custom provider through the shared transport
   assert.equal(git(directory, ['rev-parse', 'HEAD']).trim(), head);
 });
 
-test('PR workflow uses explicit custom provider for every synthesis pass', async (context) => {
+test('PR workflow uses one evidence-linked custom-provider draft', async (context) => {
   const directory = createRepository(context);
   git(directory, ['switch', '--quiet', '-c', 'feature']);
   fs.appendFileSync(
@@ -377,7 +413,7 @@ test('PR workflow uses explicit custom provider for every synthesis pass', async
 
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /Provider.*custom/i);
-  assert.equal(server.requests.length, 3);
+  assert.equal(server.requests.length, 1);
   for (const request of server.requests) {
     assert.equal(request.url, '/v1/chat/completions');
     assert.equal(request.authorization, 'Bearer workflow-secret');
@@ -389,18 +425,69 @@ test('PR workflow uses explicit custom provider for every synthesis pass', async
     assert.deepEqual(Object.keys(request.body).sort(), ['messages', 'model']);
   }
   assert.match(
-    JSON.stringify(server.requests[1].body),
-    /CLI options.*explicitly visible.*diff/is,
+    JSON.stringify(server.requests[0].body),
+    /Original evidence bundle.*kind.*change/is,
   );
-  assert.match(
-    JSON.stringify(server.requests[2].body),
-    /Overall: <summary>.*no commit SHA/is,
-  );
-  assert.match(fs.readFileSync(output, 'utf8'), /What change does this PR add\?/);
+  assert.match(fs.readFileSync(output, 'utf8'), /## Summary/);
+  assert.doesNotMatch(fs.readFileSync(output, 'utf8'), /5Cs|Pass 2/);
   assert.doesNotMatch(
     fs.readFileSync(output, 'utf8'),
     /workflow-secret|ambient-secret/,
   );
+});
+
+test('PR workflow repairs one invalid draft and never chains model summaries', async (context) => {
+  const directory = createRepository(context);
+  git(directory, ['switch', '--quiet', '-c', 'feature']);
+  fs.appendFileSync(path.join(directory, 'README.md'), 'repair fixture\n');
+  git(directory, ['add', 'README.md']);
+  git(directory, ['commit', '--quiet', '-m', 'fix: add repair fixture']);
+  const output = path.join(directory, 'summary.md');
+  const server = await createCompletionServer(context, {
+    invalidArtifactResponses: 1,
+  });
+
+  const result = await run(
+    directory,
+    ['pr', '--base', 'main', '--out', output],
+    customEnvironment(server.baseURL),
+  );
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.equal(server.requests.length, 2);
+  assert.match(result.stdout, /requesting one repair/);
+  assert.equal(
+    server.requests.every((request) =>
+      JSON.stringify(request.body).includes('Original evidence bundle'),
+    ),
+    true,
+  );
+  assert.doesNotMatch(
+    JSON.stringify(server.requests[1].body),
+    /not valid artifact json/,
+  );
+});
+
+test('PR workflow skips provider and output when branch history reverts to base', async (context) => {
+  const directory = createRepository(context);
+  git(directory, ['switch', '--quiet', '-c', 'feature']);
+  fs.appendFileSync(path.join(directory, 'README.md'), 'temporary value\n');
+  git(directory, ['add', 'README.md']);
+  git(directory, ['commit', '--quiet', '-m', 'feat: add temporary value']);
+  git(directory, ['revert', '--quiet', '--no-edit', 'HEAD']);
+  const output = path.join(directory, 'summary.md');
+  const server = await createCompletionServer(context);
+
+  const result = await run(
+    directory,
+    ['pr', '--base', 'main', '--out', output],
+    customEnvironment(server.baseURL),
+  );
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.equal(server.requests.length, 0);
+  assert.equal(fs.existsSync(output), false);
+  assert.match(result.stdout, /No final branch changes found/);
 });
 
 test('PR creation links an issue in the body without passing an unsupported gh flag', async (context) => {
@@ -465,12 +552,18 @@ test('PR creation links an issue in the body without passing an unsupported gh f
   assert.equal(captured.args.includes('--issue'), false);
   assert.equal(
     captured.args[captured.args.indexOf('--title') + 1],
-    'Add provider-neutral completion routing',
+    'fix: route provider-neutral completions',
   );
   assert.match(captured.body, /(?:^|\n)Closes #123(?:\n|$)/);
+  assert.match(captured.body, /Skipped: `npm run format`/);
+  assert.match(captured.body, /Passed: `npm test`/);
+  assert.match(captured.body, /Passed: `npm run build`/);
+  const title = captured.args[captured.args.indexOf('--title') + 1];
+  assert.match(title, /^[a-z][a-z0-9-]*(?:\([a-z0-9._/-]+\))?!?: .+/);
+  assert.equal(title.length <= 72, true);
   assert.match(
     JSON.stringify(server.requests.map((request) => request.body)),
-    /Issue hint: #123/,
+    /issue-reference.*#123/,
   );
 });
 
@@ -522,6 +615,6 @@ test('PR update links an issue in the body without passing an unsupported gh fla
   assert.match(captured.body, /(?:^|\n)Closes #456(?:\n|$)/);
   assert.match(
     JSON.stringify(server.requests.map((request) => request.body)),
-    /Issue hint: #456/,
+    /issue-reference.*#456/,
   );
 });

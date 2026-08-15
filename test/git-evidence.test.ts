@@ -57,6 +57,11 @@ interface GitEvidenceModule {
     maxPatchCharsPerFile?: number;
     maxTotalPatchChars?: number;
   }, runner?: CommandRunner): EvidenceBundle;
+  assertEvidenceSnapshotCurrent(
+    snapshot: EvidenceBundle['snapshot'],
+    cwd?: string,
+    runner?: CommandRunner,
+  ): void;
 }
 
 interface CommandRunner {
@@ -371,4 +376,36 @@ test('uses an explicit fetch refspec and aborts when HEAD moves', (context) => {
     'origin',
     '+refs/heads/main:refs/remotes/origin/main',
   ]);
+});
+
+test('rechecks a pinned snapshot before downstream mutation', (context) => {
+  const repository = materializeRepository(fixture('delete-only'));
+  context.after(() =>
+    fs.rmSync(repository.directory, { recursive: true, force: true }),
+  );
+  const bundle = gitEvidence.collectPullRequestEvidence({
+    cwd: repository.directory,
+    baseBranch: repository.baseBranch,
+    fetch: false,
+  });
+  assert.doesNotThrow(() =>
+    gitEvidence.assertEvidenceSnapshotCurrent(
+      bundle.snapshot,
+      repository.directory,
+    ),
+  );
+  git(repository.directory, [
+    'commit',
+    '--allow-empty',
+    '-m',
+    'chore: move head after evidence',
+  ]);
+  assert.throws(
+    () =>
+      gitEvidence.assertEvidenceSnapshotCurrent(
+        bundle.snapshot,
+        repository.directory,
+      ),
+    /HEAD changed after evidence collection/,
+  );
 });
