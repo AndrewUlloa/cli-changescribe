@@ -75,6 +75,9 @@ Non-decisions:
   - **Verify:**
     - `git diff --check`
     - `npm run typecheck`
+    - `npm test`
+    - `npm pack --dry-run`
+    - `npm audit --omit=dev`
   - **Depends on:** None
   - **Files:** `specs/evidence-backed-generation-v2/SPEC.md`, `PLAN.md`
   - **Size:** S
@@ -190,22 +193,33 @@ Non-decisions:
 
 ### Phase 4: Commit Generation v2
 
-- [x] **Task 7: Make staging explicit without breaking project harnesses**
+- [x] **Task 7: Make direct commit staging explicit**
   - **Description:** Make direct `diffwright commit` staged-only, add explicit
     `--all`, and migrate generated and dogfooded npm scripts to `commit --all`.
   - **Acceptance:**
     - [x] An empty index does not mutate or call the provider by default.
     - [x] `--all` is the only all-files staging path.
-    - [x] Guided init and ChangeScribe compatibility remain idempotent.
   - **Verify:**
     - `node --test .test-dist/commit-v2.test.js`
+  - **Depends on:** Task 3
+  - **Files:** `src/arguments.ts`, `src/commit.ts`, `src/cli.ts`,
+    `test/commit-v2.test.ts`
+  - **Size:** M
+
+- [x] **Task 7b: Migrate generated and compatibility harnesses**
+  - **Description:** Migrate Diffwright-managed project scripts to explicit
+    `commit --all` while preserving ChangeScribe compatibility and init
+    idempotency.
+  - **Acceptance:**
+    - [x] Guided init and ChangeScribe compatibility remain idempotent.
+    - [x] Custom scripts remain untouched.
+  - **Verify:**
     - `node --test .test-dist/init-wizard.test.js`
     - `node --test .test-dist/distribution.test.js`
-  - **Depends on:** Task 3
-  - **Files:** `src/arguments.ts`, `src/commit.ts`, `src/project-setup.ts`,
-    `src/init.ts`, `src/cli.ts`, `test/commit-v2.test.ts`,
+  - **Depends on:** Task 7
+  - **Files:** `src/project-setup.ts`, `src/init.ts`,
     `test/init-wizard.test.ts`, `test/distribution.test.ts`
-  - **Size:** M
+  - **Size:** S
 
 - [x] **Task 8: Render adaptive Conventional Commits from structured drafts**
   - **Description:** Replace the forced body parser with configurable standard
@@ -218,7 +232,7 @@ Non-decisions:
   - **Verify:**
     - `node --test .test-dist/commit-v2.test.js`
     - `node --test .test-dist/workflow-byok.test.js`
-  - **Depends on:** Tasks 3 and 7
+  - **Depends on:** Tasks 3, 7, and 7b
   - **Files:** `src/commit.ts`, `src/change-evidence.ts`,
     `test/commit-v2.test.ts`, `test/workflow-byok.test.ts`
   - **Size:** M
@@ -230,7 +244,8 @@ Non-decisions:
     - [x] Context remains explicitly `provided`, never `verified`.
     - [x] Missing, oversized, symlinked, or unsafe context fails before network
       or Git mutation.
-    - [x] Secrets remain redacted from output and errors.
+    - [x] Provider secrets remain redacted from prompts, logs, errors,
+      subprocess arguments, and child-process environments.
   - **Verify:**
     - `node --test .test-dist/change-evidence.test.js`
     - `node --test .test-dist/security.test.js`
