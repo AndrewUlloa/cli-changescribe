@@ -99,7 +99,7 @@ test('published README preserves provider, command, and security reference mater
   assert.match(readme, /OpenRouter/);
   assert.match(readme, /Vercel AI Gateway/);
   assert.match(readme, /Ollama/);
-  assert.match(readme, /stages changes if nothing is staged/i);
+  assert.match(readme, /reads only the staged diff/i);
   assert.match(readme, /directly from your machine/i);
   assert.match(readme, /Apache 2\.0 license/);
   assert.match(readme, /0\.4\.4.*MIT license/is);
@@ -129,8 +129,8 @@ test('published README states requirements and command side effects precisely', 
     /candidate.*not reused|calls the provider again/is,
     /pr --dry-run.*fetch/is,
     /pr --dry-run.*does not call the provider/is,
-    /minimum of three provider requests/i,
-    /20,000-character/i,
+    /net-diff evidence in one\s+structured request/i,
+    /complete bounded final net-diff evidence/i,
     /always runs.*npm test.*npm run build/is,
     /existing PR.*does not push/is,
     /\.final\.md/,

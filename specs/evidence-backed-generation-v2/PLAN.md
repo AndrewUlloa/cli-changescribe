@@ -190,20 +190,21 @@ Non-decisions:
 
 ### Phase 4: Commit Generation v2
 
-- [ ] **Task 7: Make staging explicit without breaking project harnesses**
+- [x] **Task 7: Make staging explicit without breaking project harnesses**
   - **Description:** Make direct `diffwright commit` staged-only, add explicit
     `--all`, and migrate generated and dogfooded npm scripts to `commit --all`.
   - **Acceptance:**
-    - [ ] An empty index does not mutate or call the provider by default.
-    - [ ] `--all` is the only all-files staging path.
-    - [ ] Guided init and ChangeScribe compatibility remain idempotent.
+    - [x] An empty index does not mutate or call the provider by default.
+    - [x] `--all` is the only all-files staging path.
+    - [x] Guided init and ChangeScribe compatibility remain idempotent.
   - **Verify:**
     - `node --test .test-dist/commit-v2.test.js`
     - `node --test .test-dist/init-wizard.test.js`
     - `node --test .test-dist/distribution.test.js`
   - **Depends on:** Task 3
   - **Files:** `src/arguments.ts`, `src/commit.ts`, `src/project-setup.ts`,
-    `test/commit-v2.test.ts`, `test/init-wizard.test.ts`
+    `src/init.ts`, `src/cli.ts`, `test/commit-v2.test.ts`,
+    `test/init-wizard.test.ts`, `test/distribution.test.ts`
   - **Size:** M
 
 - [ ] **Task 8: Render adaptive Conventional Commits from structured drafts**

@@ -117,7 +117,7 @@ function assertInitialized(packagePath: string): void {
     fs.readFileSync(packagePath, 'utf8'),
   );
   assert.deepEqual(fixturePackage.scripts, {
-    commit: 'diffwright commit',
+    commit: 'diffwright commit --all',
     'pr:summary': 'diffwright pr:summary',
     'feature:pr': 'diffwright feature:pr',
     'staging:pr': 'diffwright staging:pr',
@@ -251,7 +251,7 @@ test('packed Diffwright and ChangeScribe install and execute end to end', (conte
   );
   assert.equal(
     guidedManifest.scripts?.commit,
-    'node ./node_modules/diffwright/bin/diffwright.js commit',
+    'node ./node_modules/diffwright/bin/diffwright.js commit --all',
   );
   assert.equal(
     guidedManifest.scripts?.['feature:pr'],

@@ -113,9 +113,11 @@ Gateways can have their own downstream routing or retry policy.
 
 ## Commit preview surprises
 
-`commit --dry-run` calls the provider and may run `git add .` if nothing is
-staged. It does not commit or push. The candidate is not saved for the later
-live command, so a subsequent `commit` calls the provider again.
+`commit --dry-run` calls the provider for the existing staged diff. It never
+changes the index, commits, or pushes. Use `commit --all --dry-run` only when
+you explicitly want every working-tree change staged first. The candidate is
+not saved for the later live command, so a subsequent `commit` calls the
+provider again.
 
 ## Safe bug reports
 

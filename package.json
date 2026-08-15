@@ -15,7 +15,7 @@
     "test": "npm run build && npm run build:test && node .test-dist/run-tests.js",
     "prepack": "npm run build",
     "prepublishOnly": "npm run typecheck && npm test",
-    "commit": "npm run typecheck && npm run test && npm run build && node ./bin/diffwright.js commit",
+    "commit": "npm run typecheck && npm run test && npm run build && node ./bin/diffwright.js commit --all",
     "pr:summary": "npm run build && node ./bin/diffwright.js pr",
     "feature:pr": "npm run build && node ./bin/diffwright.js pr --base main --create-pr --mode feature"
   },

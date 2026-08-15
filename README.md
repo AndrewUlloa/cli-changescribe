@@ -35,16 +35,16 @@ the exact local installation and generated scripts.
 | You want to… | Preview or inspect | Run it |
 |---|---|---|
 | Configure a project | Use the matching `init --dry-run` command in [Quick start](#quick-start) | Use the matching guided setup command in [Quick start](#quick-start) |
-| Write a Conventional Commit | `diffwright commit --dry-run` | `diffwright commit` |
+| Write a Conventional Commit | Stage files, then `diffwright commit --dry-run` | Stage files, then `diffwright commit` |
 | Summarize a branch for a PR | `diffwright pr --dry-run` | `diffwright pr` |
 | Create or update the GitHub PR | — | `diffwright pr --create-pr` |
 | Check provider configuration | `diffwright doctor` | `diffwright doctor --live` |
 
-`commit` commits and pushes by default. Its dry run prevents those two actions,
-but it still calls the provider and stages changes if nothing is staged. PR dry run has a
-different contract: it does not call the provider or write summaries, but it may
-fetch the base branch. See [Command behavior](#command-behavior) before running
-Diffwright in automation.
+`commit` commits and pushes by default. It reads only the staged diff unless
+`--all` explicitly stages the working tree first. Its dry run prevents commit
+and push but still calls the provider. PR dry run has a different contract: it
+does not call the provider or write summaries, but it may fetch the base branch.
+See [Command behavior](#command-behavior) before running Diffwright in automation.
 
 ## Requirements
 
@@ -216,8 +216,10 @@ Other notes reviewers should know (risks + follow-ups)
 |---|---|
 | `diffwright doctor` | Validate configuration offline; no provider request. |
 | `diffwright doctor --live` | Make one minimal request through the production transport. |
-| `diffwright commit --dry-run` | Generate and print a candidate; no commit or push. May stage all changes. |
-| `diffwright commit` | Generate a validated Conventional Commit, commit it, and push the current branch. |
+| `diffwright commit --dry-run` | Generate from the staged diff and print a candidate; no index mutation, commit, or push. |
+| `diffwright commit --all --dry-run` | Explicitly stage all changes, then generate and print a candidate. |
+| `diffwright commit` | Generate from the staged diff, commit it, and push the current branch. |
+| `diffwright commit --all` | Explicitly stage all changes, then generate, commit, and push. |
 | `diffwright pr --dry-run` | Fetch when possible, resolve the commit range, and print the plan; no provider call or output write. |
 | `diffwright pr` | Generate detailed and PR-ready summaries. |
 | `diffwright pr --create-pr` | Run project gates, then create or update the GitHub PR with `gh`. |
@@ -234,18 +236,21 @@ documents every flag, default, alias, side effect, and exit behavior.
 |---|---:|---|---|
 | `doctor` | 0 | none | none |
 | `doctor --live` | 1 | none | calls the resolved endpoint |
-| `commit --dry-run` | Usually 1; one repair request is possible | Stages all changes if the index is empty | no commit or push |
-| `commit` | Usually 1; one repair request is possible | May stage all changes; creates a commit | pushes the current branch |
-| `pr --dry-run` | 0 | no summary files | attempts `git fetch -- origin <base>`; falls back to local refs |
-| `pr` | Minimum of three provider requests | overwrites the requested file, a sibling `.final.md`, and a temporary backup | attempts to fetch the base |
-| `pr --create-pr` | Same multi-pass generation | may run format, always runs the detected package manager's test/build scripts (`npm test` and `npm run build` for npm), then writes summaries | pushes only when creating a new PR; updating an existing PR does not push local commits |
+| `commit --dry-run` | Usually 1; one repair request is possible | reads the staged diff only | no commit or push |
+| `commit --all --dry-run` | Usually 1; one repair request is possible | explicitly stages all changes | no commit or push |
+| `commit` | Usually 1; one repair request is possible | reads the staged diff and creates a commit | pushes the current branch |
+| `commit --all` | Usually 1; one repair request is possible | explicitly stages all changes and creates a commit | pushes the current branch |
+| `pr --dry-run` | 0 | no summary files | attempts an explicit base-ref fetch; falls back to local refs |
+| `pr` | Usually 1; one repair request is possible | overwrites the requested file, a sibling `.final.md`, and a temporary backup | attempts to fetch the base |
+| `pr --create-pr` | Same structured generation | may run format, always runs the detected package manager's test/build scripts (`npm test` and `npm run build` for npm), then writes summaries | pushes only when creating a new PR; updating an existing PR does not push local commits |
 | `init --dry-run` | 0 | none | previews the redacted setup plan; no install or live request |
 | no-argument non-TTY `init` | 0 | edits `package.json` only when generic scripts are added or migrated | none |
 | guided or `--yes` `init` | 0 by default; 1 only with explicit live consent | may update `package.json`, a lockfile, `.gitignore`, `.env.local`, `CLAUDE.md`, and `AGENTS.md` after interactive confirmation or deterministic `--yes` planning | may install the exact local package; runs offline doctor; live doctor is separately explicit |
 
-PR synthesis uses one first-pass request, one request per 20,000-character
-commit chunk, and one final synthesis request. A release-summary fallback can
-add one more request. `--create-pr` uses the detected package manager. It runs
+PR synthesis sends the complete bounded final net-diff evidence in one
+structured request. One repair request is possible when deterministic
+validation rejects the first draft; oversized or incomplete evidence stops
+instead of being silently truncated. `--create-pr` uses the detected package manager. It runs
 `format` only when that script exists unless you skip it; test and build always
 run (`npm test` and `npm run build` in an npm project). Those gates can modify
 files and run arbitrary project code before Diffwright performs its dirty-tree
