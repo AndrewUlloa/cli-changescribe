@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import test from 'node:test';
 
 interface ArtifactDraft {
@@ -261,6 +262,41 @@ test('rejects missing, duplicate, unknown, and malformed critique claims', () =>
         }],
       }),
       multipleEvidence,
+    ),
+  );
+});
+
+test('rejects unterminated containers and invalid separators without hanging', () => {
+  const malformed = [
+    '{"schemaVersion":1,"candidates":[',
+    '{"schemaVersion":1',
+    '{"schemaVersion":1 "candidates":[]}',
+    '{"schemaVersion":1,"candidates"[]}',
+    '{"schemaVersion":1,"candidates":[{"candidateId":"claim:claim-change","evidenceIds":["change-1" "change-2"],"supported":true}]}',
+    '{"schemaVersion":1,"candidates":[,]}',
+  ];
+  const script = [
+    "const critic = require(process.argv[1]);",
+    'const malformed = JSON.parse(process.argv[2]);',
+    'const artifact = JSON.parse(process.argv[3]);',
+    'for (const value of malformed) {',
+    '  let rejected = false;',
+    '  try { critic.assertArtifactCritique(value, artifact); } catch { rejected = true; }',
+    '  if (!rejected) process.exit(2);',
+    '}',
+  ].join('\n');
+
+  assert.doesNotThrow(() =>
+    execFileSync(
+      process.execPath,
+      [
+        '-e',
+        script,
+        require.resolve('../dist/artifact-critic.js'),
+        JSON.stringify(malformed),
+        JSON.stringify(draft()),
+      ],
+      { encoding: 'utf8', stdio: 'pipe', timeout: 1_000 },
     ),
   );
 });

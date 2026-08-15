@@ -34,24 +34,33 @@ function assertExactKeys(
 
 function assertNoDuplicateJsonKeys(input: string): void {
   let index = 0;
+  const invalidJson = (): never => {
+    throw new Error('Artifact critique is invalid JSON.');
+  };
   const whitespace = (): void => {
-    while (/\s/u.test(input[index] ?? '')) {
+    while (/[\u0009\u000a\u000d\u0020]/u.test(input[index] ?? '')) {
       index += 1;
     }
   };
   const stringToken = (): string => {
+    if (input[index] !== '"') {
+      invalidJson();
+    }
     const start = index;
     index += 1;
     while (index < input.length) {
       const character = input[index];
       index += 1;
       if (character === '\\') {
+        if (index >= input.length) {
+          invalidJson();
+        }
         index += 1;
       } else if (character === '"') {
         return JSON.parse(input.slice(start, index)) as string;
       }
     }
-    throw new Error('Artifact critique is invalid JSON.');
+    return invalidJson();
   };
   const value = (): void => {
     whitespace();
@@ -68,11 +77,15 @@ function assertNoDuplicateJsonKeys(input: string): void {
       stringToken();
       return;
     }
+    const start = index;
     while (
       index < input.length &&
-      !/[\s,\]}]/u.test(input[index] ?? '')
+      !/[\u0009\u000a\u000d\u0020,\]}]/u.test(input[index] ?? '')
     ) {
       index += 1;
+    }
+    if (index === start) {
+      invalidJson();
     }
   };
   const object = (): void => {
@@ -94,12 +107,18 @@ function assertNoDuplicateJsonKeys(input: string): void {
       }
       keys.add(key);
       whitespace();
+      if (input[index] !== ':') {
+        invalidJson();
+      }
       index += 1;
       value();
       whitespace();
       if (input[index] === '}') {
         index += 1;
         return;
+      }
+      if (input[index] !== ',') {
+        invalidJson();
       }
       index += 1;
     }
@@ -118,10 +137,17 @@ function assertNoDuplicateJsonKeys(input: string): void {
         index += 1;
         return;
       }
+      if (input[index] !== ',') {
+        invalidJson();
+      }
       index += 1;
     }
   };
   value();
+  whitespace();
+  if (index !== input.length) {
+    invalidJson();
+  }
 }
 
 export function buildArtifactCriticMessages(
