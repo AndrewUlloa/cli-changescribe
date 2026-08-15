@@ -90,6 +90,7 @@ function expectedDiffwrightFiles(): string[] {
     'cli',
     'commit',
     'doctor',
+    'gate-receipts',
     'git-evidence',
     'init',
     'package-manager',
