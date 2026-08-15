@@ -100,6 +100,8 @@ function expectedDiffwrightFiles(): string[] {
     'project-setup',
     'prompts',
     'pr-summary',
+    'pr-editor',
+    'pr-review',
     'pr-workflow',
     'provider',
     'runtime-config',
@@ -121,8 +123,8 @@ function assertInitialized(packagePath: string): void {
   assert.deepEqual(fixturePackage.scripts, {
     commit: 'diffwright commit --all',
     'pr:summary': 'diffwright pr:summary',
-    'feature:pr': 'diffwright feature:pr',
-    'staging:pr': 'diffwright staging:pr',
+    'feature:pr': 'diffwright feature:pr --yes',
+    'staging:pr': 'diffwright staging:pr --yes',
   });
 }
 
@@ -257,7 +259,7 @@ test('packed Diffwright and ChangeScribe install and execute end to end', (conte
   );
   assert.equal(
     guidedManifest.scripts?.['feature:pr'],
-    'node ./node_modules/diffwright/bin/diffwright.js pr --base main --create-pr --mode feature',
+    'node ./node_modules/diffwright/bin/diffwright.js pr --base main --create-pr --yes --mode feature',
   );
   assert.equal(guidedManifest.scripts?.['staging:pr'], undefined);
   const localScriptHelp = execFileSync(

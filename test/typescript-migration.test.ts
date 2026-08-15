@@ -100,6 +100,8 @@ test('all application sources are TypeScript and compiled output exists', () => 
     'project-setup',
     'prompts',
     'pr-summary',
+    'pr-editor',
+    'pr-review',
     'pr-workflow',
     'provider',
     'runtime-config',

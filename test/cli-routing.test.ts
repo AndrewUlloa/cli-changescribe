@@ -118,6 +118,7 @@ test('each command exposes focused help with its real options and side effects',
       expected: [
         /Usage: diffwright pr/,
         /--create-pr/,
+        /--yes/,
         /--issue <number>/,
         /--context-file <path>/,
       ],

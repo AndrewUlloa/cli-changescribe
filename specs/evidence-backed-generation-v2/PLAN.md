@@ -248,20 +248,21 @@ Non-decisions:
 
 ### Phase 5: Human Review and Editorial Policy
 
-- [ ] **Task 10: Add explicit review before GitHub mutation**
+- [x] **Task 10: Add explicit review before GitHub mutation**
   - **Description:** Preview generated title/body, confirm in an interactive
     terminal, require `--yes` headlessly, and revalidate edited content before
     create/update.
   - **Acceptance:**
-    - [ ] Cancellation performs no GitHub mutation.
-    - [ ] Noninteractive mutation without `--yes` fails clearly.
-    - [ ] Generated project scripts include the intentional automation policy.
+    - [x] Cancellation performs no GitHub mutation.
+    - [x] Noninteractive mutation without `--yes` fails clearly.
+    - [x] Generated project scripts include the intentional automation policy.
   - **Verify:**
     - `node --test .test-dist/pr-review.test.js`
     - `node --test .test-dist/cli-routing.test.js`
   - **Depends on:** Task 6
-  - **Files:** `src/arguments.ts`, `src/pr-summary.ts`, `src/project-setup.ts`,
-    `test/pr-review.test.ts`, `test/cli-routing.test.ts`
+  - **Files:** `src/arguments.ts`, `src/pr-workflow.ts`, `src/pr-review.ts`,
+    `src/pr-editor.ts`, `src/project-setup.ts`, `test/pr-review.test.ts`,
+    `test/pr-editor.test.ts`, `test/cli-routing.test.ts`
   - **Size:** M
 
 - [ ] **Task 11: Add advisory plain-language checks and repository policy**
