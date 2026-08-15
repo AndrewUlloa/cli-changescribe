@@ -207,7 +207,7 @@ export function assertSupportedClaims(
   for (const claim of claims) {
     validateId(claim.id, 'claim');
     if (claimIds.has(claim.id)) {
-      throw new Error(`Duplicate claim id: ${claim.id}`);
+      throw new Error('Duplicate claim id.');
     }
     claimIds.add(claim.id);
     validateText(claim.text, `Claim ${claim.id}`, MAX_TEXT_CHARS);
@@ -217,11 +217,10 @@ export function assertSupportedClaims(
 
     const cited: EvidenceItem[] = [];
     for (const evidenceId of claim.evidenceIds) {
+      validateId(evidenceId, 'evidence reference');
       const evidence = evidenceById.get(evidenceId);
       if (!evidence) {
-        throw new Error(
-          `Claim ${claim.id} references unknown evidence id: ${evidenceId}`,
-        );
+        throw new Error('Claim references unknown evidence id.');
       }
       cited.push(evidence);
     }
@@ -425,6 +424,13 @@ function validateClaimKind(
     !cited.some((evidence) => evidence.kind === 'intent')
   ) {
     throw new Error(`Follow-up claim ${claim.id} requires provided intent.`);
+  }
+  if (
+    claim.kind === 'risk' &&
+    claim.basis !== 'inferred' &&
+    !cited.some((evidence) => evidence.kind === 'intent')
+  ) {
+    throw new Error(`Risk claim ${claim.id} requires provided intent.`);
   }
 }
 

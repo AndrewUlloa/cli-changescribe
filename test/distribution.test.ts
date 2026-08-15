@@ -86,6 +86,7 @@ function expectedDiffwrightFiles(): string[] {
   ];
   for (const moduleName of [
     'arguments',
+    'artifact-draft',
     'change-evidence',
     'cli',
     'commit',
