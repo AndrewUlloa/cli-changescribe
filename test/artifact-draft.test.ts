@@ -535,6 +535,98 @@ test('treats executable GitHub configuration and substantive rename origins as p
   );
 });
 
+test('keeps package manifests supporting when source changes are present', () => {
+  const evidence = changeEvidence.createEvidenceBundle({
+    snapshot: { headSha: 'd'.repeat(40) },
+    items: [
+      {
+        id: 'change-source',
+        kind: 'change',
+        basis: 'observed',
+        source: { kind: 'git-diff', locator: 'src/commit.ts' },
+        payload: {
+          status: 'modified',
+          path: 'src/commit.ts',
+          additions: 2,
+          deletions: 1,
+          binary: false,
+          patch: '-old\n+new\n',
+        },
+      },
+      {
+        id: 'change-manifest',
+        kind: 'change',
+        basis: 'observed',
+        source: { kind: 'git-diff', locator: 'package.json' },
+        payload: {
+          status: 'modified',
+          path: 'package.json',
+          additions: 1,
+          deletions: 1,
+          binary: false,
+          patch: '-old script\n+new script\n',
+        },
+      },
+    ],
+    receipts: [],
+    coverage: { complete: true, gaps: [] },
+  });
+  const manifestPrimary = {
+    schemaVersion: 1,
+    title: {
+      type: 'chore',
+      breaking: false,
+      subject: 'update the package script',
+      claimId: 'claim-manifest',
+    },
+    claims: [
+      {
+        id: 'claim-manifest',
+        kind: 'change',
+        text: 'update the package script.',
+        evidenceIds: ['change-manifest'],
+        basis: 'observed',
+        significance: 'primary',
+      },
+      {
+        id: 'claim-source',
+        kind: 'change',
+        text: 'Update commit generation.',
+        evidenceIds: ['change-source'],
+        basis: 'observed',
+        significance: 'supporting',
+      },
+    ],
+    sections: [
+      { kind: 'summary', claimIds: ['claim-manifest'] },
+      { kind: 'changes', claimIds: ['claim-source'] },
+    ],
+    trailers: [],
+  };
+
+  assert.throws(
+    () =>
+      artifactDraft.parseArtifactDraft(
+        JSON.stringify(manifestPrimary),
+        evidence,
+      ),
+    /primary change may cite only substantive change evidence/,
+  );
+
+  const manifestOnly = changeEvidence.createEvidenceBundle({
+    snapshot: { headSha: 'e'.repeat(40) },
+    items: [(evidence as { items: readonly unknown[] }).items[1]],
+    receipts: [],
+    coverage: { complete: true, gaps: [] },
+  });
+  const onlyDraft = structuredClone(manifestPrimary);
+  onlyDraft.claims = [onlyDraft.claims[0]];
+  onlyDraft.sections = [{ kind: 'summary', claimIds: ['claim-manifest'] }];
+  assert.doesNotThrow(() =>
+    artifactDraft.parseArtifactDraft(JSON.stringify(onlyDraft), manifestOnly),
+  );
+});
+
 test('allows supporting-only work and honors primary and supporting path overrides', () => {
   const docsOnlyEvidence = changeEvidence.createEvidenceBundle({
     snapshot: { headSha: 'd'.repeat(40) },
