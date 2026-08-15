@@ -770,6 +770,10 @@ test('PR workflow repairs one invalid draft and never chains model summaries', a
     JSON.stringify(server.requests[1].body),
     /Repair category: json-shape/,
   );
+  assert.match(
+    JSON.stringify(server.requests[1].body),
+    /return only a title.*one observed primary/is,
+  );
 });
 
 test('PR workflow repairs a draft that fails deterministic rendering', async (context) => {

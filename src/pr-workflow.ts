@@ -3,7 +3,9 @@ import os from 'node:os';
 import path from 'node:path';
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 import {
+  artifactRepairCategory,
   artifactRepairInstruction,
+  MINIMAL_ARTIFACT_REPAIR_INSTRUCTION,
   parseArtifactDraft,
   PRIMARY_GROUNDING_REPAIR_INSTRUCTION,
   type ArtifactDraft,
@@ -206,7 +208,7 @@ function buildArtifactMessages(
           : 'The previous response failed deterministic validation. Produce one corrected draft from the original evidence.',
         ...(repairInstruction === undefined
           ? []
-          : [repairInstruction]),
+          : [repairInstruction, MINIMAL_ARTIFACT_REPAIR_INSTRUCTION]),
         'Required exact shape:',
         '{"schemaVersion":1,"title":{"type":"fix","breaking":false,"subject":"imperative subject","claimId":"claim-1"},"claims":[{"id":"claim-1","kind":"change","text":"imperative subject.","evidenceIds":["change-1"],"basis":"observed","significance":"primary"}],"sections":[{"kind":"summary","claimIds":["claim-1"]}],"trailers":[]}',
         'Omit title.scope instead of using an empty string.',
@@ -275,7 +277,9 @@ async function generateArtifactDraft(
     } catch (error) {
       repairInstruction = artifactRepairInstruction(error);
       if (attempt === 0) {
-        warn('Provider draft failed validation; requesting one repair...');
+        warn(
+          `Provider draft failed ${artifactRepairCategory(repairInstruction)} validation; requesting one repair...`,
+        );
       }
     }
   }

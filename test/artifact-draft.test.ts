@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 interface ArtifactDraftModule {
+  artifactRepairCategory(instruction: string): string;
   artifactRepairInstruction(error: unknown): string;
   parseArtifactDraft(
     input: string,
@@ -38,6 +39,14 @@ test('classifies repair failures without echoing rejected artifact content', () 
       new Error('Artifact draft is not valid JSON.'),
     ),
     /Repair category: json-shape/,
+  );
+  assert.equal(
+    artifactDraft.artifactRepairCategory(
+      artifactDraft.artifactRepairInstruction(
+        new Error('Artifact draft is not valid JSON.'),
+      ),
+    ),
+    'json-shape',
   );
   assert.match(
     artifactDraft.artifactRepairInstruction(

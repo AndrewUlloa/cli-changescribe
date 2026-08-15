@@ -265,6 +265,7 @@ test('repairs one invalid draft from the original staged evidence', async (conte
   assert.equal(capture.completionCalls, 3);
   assert.match(capture.prompt, /previous response failed deterministic validation/);
   assert.match(capture.prompt, /Repair category: json-shape/);
+  assert.match(capture.prompt, /return only a title.*one observed primary/is);
   assert.match(capture.prompt, /evidence-value/);
   assert.doesNotMatch(capture.prompt, /not-json/);
 });
