@@ -108,16 +108,18 @@ const SCRIPT_MAP: Readonly<Record<string, string>> = {
 };
 
 const LEGACY_SCRIPT_VALUES: Readonly<Record<string, ReadonlySet<string>>> = {
-  commit: new Set(['changescribe commit']),
+  commit: new Set(['changescribe commit', 'diffwright commit']),
   'pr:summary': new Set(['changescribe pr:summary']),
   'feature:pr': new Set([
     'changescribe feature:pr',
     'changescribe feature:pr --yes',
+    'diffwright feature:pr',
     'diffwright feature:pr --yes',
   ]),
   'staging:pr': new Set([
     'changescribe staging:pr',
     'changescribe staging:pr --yes',
+    'diffwright staging:pr',
     'diffwright staging:pr --yes',
   ]),
 };
@@ -178,7 +180,10 @@ function runLegacyInit(
     if (!scripts[name]) {
       replacements[name] = command;
       added.push(name);
-    } else if (LEGACY_SCRIPT_VALUES[name]?.has(scripts[name])) {
+    } else if (
+      LEGACY_SCRIPT_VALUES[name]?.has(scripts[name]) &&
+      scripts[name] !== command
+    ) {
       replacements[name] = command;
       migrated.push(name);
     }
