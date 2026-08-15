@@ -80,7 +80,7 @@ jobs:
       - name: Publish to npm with trusted provenance
         env:
           PACKAGE_FILE: ${{ steps.pack.outputs.package_file }}
-        run: npm publish "$PACKAGE_FILE" --access public
+        run: npm publish "./$PACKAGE_FILE" --access public
 
   attach:
     name: Attach npm package to GitHub Release
