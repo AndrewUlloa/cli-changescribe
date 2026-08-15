@@ -179,6 +179,7 @@ test('release automation publishes one verified package with trusted provenance'
   assert.match(workflow, /npm audit --omit=dev/);
   assert.match(workflow, /npm audit signatures/);
   assert.match(workflow, /npm publish .*--access public/);
+  assert.match(workflow, /npm publish "\.\/\$PACKAGE_FILE" --access public/);
   assert.match(workflow, /actions\/upload-artifact@v4/);
   assert.match(workflow, /actions\/download-artifact@v4/);
   assert.match(workflow, /overwrite: true/);
