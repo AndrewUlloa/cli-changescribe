@@ -103,15 +103,23 @@ export interface InitDependencies {
 const SCRIPT_MAP: Readonly<Record<string, string>> = {
   commit: 'diffwright commit --all',
   'pr:summary': 'diffwright pr:summary',
-  'feature:pr': 'diffwright feature:pr',
-  'staging:pr': 'diffwright staging:pr',
+  'feature:pr': 'diffwright feature:pr --yes',
+  'staging:pr': 'diffwright staging:pr --yes',
 };
 
-const LEGACY_SCRIPT_MAP: Readonly<Record<string, string>> = {
-  commit: 'changescribe commit',
-  'pr:summary': 'changescribe pr:summary',
-  'feature:pr': 'changescribe feature:pr',
-  'staging:pr': 'changescribe staging:pr',
+const LEGACY_SCRIPT_VALUES: Readonly<Record<string, ReadonlySet<string>>> = {
+  commit: new Set(['changescribe commit']),
+  'pr:summary': new Set(['changescribe pr:summary']),
+  'feature:pr': new Set([
+    'diffwright feature:pr',
+    'changescribe feature:pr',
+    'changescribe feature:pr --yes',
+  ]),
+  'staging:pr': new Set([
+    'diffwright staging:pr',
+    'changescribe staging:pr',
+    'changescribe staging:pr --yes',
+  ]),
 };
 
 const MAX_SETUP_FILE_BYTES = 1024 * 1024;
@@ -170,7 +178,7 @@ function runLegacyInit(
     if (!scripts[name]) {
       replacements[name] = command;
       added.push(name);
-    } else if (scripts[name] === LEGACY_SCRIPT_MAP[name]) {
+    } else if (LEGACY_SCRIPT_VALUES[name]?.has(scripts[name])) {
       replacements[name] = command;
       migrated.push(name);
     }

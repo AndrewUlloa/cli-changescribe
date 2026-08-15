@@ -156,6 +156,7 @@ export function validatePrArguments(argv: string[]): void {
     '--create-pr',
     '--skip-format',
     '--no-format',
+    '--yes',
   ]);
 
   for (let index = 0; index < argv.length; index += 1) {

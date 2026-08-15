@@ -99,6 +99,7 @@ Options:
                       Add bounded source-agnostic intent from a regular project file
   --dry-run           Show the range and plan without provider calls or output files
   --create-pr         Run project gates and create or update a PR with gh
+  --yes               Approve GitHub mutation noninteractively after validation
   --skip-format       Skip the optional package-manager format script
   --no-format         Alias for --skip-format
 

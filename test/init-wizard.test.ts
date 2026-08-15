@@ -216,7 +216,7 @@ test('--yes configures a validated self-host without a stale global or self-depe
   );
   assert.equal(
     manifest.scripts['feature:pr'],
-    'npm run build && node ./bin/diffwright.js pr --base main --create-pr --mode feature',
+    'npm run build && node ./bin/diffwright.js pr --base main --create-pr --yes --mode feature',
   );
   assert.equal(manifest.scripts['staging:pr'], undefined);
   assert.match(fs.readFileSync(path.join(cwd, 'CLAUDE.md'), 'utf8'), /npm run commit/);
@@ -539,7 +539,7 @@ test('Yarn PnP verifies and generates the same delimiter-safe local command', as
   assert.equal(manifest.scripts.commit, 'yarn exec -- diffwright commit --all');
   assert.equal(
     manifest.scripts['feature:pr'],
-    'yarn exec -- diffwright pr --base main --create-pr --mode feature',
+    'yarn exec -- diffwright pr --base main --create-pr --yes --mode feature',
   );
   assert.equal(spawnCount, 0);
 });

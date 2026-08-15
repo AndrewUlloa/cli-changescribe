@@ -35,6 +35,9 @@ import {
   type PackageCommand,
   type PackageManagerName,
 } from './package-manager';
+import { createProcessPrEditor } from './pr-editor';
+import { reviewPullRequest } from './pr-review';
+import { createNodePrompter } from './prompts';
 import { resolveProvider, type ResolvedProvider } from './provider';
 import {
   knownSecretValues,
@@ -59,6 +62,7 @@ interface PrArguments {
   mode: string;
   skipFormat: boolean;
   contextFiles: string[];
+  yes: boolean;
 }
 
 interface ExistingPr {
@@ -515,6 +519,7 @@ function parseArgs(argv: string[], env: NodeJS.ProcessEnv): PrArguments {
     mode: '',
     skipFormat: false,
     contextFiles: [],
+    yes: false,
   };
   for (let index = 0; index < argv.length; index += 1) {
     const current = argv[index];
@@ -543,6 +548,8 @@ function parseArgs(argv: string[], env: NodeJS.ProcessEnv): PrArguments {
     } else if (current === '--context-file' && next) {
       args.contextFiles.push(next);
       index += 1;
+    } else if (current === '--yes') {
+      args.yes = true;
     }
   }
   args.issue = args.issue ? normalizeIssueReference(args.issue) : '';
@@ -584,6 +591,12 @@ async function main(argv: string[]): Promise<void> {
   const knownSecrets = knownSecretValues(runtime.values);
   const args = parseArgs(argv, runtime.values);
   const context = loadContextEvidence(args.contextFiles, { knownSecrets });
+  const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
+  if (args.createPr && !args.yes && !interactive) {
+    throw new Error(
+      'GitHub mutation requires interactive review or explicit --yes in a noninteractive environment.',
+    );
+  }
   const resolved = resolveProvider({
     env: runtime.values,
     sources: runtime.sources,
@@ -725,11 +738,33 @@ async function main(argv: string[]): Promise<void> {
     mode,
     knownSecrets,
   );
-  const artifact = renderPullRequestArtifact(draft, evidence);
-  for (const warning of artifact.warnings) {
+  const renderedArtifact = renderPullRequestArtifact(draft, evidence);
+  for (const warning of renderedArtifact.warnings) {
     warn(warning);
   }
   success('Evidence-linked PR artifact validated and rendered');
+
+  let artifact = renderedArtifact;
+  if (args.createPr) {
+    if (args.yes) {
+      artifact = await reviewPullRequest(renderedArtifact, {
+        yes: true,
+        knownSecrets,
+      });
+    } else {
+      const prompter = createNodePrompter();
+      try {
+        artifact = await reviewPullRequest(
+          renderedArtifact,
+          { knownSecrets },
+          { prompter, editor: createProcessPrEditor() },
+        );
+      } finally {
+        prompter.close();
+      }
+    }
+    success(args.yes ? 'PR artifact approved by --yes' : 'PR artifact approved');
+  }
 
   assertEvidenceSnapshotCurrent(evidence.snapshot);
   const finalSummary = artifact.body.trim();

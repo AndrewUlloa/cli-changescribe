@@ -211,8 +211,18 @@ const MANAGED_SCRIPT_VALUES: Readonly<Record<string, ReadonlySet<string>>> = {
     'changescribe commit',
   ]),
   'pr:summary': new Set(['diffwright pr:summary', 'changescribe pr:summary']),
-  'feature:pr': new Set(['diffwright feature:pr', 'changescribe feature:pr']),
-  'staging:pr': new Set(['diffwright staging:pr', 'changescribe staging:pr']),
+  'feature:pr': new Set([
+    'diffwright feature:pr',
+    'diffwright feature:pr --yes',
+    'changescribe feature:pr',
+    'changescribe feature:pr --yes',
+  ]),
+  'staging:pr': new Set([
+    'diffwright staging:pr',
+    'diffwright staging:pr --yes',
+    'changescribe staging:pr',
+    'changescribe staging:pr --yes',
+  ]),
 };
 
 const MANAGED_GATE_PREFIX =
@@ -226,9 +236,9 @@ function isStrictGeneratedScript(name: string, value: string): boolean {
     commit: 'commit(?: --all)?',
     'pr:summary': '(?:pr|pr:summary)',
     'feature:pr':
-      `pr --base ${SAFE_GENERATED_BRANCH} --create-pr --mode feature`,
+      `pr --base ${SAFE_GENERATED_BRANCH} --create-pr(?: --yes)? --mode feature`,
     'staging:pr':
-      `pr --base ${SAFE_GENERATED_BRANCH} --create-pr --mode release`,
+      `pr --base ${SAFE_GENERATED_BRANCH} --create-pr(?: --yes)? --mode release`,
   };
   const suffix = suffixes[name];
   return suffix !== undefined && new RegExp(
@@ -341,7 +351,7 @@ export function buildScriptPlan(options: {
     'feature:pr',
     commandChain([
       ...selfHostBuildCommands,
-      `${cli} pr --base ${options.baseBranch} --create-pr --mode feature`,
+      `${cli} pr --base ${options.baseBranch} --create-pr --yes --mode feature`,
     ]),
     changes,
   );
@@ -353,7 +363,7 @@ export function buildScriptPlan(options: {
       'staging:pr',
       commandChain([
         ...selfHostBuildCommands,
-        `${cli} pr --base ${releaseBranch} --create-pr --mode release`,
+        `${cli} pr --base ${releaseBranch} --create-pr --yes --mode release`,
       ]),
       changes,
     );

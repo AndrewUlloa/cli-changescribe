@@ -296,7 +296,15 @@ for (const manager of ['npm', 'pnpm', 'yarn', 'bun'] as const) {
 
       const result = await run(
         directory,
-        ['pr', '--base', 'main', '--out', 'summary.md', '--create-pr'],
+        [
+          'pr',
+          '--base',
+          'main',
+          '--out',
+          'summary.md',
+          '--create-pr',
+          '--yes',
+        ],
         env,
       );
 
@@ -344,7 +352,7 @@ test(
 
     const result = await run(
       directory,
-      ['pr', '--base', 'main', '--create-pr'],
+      ['pr', '--base', 'main', '--create-pr', '--yes'],
       env,
     );
 
@@ -452,6 +460,24 @@ test('PR workflow uses one evidence-linked custom-provider draft', async (contex
   );
 });
 
+test('headless GitHub mutation requires explicit --yes before provider work', async (context) => {
+  const directory = createRepository(context);
+  git(directory, ['switch', '--quiet', '-c', 'feature']);
+  fs.appendFileSync(path.join(directory, 'README.md'), 'headless fixture\n');
+  git(directory, ['add', 'README.md']);
+  git(directory, ['commit', '--quiet', '-m', 'feat: add headless fixture']);
+
+  const result = await run(
+    directory,
+    ['pr', '--base', 'main', '--create-pr'],
+    customEnvironment('http://127.0.0.1:9/v1'),
+  );
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /interactive review or explicit --yes/i);
+  assert.doesNotMatch(result.stdout, /Collecting|Generating|Running npm/);
+});
+
 test('PR workflow repairs one invalid draft and never chains model summaries', async (context) => {
   const directory = createRepository(context);
   git(directory, ['switch', '--quiet', '-c', 'feature']);
@@ -555,6 +581,7 @@ test('PR creation links an issue in the body without passing an unsupported gh f
       '--issue',
       '#123',
       '--create-pr',
+      '--yes',
       '--skip-format',
     ],
     env,
@@ -617,7 +644,16 @@ test('PR update links an issue in the body without passing an unsupported gh fla
 
   const result = await run(
     directory,
-    ['pr', '--base', 'main', '--issue', '456', '--create-pr', '--skip-format'],
+    [
+      'pr',
+      '--base',
+      'main',
+      '--issue',
+      '456',
+      '--create-pr',
+      '--yes',
+      '--skip-format',
+    ],
     env,
   );
 
