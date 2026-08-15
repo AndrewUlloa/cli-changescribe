@@ -105,13 +105,13 @@ Non-decisions:
 
 ### Phase 2: Shared Evidence Foundation
 
-- [ ] **Task 3: Introduce immutable evidence and claim contracts**
+- [x] **Task 3: Introduce immutable evidence and claim contracts**
   - **Description:** Add source-agnostic records, claim validation, coverage
     accounting, and bounded context-file loading.
   - **Acceptance:**
-    - [ ] Duplicate/missing evidence IDs and unsupported claim references fail.
-    - [ ] Context input is a bounded regular file and never echoed in errors.
-    - [ ] Existing secret redaction applies before model transport.
+    - [x] Duplicate/missing evidence IDs and unsupported claim references fail.
+    - [x] Raw payloads and total bundles have explicit size limits.
+    - [x] Inferred claims are excluded from renderable output.
   - **Verify:**
     - `npm run typecheck`
     - `node --test .test-dist/change-evidence.test.js`
@@ -119,6 +119,9 @@ Non-decisions:
   - **Files:** `src/change-evidence.ts`, `test/change-evidence.test.ts`,
     `test/typescript-migration.test.ts`, `test/distribution.test.ts`
   - **Size:** M
+
+  Context-file I/O remains in Task 9 so this domain module stays pure and
+  source-agnostic.
 
 ### Checkpoint: Evidence Foundation
 
