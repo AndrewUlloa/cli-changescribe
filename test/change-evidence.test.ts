@@ -29,6 +29,16 @@ type EvidenceItem =
       basis: 'observed';
       source: { kind: string; locator: string };
       payload: { receiptId: string };
+    }
+  | {
+      id: string;
+      kind: 'constraint';
+      basis: 'provided';
+      source: { kind: string; locator: string };
+      payload: {
+        name: string;
+        value: string | number | boolean | null | readonly string[];
+      };
     };
 
 interface VerificationReceipt {
@@ -156,6 +166,20 @@ function baseInput(): EvidenceBundleInput {
   };
 }
 
+function inputWithConstraint(
+  value: string | number | boolean | null | readonly string[],
+): EvidenceBundleInput {
+  const input = baseInput();
+  input.items.push({
+    id: 'constraint-1',
+    kind: 'constraint',
+    basis: 'provided',
+    source: { kind: 'workflow', locator: 'repository-policy' },
+    payload: { name: 'allowed-values', value },
+  });
+  return input;
+}
+
 test('creates an immutable raw evidence bundle and serializes its provenance', () => {
   const input = baseInput();
   const bundle = createEvidenceBundle(input);
@@ -206,6 +230,56 @@ test('rejects duplicate identifiers, inconsistent coverage, and invalid receipts
     () => createEvidenceBundle(missingReceipt),
     /references unknown receipt/,
   );
+});
+
+test('accepts every supported constraint value variant', () => {
+  for (const value of [
+    'main',
+    3.5,
+    true,
+    false,
+    null,
+    [],
+    ['main', 'release'],
+  ] as const) {
+    assert.doesNotThrow(() => createEvidenceBundle(inputWithConstraint(value)));
+  }
+});
+
+test('bounds constraint strings and arrays and rejects unsafe runtime values', () => {
+  const invalidValues: Array<{
+    value: unknown;
+    message: RegExp;
+  }> = [
+    { value: 'x'.repeat(65_537), message: /Constraint value.*size/i },
+    { value: 'main\u0000release', message: /Constraint value.*control/i },
+    {
+      value: Array.from({ length: 257 }, () => 'main'),
+      message: /Constraint value array.*size/i,
+    },
+    {
+      value: ['main', 'release\u0007'],
+      message: /Constraint value array item.*control/i,
+    },
+    { value: ['main', 42], message: /Constraint value array item.*string/i },
+    { value: Number.NaN, message: /Constraint value number.*finite/i },
+    { value: Number.POSITIVE_INFINITY, message: /Constraint value number.*finite/i },
+    { value: Number.NEGATIVE_INFINITY, message: /Constraint value number.*finite/i },
+    { value: { branch: 'main' }, message: /Constraint value type/i },
+    { value: undefined, message: /Constraint value type/i },
+  ];
+
+  for (const { value, message } of invalidValues) {
+    assert.throws(
+      () =>
+        createEvidenceBundle(
+          inputWithConstraint(
+            value as string | number | boolean | null | readonly string[],
+          ),
+        ),
+      message,
+    );
+  }
 });
 
 test('validates change, rationale, and verification claims by evidence kind', () => {
