@@ -9,9 +9,12 @@ import {
 } from './artifact-renderer';
 import { validateCommitArguments } from './arguments';
 import {
+  createEvidenceBundle,
   serializeEvidenceBundle,
   type EvidenceBundle,
+  type IntentEvidenceItem,
 } from './change-evidence';
+import { loadContextEvidence } from './context-evidence';
 import {
   resolveProvider,
   type ResolveProviderOptions,
@@ -72,6 +75,38 @@ function runGit(args: readonly string[]): string {
 
 function hasWorkingTreeChanges(): boolean {
   return runGit(['status', '--porcelain', '-z']).length > 0;
+}
+
+function optionValues(argv: readonly string[], option: string): string[] {
+  const values: string[] = [];
+  for (let index = 0; index < argv.length; index += 1) {
+    if (argv[index] === option) {
+      const value = argv[index + 1];
+      if (value !== undefined) {
+        values.push(value);
+      }
+      index += 1;
+    }
+  }
+  return values;
+}
+
+function withContextEvidence(
+  staged: StagedEvidenceBundle,
+  context: readonly Readonly<IntentEvidenceItem>[],
+): StagedEvidenceBundle {
+  if (context.length === 0) {
+    return staged;
+  }
+  return createEvidenceBundle({
+    snapshot: { ...staged.snapshot },
+    items: [...staged.items, ...context],
+    receipts: [...staged.receipts],
+    coverage: {
+      complete: staged.coverage.complete,
+      gaps: [...staged.coverage.gaps],
+    },
+  }) as StagedEvidenceBundle;
 }
 
 function stageAllChanges(): void {
@@ -218,6 +253,12 @@ async function generateCommitMessage(
   const stageAll = argv.includes('--all');
   console.log('🔍 Analyzing staged changes...');
 
+  const runtime = dependencies.loadRuntimeConfig();
+  const knownSecrets = knownSecretValues(runtime.values);
+  const context = loadContextEvidence(optionValues(argv, '--context-file'), {
+    knownSecrets,
+  });
+
   const dirty = hasWorkingTreeChanges();
   if (!dirty) {
     console.log('✅ No changes to commit');
@@ -228,21 +269,20 @@ async function generateCommitMessage(
     stageAllChanges();
   }
 
-  const evidence = collectStagedEvidence();
-  if (evidence.items.length === 0) {
+  const stagedEvidence = collectStagedEvidence();
+  if (stagedEvidence.items.length === 0) {
     throw new Error(
       'No staged changes. Stage the intended files first or rerun with --all.',
     );
   }
-  if (!evidence.coverage.complete) {
+  if (!stagedEvidence.coverage.complete) {
     throw new Error(
       'Staged evidence is incomplete. Split the commit or resolve the reported coverage gaps and retry.',
     );
   }
+  const evidence = withContextEvidence(stagedEvidence, context);
 
   const branch = dryRun ? '' : branchForPush();
-  const runtime = dependencies.loadRuntimeConfig();
-  const knownSecrets = knownSecretValues(runtime.values);
   const resolved = dependencies.resolveProvider({
     env: runtime.values,
     sources: runtime.sources,

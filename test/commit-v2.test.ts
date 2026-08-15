@@ -241,3 +241,50 @@ test('aborts before commit when the staged index moves during generation', async
   );
   assert.equal(git(directory, ['rev-parse', 'HEAD']).trim(), head);
 });
+
+test('adds bounded source-agnostic context as provided evidence', async (context) => {
+  const directory = repository(context);
+  useRepository(context, directory);
+  fs.writeFileSync(
+    path.join(directory, 'intent.md'),
+    'Preserve the staged-index contract while removing test-key from prompts.\n',
+  );
+  git(directory, ['add', 'intent.md']);
+  git(directory, ['commit', '--quiet', '-m', 'docs: add intent fixture']);
+  fs.writeFileSync(path.join(directory, 'value.txt'), 'staged implementation\n');
+  git(directory, ['add', 'value.txt']);
+  const capture = { resolveCalls: 0, completionCalls: 0, prompt: '' };
+
+  await runCommit(
+    ['--dry-run', '--context-file', 'intent.md'],
+    dependencies(capture),
+  );
+
+  assert.match(capture.prompt, /staged-index contract/);
+  assert.match(capture.prompt, /context-file/);
+  assert.match(capture.prompt, /provided/);
+  assert.match(capture.prompt, /\[REDACTED\]/);
+  assert.doesNotMatch(capture.prompt, /test-key/);
+});
+
+test('validates context before the explicit stage-all mutation', async (context) => {
+  const directory = repository(context);
+  useRepository(context, directory);
+  fs.writeFileSync(path.join(directory, 'value.txt'), 'leave unstaged\n');
+  fs.symlinkSync(
+    path.join(directory, 'README.md'),
+    path.join(directory, 'unsafe-context.md'),
+  );
+  const capture = { resolveCalls: 0, completionCalls: 0, prompt: '' };
+
+  await assert.rejects(
+    runCommit(
+      ['--all', '--context-file', 'unsafe-context.md'],
+      dependencies(capture),
+    ),
+    /context file/i,
+  );
+  assert.equal(git(directory, ['diff', '--staged']), '');
+  assert.equal(capture.resolveCalls, 0);
+  assert.equal(capture.completionCalls, 0);
+});

@@ -15,9 +15,11 @@ import {
   type ConstraintEvidenceItem,
   type EvidenceBundle,
   type EvidenceItem,
+  type IntentEvidenceItem,
   type VerificationEvidenceItem,
   type VerificationReceipt,
 } from './change-evidence';
+import { loadContextEvidence } from './context-evidence';
 import {
   createSkippedGateReceipt,
   requirePassedGate,
@@ -56,6 +58,7 @@ interface PrArguments {
   createPr: boolean;
   mode: string;
   skipFormat: boolean;
+  contextFiles: string[];
 }
 
 interface ExistingPr {
@@ -219,6 +222,7 @@ function withWorkflowEvidence(
   base: string,
   mode: string,
   issue: string,
+  context: readonly Readonly<IntentEvidenceItem>[],
 ): EvidenceBundle {
   const constraints: ConstraintEvidenceItem[] = [
     constraintItem('constraint-branch', 'branch', branch),
@@ -242,6 +246,7 @@ function withWorkflowEvidence(
   );
   const items: EvidenceItem[] = [
     ...gitEvidence.items,
+    ...context,
     ...constraints,
     ...verification,
   ];
@@ -509,6 +514,7 @@ function parseArgs(argv: string[], env: NodeJS.ProcessEnv): PrArguments {
     createPr: false,
     mode: '',
     skipFormat: false,
+    contextFiles: [],
   };
   for (let index = 0; index < argv.length; index += 1) {
     const current = argv[index];
@@ -533,6 +539,9 @@ function parseArgs(argv: string[], env: NodeJS.ProcessEnv): PrArguments {
       args.skipFormat = true;
     } else if (current === '--mode' && next) {
       args.mode = next;
+      index += 1;
+    } else if (current === '--context-file' && next) {
+      args.contextFiles.push(next);
       index += 1;
     }
   }
@@ -574,6 +583,7 @@ async function main(argv: string[]): Promise<void> {
   const runtime = loadRuntimeConfig();
   const knownSecrets = knownSecretValues(runtime.values);
   const args = parseArgs(argv, runtime.values);
+  const context = loadContextEvidence(args.contextFiles, { knownSecrets });
   const resolved = resolveProvider({
     env: runtime.values,
     sources: runtime.sources,
@@ -620,6 +630,7 @@ async function main(argv: string[]): Promise<void> {
     step(`Mode: ${mode}`);
     step(`Provider: ${resolved.profile.id}`);
     step(`Model: ${resolved.profile.model}`);
+    step(`Context files: ${args.contextFiles.length}`);
     return;
   }
   if (!initialEvidence.coverage.complete) {
@@ -703,6 +714,7 @@ async function main(argv: string[]): Promise<void> {
     args.base,
     mode,
     args.issue,
+    context,
   );
   step('Generating one structured draft from original evidence...');
   const draft = await generateArtifactDraft(

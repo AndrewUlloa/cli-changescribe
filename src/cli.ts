@@ -67,13 +67,15 @@ Complete reference: ${CLI_REFERENCE}
 }
 
 function printCommitHelp(): void {
-  console.log(`Usage: diffwright commit [--dry-run] [--all]
+  console.log(`Usage: diffwright commit [--dry-run] [--all] [--context-file <path>]
 
 Generate a Conventional Commit message from the staged diff.
 
 Options:
   --dry-run   Generate and print the message without committing or pushing.
   --all       Stage every tracked and untracked working-tree change first.
+  --context-file <path>
+              Add bounded source-agnostic intent from a regular project file.
 
 Without --all, Diffwright analyzes only the existing staged diff and never changes
 the index. Without --dry-run, it creates a commit and pushes the current branch.
@@ -93,6 +95,8 @@ Options:
   --limit <number>    Legacy history cap; never limits the final net diff
   --issue <number>    Add issue context and append "Closes #<number>" to the PR body
   --mode <mode>       Summary mode: feature or release
+  --context-file <path>
+                      Add bounded source-agnostic intent from a regular project file
   --dry-run           Show the range and plan without provider calls or output files
   --create-pr         Run project gates and create or update a PR with gh
   --skip-format       Skip the optional package-manager format script

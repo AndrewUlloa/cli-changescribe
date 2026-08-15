@@ -223,14 +223,14 @@ Non-decisions:
     `test/commit-v2.test.ts`, `test/workflow-byok.test.ts`
   - **Size:** M
 
-- [ ] **Task 9: Add generic supplied context to commit and PR generation**
+- [x] **Task 9: Add generic supplied context to commit and PR generation**
   - **Description:** Route bounded context-file evidence into both artifact
     pipelines without teaching the core which external system produced it.
   - **Acceptance:**
-    - [ ] Context remains explicitly `provided`, never `verified`.
-    - [ ] Missing, oversized, symlinked, or unsafe context fails before network
+    - [x] Context remains explicitly `provided`, never `verified`.
+    - [x] Missing, oversized, symlinked, or unsafe context fails before network
       or Git mutation.
-    - [ ] Secrets remain redacted from output and errors.
+    - [x] Secrets remain redacted from output and errors.
   - **Verify:**
     - `node --test .test-dist/change-evidence.test.js`
     - `node --test .test-dist/security.test.js`
