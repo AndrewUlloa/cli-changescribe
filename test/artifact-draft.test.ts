@@ -7,7 +7,7 @@ interface ArtifactDraftModule {
     title: { type: string; scope?: string; breaking: boolean; subject: string };
     claims: Array<{ id: string; text: string }>;
     sections: Array<{ kind: string; claimIds: string[] }>;
-    trailers: Array<{ token: string; value: string }>;
+    trailers: Array<{ token: string; value: string; evidenceIds: string[] }>;
   };
 }
 
@@ -42,6 +42,13 @@ function evidenceBundle(): unknown {
         basis: 'provided',
         source: { kind: 'user-intent', locator: 'command-line' },
         payload: { text: 'Prevent empty tokens from throwing.' },
+      },
+      {
+        id: 'constraint-issue',
+        kind: 'constraint',
+        basis: 'provided',
+        source: { kind: 'workflow', locator: 'issue-reference' },
+        payload: { name: 'issue-reference', value: '#123' },
       },
       {
         id: 'verification-1',
@@ -105,7 +112,9 @@ function validDraft(): Record<string, unknown> {
       { kind: 'rationale', claimIds: ['claim-rationale'] },
       { kind: 'verification', claimIds: ['claim-verification'] },
     ],
-    trailers: [{ token: 'Refs', value: '#123' }],
+    trailers: [
+      { token: 'Refs', value: '#123', evidenceIds: ['constraint-issue'] },
+    ],
   };
 }
 
@@ -117,8 +126,25 @@ test('parses a bounded evidence-linked JSON draft and freezes it', () => {
   assert.equal(draft.title.scope, 'parser');
   assert.equal(draft.claims.length, 3);
   assert.equal(draft.trailers[0].token, 'Refs');
+  assert.deepEqual(draft.trailers[0].evidenceIds, ['constraint-issue']);
   assert.equal(Object.isFrozen(draft), true);
   assert.equal(Object.isFrozen(draft.claims), true);
+});
+
+test('requires every trailer to cite provided evidence', () => {
+  for (const evidenceIds of [[], ['missing-1']]) {
+    const candidate = validDraft();
+    const trailers = candidate.trailers as Array<Record<string, unknown>>;
+    trailers[0].evidenceIds = evidenceIds;
+    assert.throws(
+      () =>
+        artifactDraft.parseArtifactDraft(
+          JSON.stringify(candidate),
+          evidenceBundle(),
+        ),
+      /trailer evidence/i,
+    );
+  }
 });
 
 test('rejects free-form markdown, unknown fields, and unknown evidence ids', () => {
