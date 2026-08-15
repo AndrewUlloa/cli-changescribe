@@ -67,7 +67,7 @@ map.
 | Gate | Result |
 |---|---|
 | `npm run typecheck` | Pass |
-| `npm test` | Pass: 315 tests, 0 failures |
+| `npm test` | Pass: 316 tests, 0 failures |
 | `npm pack --dry-run --json` | Pass: 70 package entries; policy Schema and compiled v2 modules/maps present |
 | `npm audit --omit=dev` | Pass: 0 vulnerabilities |
 | `npm audit signatures` | Pass: 39 of 39 packages have verified registry signatures |

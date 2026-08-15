@@ -63,6 +63,11 @@ Package publication and merge remain separate maintainer decisions.
   substantive source change in the generated subject. Fixture directories are
   now supporting when source changes exist, while fixture-only work can still
   be primary; a regression test records both cases.
+- Final CodeRabbit follow-up fixed stale draft retention after a failed render,
+  moved the `GH_REPO` override into a successful mutation regression, and
+  reconciled the plan's five-file task limit. The staging-alias comment was
+  rejected because the published CLI intentionally supports consumer projects
+  with a detected staging topology even though this repository uses main only.
 
 ## Residual risks and deferred work
 
