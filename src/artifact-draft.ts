@@ -401,6 +401,22 @@ export function classifyChangeEvidenceRole(
   return isSupportingChange(item, policy) ? 'supporting' : 'substantive';
 }
 
+export function eligiblePrimaryChangeEvidenceIds(
+  evidence: EvidenceBundle,
+  policy: ArtifactSelectionPolicy = {},
+): readonly string[] {
+  const changes = evidence.items.filter(
+    (item): item is Extract<EvidenceBundle['items'][number], { kind: 'change' }> =>
+      item.kind === 'change',
+  );
+  const substantive = changes.filter(
+    (item) => classifyChangeEvidenceRole(item, policy) === 'substantive',
+  );
+  return Object.freeze(
+    (substantive.length > 0 ? substantive : changes).map((item) => item.id),
+  );
+}
+
 function isSupportingPath(
   path: string,
   policy: ArtifactSelectionPolicy,

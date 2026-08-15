@@ -5,6 +5,7 @@ import type { ChatCompletionMessageParam } from 'openai/resources/chat/completio
 import {
   artifactRepairCategory,
   artifactRepairInstruction,
+  eligiblePrimaryChangeEvidenceIds,
   MINIMAL_ARTIFACT_REPAIR_INSTRUCTION,
   parseArtifactDraft,
   PRIMARY_GROUNDING_REPAIR_INSTRUCTION,
@@ -184,6 +185,8 @@ function buildArtifactMessages(
   repairInstruction: string | undefined,
 ): ChatCompletionMessageParam[] {
   const serialized = serializeEvidenceBundle(evidence);
+  const primaryEvidenceIds = eligiblePrimaryChangeEvidenceIds(evidence);
+  const examplePrimaryEvidenceId = primaryEvidenceIds[0] ?? 'change-1';
   if (serialized.length > MAX_MODEL_EVIDENCE_CHARS) {
     throw new Error(
       'Complete pull-request evidence exceeds the supported model request size. Split the change and retry.',
@@ -210,7 +213,8 @@ function buildArtifactMessages(
           ? []
           : [repairInstruction, MINIMAL_ARTIFACT_REPAIR_INSTRUCTION]),
         'Required exact shape:',
-        '{"schemaVersion":1,"title":{"type":"fix","breaking":false,"subject":"imperative subject","claimId":"claim-1"},"claims":[{"id":"claim-1","kind":"change","text":"imperative subject.","evidenceIds":["change-1"],"basis":"observed","significance":"primary"}],"sections":[{"kind":"summary","claimIds":["claim-1"]}],"trailers":[]}',
+        `{"schemaVersion":1,"title":{"type":"fix","breaking":false,"subject":"imperative subject","claimId":"claim-1"},"claims":[{"id":"claim-1","kind":"change","text":"imperative subject.","evidenceIds":["${examplePrimaryEvidenceId}"],"basis":"observed","significance":"primary"}],"sections":[{"kind":"summary","claimIds":["claim-1"]}],"trailers":[]}`,
+        `Eligible primary change evidence IDs: ${JSON.stringify(primaryEvidenceIds)}`,
         'Omit title.scope instead of using an empty string.',
         'Allowed claim kinds: change, rationale, verification, risk, review-focus, follow-up.',
         'Allowed section kinds: summary, changes, rationale, verification, review-focus, risks, follow-ups.',

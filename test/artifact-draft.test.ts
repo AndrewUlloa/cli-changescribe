@@ -4,6 +4,10 @@ import test from 'node:test';
 interface ArtifactDraftModule {
   artifactRepairCategory(instruction: string): string;
   artifactRepairInstruction(error: unknown): string;
+  eligiblePrimaryChangeEvidenceIds(
+    evidence: unknown,
+    selectionPolicy?: { supportingPaths?: readonly string[] },
+  ): readonly string[];
   parseArtifactDraft(
     input: string,
     evidence: unknown,
@@ -403,6 +407,10 @@ test('prevents supporting plan changes from displacing substantive source change
     receipts: [],
     coverage: { complete: true, gaps: [] },
   });
+  assert.deepEqual(
+    artifactDraft.eligiblePrimaryChangeEvidenceIds(evidence),
+    ['change-source'],
+  );
   const planPrimary = {
     schemaVersion: 1,
     title: {
