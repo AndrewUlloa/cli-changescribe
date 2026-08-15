@@ -264,41 +264,81 @@ Non-decisions:
 
 ### Phase 5: Human Review and Editorial Policy
 
-- [x] **Task 10: Add explicit review before GitHub mutation**
+- [x] **Task 10a: Add explicit artifact review and editing**
   - **Description:** Preview generated title/body, confirm in an interactive
     terminal, require `--yes` headlessly, and revalidate edited content before
     create/update.
   - **Acceptance:**
     - [x] Cancellation performs no GitHub mutation.
     - [x] Noninteractive mutation without `--yes` fails clearly.
-    - [x] Generated scripts preserve interactive review; this repository opts
-      into intentional headless approval in its own `feature:pr` script.
   - **Verify:**
     - `node --test .test-dist/pr-review.test.js`
-    - `node --test .test-dist/cli-routing.test.js`
   - **Depends on:** Task 6
-  - **Files:** `src/arguments.ts`, `src/pr-workflow.ts`, `src/pr-review.ts`,
-    `src/pr-editor.ts`, `src/project-setup.ts`, `test/pr-review.test.ts`,
-    `test/pr-editor.test.ts`, `test/cli-routing.test.ts`
+  - **Files:** `src/arguments.ts`, `src/pr-review.ts`, `src/pr-editor.ts`,
+    `test/pr-review.test.ts`, `test/pr-editor.test.ts`
   - **Size:** M
 
-- [x] **Task 11: Add advisory plain-language checks and repository policy**
+- [x] **Task 10b: Integrate review with PR mutation and generated scripts**
+  - **Description:** Wire the reviewed artifact into create/update mutation and
+    keep generated consumer scripts interactive by default.
+  - **Acceptance:**
+    - [x] Generated scripts preserve interactive review; this repository opts
+      into intentional headless approval in its own `feature:pr` script.
+    - [x] GitHub receives the exact reviewed title and body bytes.
+  - **Verify:**
+    - `node --test .test-dist/cli-routing.test.js`
+    - `node --test .test-dist/workflow-byok.test.js`
+  - **Depends on:** Task 10a
+  - **Files:** `src/pr-workflow.ts`, `src/project-setup.ts`,
+    `test/cli-routing.test.ts`, `test/project-setup.test.ts`,
+    `test/workflow-byok.test.ts`
+  - **Size:** M
+
+- [x] **Task 11a: Add advisory plain-language checks**
   - **Description:** Add warnings for excessive sentence length, vague
     absolutes, duplicate claims, and unstable terminology while keeping
-    factual/schema violations blocking and repository overrides authoritative.
+    factual/schema violations blocking.
   - **Acceptance:**
     - [x] Style warnings never masquerade as factual proof.
     - [x] Precise code identifiers, URLs, and repository terminology are not
       mechanically rewritten.
-    - [x] Default policy remains useful without configuration.
   - **Verify:**
     - `node --test .test-dist/editorial-policy.test.js`
     - `npm run typecheck`
-  - **Depends on:** Tasks 8 and 10
+  - **Depends on:** Tasks 8 and 10b
   - **Files:** `src/artifact-draft.ts`, `src/artifact-renderer.ts`,
-    `src/artifact-critic.ts`, `src/editorial-policy.ts`,
-    `src/repository-policy.ts`, `src/commit.ts`, `src/pr-workflow.ts`,
-    `src/pr-review.ts`, and focused contract/workflow tests
+    `src/editorial-policy.ts`, `test/artifact-draft.test.ts`,
+    `test/editorial-policy.test.ts`
+  - **Size:** M
+
+- [x] **Task 11b: Load and enforce pinned repository policy**
+  - **Description:** Load bounded data-only policy from committed Git state and
+    apply it at commit and PR validation boundaries.
+  - **Acceptance:**
+    - [x] Default policy remains useful without configuration.
+    - [x] Feature policy cannot weaken the base policy reviewing that feature.
+  - **Verify:**
+    - `node --test .test-dist/repository-policy.test.js`
+    - `npm run typecheck`
+  - **Depends on:** Task 11a
+  - **Files:** `src/repository-policy.ts`, `src/commit.ts`,
+    `src/pr-workflow.ts`, `test/repository-policy.test.ts`,
+    `test/commit-v2.test.ts`
+  - **Size:** M
+
+- [x] **Task 11c: Add terminal evidence criticism**
+  - **Description:** Audit every renderable model-authored claim and trailer
+    against its cited original evidence before preview or mutation.
+  - **Acceptance:**
+    - [x] Malformed, incomplete, or unsupported criticism fails closed.
+    - [x] The critic cannot rewrite artifacts or override deterministic rules.
+  - **Verify:**
+    - `node --test .test-dist/artifact-critic.test.js`
+    - `node --test .test-dist/change-evidence.test.js`
+  - **Depends on:** Tasks 8 and 11b
+  - **Files:** `src/artifact-critic.ts`, `src/change-evidence.ts`,
+    `test/artifact-critic.test.ts`, `test/change-evidence.test.ts`,
+    `test/workflow-byok.test.ts`
   - **Size:** M
 
 - [x] **Task 12: Document the evidence contract and migrate examples**
