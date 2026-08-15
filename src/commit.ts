@@ -2,10 +2,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
-import { parseArtifactDraft, type ArtifactDraft } from './artifact-draft';
 import {
-  assertArtifactCritique,
+  artifactRepairInstruction,
+  parseArtifactDraft,
+  type ArtifactDraft,
+} from './artifact-draft';
+import {
   buildArtifactCriticMessages,
+  filterArtifactDraftByCritique,
 } from './artifact-critic';
 import {
   renderCommitArtifact,
@@ -153,7 +157,7 @@ function redactMessageSecrets(
 
 function buildArtifactMessages(
   evidence: EvidenceBundle,
-  repair: boolean,
+  repairInstruction: string | undefined,
 ): ChatCompletionMessageParam[] {
   const serialized = serializeEvidenceBundle(evidence);
   if (serialized.length > MAX_MODEL_EVIDENCE_CHARS) {
@@ -170,9 +174,12 @@ function buildArtifactMessages(
     {
       role: 'user',
       content: [
-        repair
-          ? 'The previous response failed deterministic validation. Produce one corrected evidence-linked draft from the original evidence.'
-          : 'Produce one evidence-linked draft.',
+        repairInstruction === undefined
+          ? 'Produce one evidence-linked draft.'
+          : 'The previous response failed deterministic validation. Produce one corrected evidence-linked draft from the original evidence.',
+        ...(repairInstruction === undefined
+          ? []
+          : [repairInstruction]),
         'Required exact shape:',
         '{"schemaVersion":1,"title":{"type":"fix","breaking":false,"subject":"imperative subject","claimId":"claim-1"},"claims":[{"id":"claim-1","kind":"change","text":"imperative subject.","evidenceIds":["change-1"],"basis":"observed","significance":"primary"}],"sections":[{"kind":"summary","claimIds":["claim-1"]}],"trailers":[]}',
         'Omit title.scope instead of using an empty string.',
@@ -200,13 +207,14 @@ async function requestArtifact(
 ): Promise<RenderedCommit> {
   let draft: ArtifactDraft | undefined;
   let rendered: RenderedCommit | undefined;
+  let repairInstruction: string | undefined;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const completion = await timings.measure(
       attempt === 0 ? 'provider-draft' : 'provider-repair',
       async () =>
         await dependencies.completeChat(resolved, {
           messages: redactMessageSecrets(
-            buildArtifactMessages(evidence, attempt === 1),
+            buildArtifactMessages(evidence, repairInstruction),
             knownSecrets,
           ),
           outputLimit: 4_096,
@@ -233,9 +241,10 @@ async function requestArtifact(
       draft = result.draft;
       rendered = result.rendered;
       break;
-    } catch {
+    } catch (error) {
       draft = undefined;
       rendered = undefined;
+      repairInstruction = artifactRepairInstruction(error);
       if (attempt === 0) {
         console.log(
           '⚠️  Provider draft failed validation; requesting one repair...',
@@ -248,23 +257,38 @@ async function requestArtifact(
       'Provider returned an invalid evidence-linked commit draft after one repair.',
     );
   }
-  await timings.measure('provider-critic', async () => {
+  const validatedDraft = draft;
+  const filtered = await timings.measure('provider-critic', async () => {
     const critique = await dependencies.completeChat(resolved, {
       messages: redactMessageSecrets(
-        buildArtifactCriticMessages(evidence, draft),
+        buildArtifactCriticMessages(evidence, validatedDraft),
         knownSecrets,
       ),
       outputLimit: 8_192,
       intent: 'workflow',
     });
-    assertArtifactCritique(
+    return filterArtifactDraftByCritique(
       redactSecretValues(
         critique.content || critique.reasoning,
         knownSecrets,
       ).trim(),
-      draft,
+      validatedDraft,
     );
   });
+  if (filtered.removedCandidateIds.length > 0) {
+    console.log(
+      `⚠️  Critic removed ${String(filtered.removedCandidateIds.length)} unsupported optional ${filtered.removedCandidateIds.length === 1 ? 'claim' : 'claims'}.`,
+    );
+    draft = parseArtifactDraft(JSON.stringify(filtered.draft), evidence);
+    rendered = timings.measureSync('render', () =>
+      renderCommitArtifact(
+        draft as ArtifactDraft,
+        evidence,
+        policy.title,
+        policy.editorial,
+      ),
+    );
+  }
   return rendered;
 }
 

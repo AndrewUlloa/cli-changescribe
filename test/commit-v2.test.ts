@@ -257,6 +257,7 @@ test('repairs one invalid draft from the original staged evidence', async (conte
 
   assert.equal(capture.completionCalls, 3);
   assert.match(capture.prompt, /previous response failed deterministic validation/);
+  assert.match(capture.prompt, /Repair category: json-shape/);
   assert.match(capture.prompt, /evidence-value/);
   assert.doesNotMatch(capture.prompt, /not-json/);
 });
@@ -280,7 +281,7 @@ test('rejects an invented breaking change after one repair', async (context) => 
   assert.equal(capture.completionCalls, 2);
 });
 
-test('critic vetoes supporting prose that cites unrelated substantive evidence', async (context) => {
+test('critic removes supporting prose that cites unrelated substantive evidence', async (context) => {
   const directory = repository(context);
   useRepository(context, directory);
   fs.writeFileSync(path.join(directory, 'source.ts'), 'export const value = 1;\n');
@@ -300,33 +301,58 @@ test('critic vetoes supporting prose that cites unrelated substantive evidence',
     claimIds: ['claim-plan'],
   });
 
+  await runCommit(
+    ['--dry-run'],
+    dependencies(
+      capture,
+      [JSON.stringify(dishonest)],
+      JSON.stringify({
+        schemaVersion: 1,
+        candidates: [
+          {
+            candidateId: 'claim:claim-change',
+            evidenceIds: ['change-1'],
+            supported: true,
+          },
+          {
+            candidateId: 'claim:claim-plan',
+            evidenceIds: ['change-1'],
+            supported: false,
+          },
+        ],
+      }),
+    ),
+  );
+  assert.equal(capture.completionCalls, 2);
+  assert.match(capture.prompt, /Use feat for a new feature and fix for a bug fix/);
+});
+
+test('critic still blocks an unsupported primary claim', async (context) => {
+  const directory = repository(context);
+  useRepository(context, directory);
+  fs.writeFileSync(path.join(directory, 'source.ts'), 'export const value = 1;\n');
+  git(directory, ['add', 'source.ts']);
+  const capture = { resolveCalls: 0, completionCalls: 0, prompt: '' };
+
   await assert.rejects(
     runCommit(
       ['--dry-run'],
       dependencies(
         capture,
-        [JSON.stringify(dishonest)],
+        [JSON.stringify(validDraft())],
         JSON.stringify({
           schemaVersion: 1,
-          candidates: [
-            {
-              candidateId: 'claim:claim-change',
-              evidenceIds: ['change-1'],
-              supported: true,
-            },
-            {
-              candidateId: 'claim:claim-plan',
-              evidenceIds: ['change-1'],
-              supported: false,
-            },
-          ],
+          candidates: [{
+            candidateId: 'claim:claim-change',
+            evidenceIds: ['change-1'],
+            supported: false,
+          }],
         }),
       ),
     ),
-    /critique rejected unsupported claims/i,
+    /critique rejected the primary claim/i,
   );
   assert.equal(capture.completionCalls, 2);
-  assert.match(capture.prompt, /Use feat for a new feature and fix for a bug fix/);
 });
 
 test('critic transport failure is terminal and never triggers draft repair', async (context) => {

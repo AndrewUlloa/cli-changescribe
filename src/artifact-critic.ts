@@ -14,6 +14,11 @@ interface CriticCandidate {
   readonly evidenceIds: readonly string[];
 }
 
+export interface FilteredArtifactCritique {
+  readonly draft: ArtifactDraft;
+  readonly removedCandidateIds: readonly string[];
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -210,10 +215,10 @@ function criticCandidates(draft: ArtifactDraft): readonly CriticCandidate[] {
   );
 }
 
-export function assertArtifactCritique(
+function parseArtifactCritique(
   value: string,
   draft: ArtifactDraft,
-): void {
+): ReadonlyMap<string, boolean> {
   if (value.length === 0 || value.length > MAX_CRITIQUE_CHARS) {
     throw new Error('Artifact critique is invalid.');
   }
@@ -238,6 +243,7 @@ export function assertArtifactCritique(
   if (parsed.candidates.length !== expected.length) {
     throw new Error('Artifact critique rejected unsupported claims.');
   }
+  const verdicts = new Map<string, boolean>();
   for (const [index, candidate] of parsed.candidates.entries()) {
     const expectedCandidate = expected[index];
     if (!isRecord(candidate) || expectedCandidate === undefined) {
@@ -254,10 +260,72 @@ export function assertArtifactCritique(
       candidate.evidenceIds.some(
         (evidenceId, evidenceIndex) =>
           evidenceId !== expectedCandidate.evidenceIds[evidenceIndex],
-      ) ||
-      !candidate.supported
+      )
     ) {
       throw new Error('Artifact critique rejected unsupported claims.');
     }
+    verdicts.set(candidate.candidateId, candidate.supported);
+  }
+  return verdicts;
+}
+
+export function filterArtifactDraftByCritique(
+  value: string,
+  draft: ArtifactDraft,
+): FilteredArtifactCritique {
+  const verdicts = parseArtifactCritique(value, draft);
+  const removedCandidateIds = Object.freeze(
+    [...verdicts.entries()]
+      .filter(([, supported]) => !supported)
+      .map(([candidateId]) => candidateId),
+  );
+  if (removedCandidateIds.length === 0) {
+    return Object.freeze({ draft, removedCandidateIds });
+  }
+  if (removedCandidateIds.includes(`claim:${draft.title.claimId}`)) {
+    throw new Error('Artifact critique rejected the primary claim.');
+  }
+
+  const removedClaims = new Set(
+    removedCandidateIds
+      .filter((candidateId) => candidateId.startsWith('claim:'))
+      .map((candidateId) => candidateId.slice('claim:'.length)),
+  );
+  const removedTrailers = new Set(
+    removedCandidateIds
+      .filter((candidateId) => candidateId.startsWith('trailer:'))
+      .map((candidateId) => Number(candidateId.slice('trailer:'.length)) - 1),
+  );
+  const filtered: ArtifactDraft = {
+    schemaVersion: 1,
+    title: draft.title,
+    claims: draft.claims.filter((claim) => !removedClaims.has(claim.id)),
+    sections: draft.sections
+      .map((section) => ({
+        ...section,
+        claimIds: section.claimIds.filter(
+          (claimId) => !removedClaims.has(claimId),
+        ),
+      }))
+      .filter(
+        (section) => section.kind === 'summary' || section.claimIds.length > 0,
+      ),
+    trailers: draft.trailers.filter(
+      (_trailer, index) => !removedTrailers.has(index),
+    ),
+  };
+  return Object.freeze({
+    draft: filtered,
+    removedCandidateIds,
+  });
+}
+
+export function assertArtifactCritique(
+  value: string,
+  draft: ArtifactDraft,
+): void {
+  const filtered = filterArtifactDraftByCritique(value, draft);
+  if (filtered.removedCandidateIds.length > 0) {
+    throw new Error('Artifact critique rejected unsupported claims.');
   }
 }

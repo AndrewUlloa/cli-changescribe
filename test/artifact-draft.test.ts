@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 interface ArtifactDraftModule {
+  artifactRepairInstruction(error: unknown): string;
   parseArtifactDraft(
     input: string,
     evidence: unknown,
@@ -30,6 +31,26 @@ interface ChangeEvidenceModule {
 
 const artifactDraft: ArtifactDraftModule = require('../dist/artifact-draft.js');
 const changeEvidence: ChangeEvidenceModule = require('../dist/change-evidence.js');
+
+test('classifies repair failures without echoing rejected artifact content', () => {
+  assert.match(
+    artifactDraft.artifactRepairInstruction(
+      new Error('Artifact draft is not valid JSON.'),
+    ),
+    /Repair category: json-shape/,
+  );
+  assert.match(
+    artifactDraft.artifactRepairInstruction(
+      new Error('Conventional Commit subject must not end with a period.'),
+    ),
+    /Repair category: title-policy/,
+  );
+  const sensitive = 'gsk_sensitive_value';
+  assert.doesNotMatch(
+    artifactDraft.artifactRepairInstruction(new Error(sensitive)),
+    new RegExp(sensitive),
+  );
+});
 
 function evidenceBundle(): unknown {
   return changeEvidence.createEvidenceBundle({

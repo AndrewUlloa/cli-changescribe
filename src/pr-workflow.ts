@@ -2,10 +2,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
-import { parseArtifactDraft, type ArtifactDraft } from './artifact-draft';
 import {
-  assertArtifactCritique,
+  artifactRepairInstruction,
+  parseArtifactDraft,
+  type ArtifactDraft,
+} from './artifact-draft';
+import {
   buildArtifactCriticMessages,
+  filterArtifactDraftByCritique,
 } from './artifact-critic';
 import { renderPullRequestArtifact } from './artifact-renderer';
 import {
@@ -173,7 +177,7 @@ function buildArtifactMessages(
   branch: string,
   base: string,
   mode: string,
-  repair: boolean,
+  repairInstruction: string | undefined,
 ): ChatCompletionMessageParam[] {
   const serialized = serializeEvidenceBundle(evidence);
   if (serialized.length > MAX_MODEL_EVIDENCE_CHARS) {
@@ -193,9 +197,12 @@ function buildArtifactMessages(
         `Branch: ${branch}`,
         `Base: ${base}`,
         `Mode: ${mode}`,
-        repair
-          ? 'The previous response failed deterministic validation. Produce one corrected draft from the original evidence.'
-          : 'Produce one evidence-linked draft.',
+        repairInstruction === undefined
+          ? 'Produce one evidence-linked draft.'
+          : 'The previous response failed deterministic validation. Produce one corrected draft from the original evidence.',
+        ...(repairInstruction === undefined
+          ? []
+          : [repairInstruction]),
         'Required exact shape:',
         '{"schemaVersion":1,"title":{"type":"fix","breaking":false,"subject":"imperative subject","claimId":"claim-1"},"claims":[{"id":"claim-1","kind":"change","text":"imperative subject.","evidenceIds":["change-1"],"basis":"observed","significance":"primary"}],"sections":[{"kind":"summary","claimIds":["claim-1"]}],"trailers":[]}',
         'Omit title.scope instead of using an empty string.',
@@ -223,13 +230,20 @@ async function generateArtifactDraft(
   timings: OperationTimings,
 ): Promise<ArtifactDraft> {
   let draft: ArtifactDraft | undefined;
+  let repairInstruction: string | undefined;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const completion = await timings.measure(
       attempt === 0 ? 'provider-draft' : 'provider-repair',
       async () =>
         await createCompletionSafe(
           resolved,
-          buildArtifactMessages(evidence, branch, base, mode, attempt === 1),
+          buildArtifactMessages(
+            evidence,
+            branch,
+            base,
+            mode,
+            repairInstruction,
+          ),
           4096,
           knownSecrets,
         ),
@@ -252,7 +266,8 @@ async function generateArtifactDraft(
         return candidate;
       });
       break;
-    } catch {
+    } catch (error) {
+      repairInstruction = artifactRepairInstruction(error);
       if (attempt === 0) {
         warn('Provider draft failed validation; requesting one repair...');
       }
@@ -1029,22 +1044,14 @@ async function main(argv: string[], timings: OperationTimings): Promise<void> {
     repositoryPolicy.policy,
     timings,
   );
-  const generatedArtifact = timings.measureSync('render', () =>
-    renderPullRequestArtifact(
-      draft,
-      evidence,
-      repositoryPolicy.policy.title,
-      repositoryPolicy.policy.editorial,
-    ),
-  );
-  await timings.measure('provider-critic', async () => {
+  const filtered = await timings.measure('provider-critic', async () => {
     const critique = await createCompletionSafe(
       resolved,
       buildArtifactCriticMessages(evidence, draft),
       8_192,
       knownSecrets,
     );
-    assertArtifactCritique(
+    return filterArtifactDraftByCritique(
       redactSecretValues(
         critique.content || critique.reasoning,
         knownSecrets,
@@ -1052,6 +1059,23 @@ async function main(argv: string[], timings: OperationTimings): Promise<void> {
       draft,
     );
   });
+  if (filtered.removedCandidateIds.length > 0) {
+    warn(
+      `Critic removed ${String(filtered.removedCandidateIds.length)} unsupported optional ${filtered.removedCandidateIds.length === 1 ? 'claim' : 'claims'}.`,
+    );
+  }
+  const filteredDraft = parseArtifactDraft(
+    JSON.stringify(filtered.draft),
+    evidence,
+  );
+  const generatedArtifact = timings.measureSync('render', () =>
+    renderPullRequestArtifact(
+      filteredDraft,
+      evidence,
+      repositoryPolicy.policy.title,
+      repositoryPolicy.policy.editorial,
+    ),
+  );
   const renderedArtifact = args.issue
     ? Object.freeze({
         ...generatedArtifact,

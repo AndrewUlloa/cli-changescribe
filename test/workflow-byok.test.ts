@@ -758,6 +758,10 @@ test('PR workflow repairs one invalid draft and never chains model summaries', a
     JSON.stringify(server.requests[1].body),
     /not valid artifact json/,
   );
+  assert.match(
+    JSON.stringify(server.requests[1].body),
+    /Repair category: json-shape/,
+  );
 });
 
 test('PR workflow repairs a draft that fails deterministic rendering', async (context) => {
@@ -780,6 +784,10 @@ test('PR workflow repairs a draft that fails deterministic rendering', async (co
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.equal(server.requests.length, 3);
   assert.match(result.stdout, /requesting one repair/);
+  assert.match(
+    JSON.stringify(server.requests[1].body),
+    /Repair category: title-policy/,
+  );
   assert.match(
     fs.readFileSync(output, 'utf8'),
     /route completions through provider-neutral configuration/i,
@@ -812,7 +820,7 @@ test('PR workflow discards a render-invalid draft when its repair cannot be pars
   assert.equal(fs.existsSync(output), false);
 });
 
-test('PR critic vetoes dishonest supporting prose before output or GitHub mutation', async (context) => {
+test('PR critic removes dishonest supporting prose before GitHub mutation', async (context) => {
   const directory = createRepository(context);
   addPrMutationFixture(context, directory);
   const output = path.join(directory, 'summary.md');
@@ -840,11 +848,14 @@ test('PR critic vetoes dishonest supporting prose before output or GitHub mutati
     env,
   );
 
-  assert.equal(result.status, 1, result.stderr || result.stdout);
-  assert.match(result.stderr, /critique rejected unsupported claims/i);
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /Critic removed 1 unsupported optional claim/i);
   assert.equal(server.requests.length, 2);
-  assert.equal(fs.existsSync(output), false);
-  assert.equal(fs.existsSync(capture), false);
+  assert.doesNotMatch(fs.readFileSync(output, 'utf8'), /mark the plan/i);
+  assert.doesNotMatch(
+    JSON.parse(fs.readFileSync(capture, 'utf8')).body as string,
+    /mark the plan/i,
+  );
 });
 
 test('PR workflow skips provider and output when branch history reverts to base', async (context) => {

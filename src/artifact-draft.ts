@@ -50,6 +50,29 @@ export interface ArtifactDraft {
   readonly trailers: readonly ArtifactTrailerDraft[];
 }
 
+export function artifactRepairInstruction(error: unknown): string {
+  const message = error instanceof Error ? error.message : '';
+  if (
+    /JSON|schema version|must be an object|bounded array|missing or unknown fields/iu
+      .test(message)
+  ) {
+    return 'Repair category: json-shape. Return one complete JSON object with exactly the required fields and value types.';
+  }
+  if (/title|Conventional Commit|breaking-change/iu.test(message)) {
+    return 'Repair category: title-policy. Correct the title grammar, title-to-primary-claim match, type, scope, breaking marker, and 72-character hard limit.';
+  }
+  if (/evidence|observed|provided|substantive|supporting/iu.test(message)) {
+    return 'Repair category: evidence-grounding. Remove unsupported claims or cite only evidence IDs that directly support each remaining claim.';
+  }
+  if (/section|claim|primary|summary/iu.test(message)) {
+    return 'Repair category: claim-structure. Use one observed primary change in the sole summary and assign every other claim to exactly one compatible section.';
+  }
+  if (/trailer/iu.test(message)) {
+    return 'Repair category: trailer-structure. Remove unsupported trailers and keep only trailers backed by provided evidence.';
+  }
+  return 'Repair category: artifact-structure. Return the smallest valid draft that follows the exact required shape and omits optional unsupported content.';
+}
+
 const MAX_DRAFT_CHARS = 256 * 1024;
 const MAX_CLAIMS = 128;
 const MAX_CLAIM_TEXT_CHARS = 8_192;
