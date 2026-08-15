@@ -1,0 +1,147 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/AndrewUlloa/diffwright/main/documentation/diffwrightrc.schema.json",
+  "title": "Diffwright repository policy",
+  "description": "Versioned, repository-local policy for Conventional Commit titles and advisory editorial checks. Runtime validation also rejects duplicate JSON keys, invalid UTF-8, unsafe control or bidirectional characters, and case-insensitive duplicates where documented.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version"],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048
+    },
+    "version": {
+      "const": 1
+    },
+    "title": {
+      "$ref": "#/$defs/titlePolicy"
+    },
+    "editorial": {
+      "$ref": "#/$defs/editorialPolicy"
+    }
+  },
+  "$defs": {
+    "typeToken": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,31}$"
+    },
+    "scopeToken": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._/-]{0,63}$"
+    },
+    "boundedTerm": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "titlePolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "additionalTypes": {
+          "description": "Additional Conventional Commit types. Values must be unique and must not duplicate the built-in standard types.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/typeToken"
+          }
+        },
+        "scopeMode": {
+          "enum": ["optional", "forbidden"]
+        },
+        "allowedScopes": {
+          "description": "Optional allowlist for generated scopes. Values must be unique.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 128,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/scopeToken"
+          }
+        },
+        "targetLength": {
+          "description": "Advisory title-length target. The immutable hard maximum remains 72 characters.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 72
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "scopeMode": {
+                "const": "forbidden"
+              }
+            },
+            "required": ["scopeMode"]
+          },
+          "then": {
+            "not": {
+              "required": ["allowedScopes"]
+            }
+          }
+        }
+      ]
+    },
+    "terminologyGroup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "terms"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "terms": {
+          "description": "Terms are compared case-insensitively at runtime.",
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/boundedTerm"
+          }
+        }
+      }
+    },
+    "editorialPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "maxSentenceWords": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 100
+        },
+        "duplicateClaimMinWords": {
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 100
+        },
+        "vagueAbsolutes": {
+          "description": "Literal advisory terms. Values are compared case-insensitively at runtime.",
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/boundedTerm"
+          }
+        },
+        "terminologyGroups": {
+          "description": "Group names are unique case-insensitively at runtime.",
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/$defs/terminologyGroup"
+          }
+        }
+      }
+    }
+  }
+}

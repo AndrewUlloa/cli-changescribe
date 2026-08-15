@@ -109,7 +109,43 @@ Gateways can have their own downstream routing or retry policy.
   GitHub-ready block, and a temporary backup path is printed.
 - `--create-pr` requires `gh auth status` to succeed and the project to provide
   passing `test` and `build` scripts for its detected package manager.
-- Existing PR updates do not push local commits; push them separately.
+- A headless `--create-pr` requires explicit `--yes`. In a TTY, review the exact
+  title and body and choose Approve, Edit, or Cancel.
+- Existing PR updates do not push local commits. Push them first: the
+  same-repository PR head must exactly match the reviewed local SHA.
+- A new PR pushes the reviewed SHA directly. A rejected non-fast-forward push,
+  moved base, moved local head, or mismatched remote head stops before GitHub
+  creation or editing.
+- `DIFFWRIGHT_EDITOR` or `EDITOR` must name one executable without arguments.
+  Use a wrapper executable when a GUI editor requires flags such as `--wait`.
+
+## Evidence or critic failures
+
+Normal commit and PR generation makes one structured draft request and one
+separate terminal evidence-critic request to the same resolved provider and
+model. A deterministic draft failure may add one
+repair request. The critic is terminal: it never rewrites a claim or triggers a
+second draft.
+
+- **Incomplete evidence:** resolve the named binary, unavailable, or size gap,
+  or split the change. Diffwright never silently truncates a patch.
+- **Evidence request too large:** split unrelated work into separate commits or
+  PRs. Do not bypass the check by hiding changed files from the reviewed Git
+  snapshot.
+- **Invalid draft after one repair:** the model did not satisfy the strict JSON,
+  Conventional title, section, primary-selection, or evidence-link contract.
+  Try a more capable compatible model or make the change smaller and clearer.
+- **Critique rejected unsupported claims:** the draft was structurally valid,
+  but a separate model audit could not support every rendered claim from its
+  exact cited evidence. No commit, summary, push, or GitHub mutation follows.
+  Remove unrelated changes or add a bounded `--context-file` only when it
+  contains real intent that the repository diff cannot show.
+- **Critic transport or response failure:** the critic fails closed. Fix the
+  provider/network issue and retry; Diffwright does not accept the draft alone.
+
+A changed test file never proves that tests passed. Only a captured successful
+project-gate receipt renders as Passed. The critic improves grounding but is not
+a proof system; use interactive PR review when semantic judgment matters.
 
 ## Commit preview surprises
 
@@ -117,7 +153,26 @@ Gateways can have their own downstream routing or retry policy.
 changes the index, commits, or pushes. Use `commit --all --dry-run` only when
 you explicitly want every working-tree change staged first. The candidate is
 not saved for the later live command, so a subsequent `commit` calls the
-provider again.
+provider again. A successful run normally makes two requests: draft and critic.
+
+If a Git hook changes the reviewed tree, parent, message, or branch after
+generation, Diffwright refuses to push. The hook-created commit may remain local
+for inspection; repair the hook or working state and retry with a fresh staged
+snapshot. Diffwright pushes the verified commit SHA, never an ambient branch tip.
+
+## Repository policy problems
+
+Repository policy is the tracked root `.diffwrightrc.json`, not an environment
+path. Validate it against the shipped
+[JSON Schema](https://github.com/AndrewUlloa/diffwright/blob/main/documentation/diffwrightrc.schema.json).
+Unknown or duplicate keys, invalid UTF-8, symlink/non-file entries, values over
+their bounds, or a title target above 72 stop the workflow.
+
+Commit policy is pinned to the last committed `HEAD`, so editing or staging the
+file does not change the rules for that same commit. PR policy is pinned to the
+base commit; a feature-branch policy edit cannot weaken its own review. Raw
+policy patches do not go to the provider. Advisory warnings report style issues
+without rewriting the approved title or body.
 
 ## Safe bug reports
 

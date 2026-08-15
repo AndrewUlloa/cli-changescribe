@@ -30,7 +30,7 @@ test('published README leads with product identity and a one-minute quick start'
   const firstSection = readme.slice(0, readme.indexOf('## Providers'));
 
   assert.match(firstSection, /<div align="center">/);
-  assert.match(firstSection, /Turn Git diffs into.*Conventional Commit.*PR summar/is);
+  assert.match(firstSection, /Compile Git evidence into.*Conventional Commit.*PRs/is);
   assert.match(firstSection, /npm install -g diffwright/);
   assert.match(firstSection, /## Choose your workflow/);
   assert.match(firstSection, /## Quick start/);
@@ -129,10 +129,12 @@ test('published README states requirements and command side effects precisely', 
     /candidate.*not reused|calls the provider again/is,
     /pr --dry-run.*fetch/is,
     /pr --dry-run.*does not call the provider/is,
-    /net-diff evidence in one\s+structured request/i,
-    /complete bounded final net-diff evidence/i,
+    /complete bounded evidence.*structured draft/is,
+    /separate terminal critic/i,
+    /same resolved provider\s+and model/is,
+    /2 normally; 3 when the draft needs one repair/i,
     /always runs.*npm test.*npm run build/is,
-    /existing PR.*does not push/is,
+    /update requires the remote PR head to already equal it/i,
     /\.final\.md/,
     /temporary backup/i,
   ]) {
@@ -143,6 +145,7 @@ test('published README states requirements and command side effects precisely', 
 test('README links to shipped reference and community documentation', () => {
   const targets = [
     'documentation/cli-reference.md',
+    'documentation/diffwrightrc.schema.json',
     'documentation/providers.md',
     'documentation/troubleshooting.md',
     'documentation/releases.md',
@@ -178,6 +181,7 @@ test('CLI reference documents every supported option and exit behavior', () => {
     '--skip-format',
     '--no-format',
     '--mode',
+    '--context-file',
     '--yes',
     '--provider',
     '--model',
@@ -189,6 +193,39 @@ test('CLI reference documents every supported option and exit behavior', () => {
   }
   assert.match(reference, /unknown commands\/options.*nonzero/is);
   assert.match(reference, /Closes #/);
+});
+
+test('repository policy schema is shipped and matches the documented v1 surface', () => {
+  const schemaPath = path.join(
+    repoRoot,
+    'documentation/diffwrightrc.schema.json',
+  );
+  const schema = JSON.parse(fs.readFileSync(schemaPath, 'utf8')) as {
+    $schema?: string;
+    properties?: Record<string, unknown>;
+    required?: string[];
+    $defs?: Record<string, unknown>;
+  };
+
+  assert.equal(schema.$schema, 'https://json-schema.org/draft/2020-12/schema');
+  assert.deepEqual(schema.required, ['version']);
+  assert.deepEqual(Object.keys(schema.properties ?? {}).sort(), [
+    '$schema',
+    'editorial',
+    'title',
+    'version',
+  ]);
+  assert.ok(schema.$defs?.titlePolicy);
+  assert.ok(schema.$defs?.editorialPolicy);
+  assert.match(readme, /diffwrightrc\.schema\.json/);
+  assert.match(
+    repositoryFile('documentation/cli-reference.md'),
+    /diffwrightrc\.schema\.json/,
+  );
+  assert.match(
+    repositoryFile('documentation/troubleshooting.md'),
+    /diffwrightrc\.schema\.json/,
+  );
 });
 
 test('CLI reference distinguishes guided, legacy, and deterministic init modes', () => {
