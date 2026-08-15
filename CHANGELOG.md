@@ -7,6 +7,8 @@ and Diffwright uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-08-15
+
 ### Added
 
 - Added evidence-linked commit and pull-request drafts, deterministic artifact
@@ -21,7 +23,8 @@ and Diffwright uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   to opt into staging every working-tree change; Diffwright-managed scripts are
   migrated automatically.
 - Changed pull-request evidence to the final `merge-base...HEAD` net diff so
-  deletions, renames, and reverted intermediate work are represented correctly.
+  deletions and renames are represented, while intermediate changes later
+  reverted to the base state are excluded from the final artifact.
 - Changed GitHub mutation to require interactive approval or explicit `--yes`
   in headless workflows, while preserving approved title and body bytes.
 - Changed commit and squash titles to share deterministic Conventional Commit
@@ -57,6 +60,7 @@ and Diffwright uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Replaced stale README badges with live Shields.io badges.
 - Established `v0.4.4` as Diffwright's first formal GitHub Release.
 
-[Unreleased]: https://github.com/AndrewUlloa/diffwright/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/AndrewUlloa/diffwright/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/AndrewUlloa/diffwright/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/AndrewUlloa/diffwright/compare/v0.4.4...v0.5.0
 [0.4.4]: https://github.com/AndrewUlloa/diffwright/releases/tag/v0.4.4
