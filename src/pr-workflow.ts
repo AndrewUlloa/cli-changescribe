@@ -225,7 +225,7 @@ async function generateArtifactDraft(
       knownSecrets,
     );
     try {
-      draft = parseArtifactDraft(
+      const candidate = parseArtifactDraft(
         redactSecretValues(
           completion.content || completion.reasoning,
           knownSecrets,
@@ -233,11 +233,12 @@ async function generateArtifactDraft(
         evidence,
       );
       renderPullRequestArtifact(
-        draft,
+        candidate,
         evidence,
         policy.title,
         policy.editorial,
       );
+      draft = candidate;
       break;
     } catch {
       if (attempt === 0) {
@@ -904,6 +905,12 @@ async function main(argv: string[]): Promise<void> {
   const githubRepository = args.createPr
     ? resolveGitHubRepositoryIdentity()
     : undefined;
+  const requireGitHubRepository = (): GitHubRepositoryIdentity => {
+    if (githubRepository === undefined) {
+      throw new Error('GitHub repository identity was not resolved.');
+    }
+    return githubRepository;
+  };
 
   const receipts: VerificationReceipt[] = [];
   if (args.createPr) {
@@ -958,7 +965,7 @@ async function main(argv: string[]): Promise<void> {
       args.base,
       branch,
       initialEvidence.snapshot.headSha,
-      githubRepository as GitHubRepositoryIdentity,
+      requireGitHubRepository(),
     );
     if (existingPr) {
       warn(`Found existing PR #${existingPr.number}: ${existingPr.title}`);
@@ -1107,7 +1114,7 @@ async function main(argv: string[]): Promise<void> {
       args.base,
       branch,
       evidence.snapshot.headSha,
-      githubRepository as GitHubRepositoryIdentity,
+      requireGitHubRepository(),
     );
     assertMutationSnapshot();
     if (existingPr) {
@@ -1116,7 +1123,7 @@ async function main(argv: string[]): Promise<void> {
         existingPr.number,
         artifact.title,
         finalSummary,
-        githubRepository as GitHubRepositoryIdentity,
+        requireGitHubRepository(),
         () => {
           assertMutationSnapshot();
           assertRemoteHead();
@@ -1129,7 +1136,7 @@ async function main(argv: string[]): Promise<void> {
         evidence.snapshot.headSha,
         artifact.title,
         finalSummary,
-        githubRepository as GitHubRepositoryIdentity,
+        requireGitHubRepository(),
         () => {
           assertMutationSnapshot();
           assertRemoteHead();

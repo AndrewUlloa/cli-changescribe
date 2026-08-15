@@ -9,6 +9,13 @@ import test, { type TestContext } from 'node:test';
 
 const bin = path.resolve(__dirname, '..', 'bin', 'diffwright.js');
 
+type ArtifactResponseKind = 'parse-invalid' | 'render-invalid' | 'valid';
+
+function isArtifactPrompt(serialized: string): boolean {
+  return serialized.includes('Produce one evidence-linked draft') ||
+    serialized.includes('previous response failed deterministic validation');
+}
+
 function git(cwd: string, args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8' });
 }
@@ -38,6 +45,7 @@ async function createCompletionServer(
   options: {
     invalidArtifactResponses?: number;
     renderInvalidArtifactResponses?: number;
+    artifactResponses?: readonly ArtifactResponseKind[];
     scope?: string;
     dishonestSupporting?: boolean;
   } = {},
@@ -59,29 +67,25 @@ async function createCompletionServer(
       });
       response.writeHead(200, { 'content-type': 'application/json' });
       const serializedRequest = JSON.stringify(parsed);
-      const isArtifactDraft = serializedRequest.includes(
-        'Produce one evidence-linked draft',
-      );
       const isArtifactCritic = serializedRequest.includes(
         'independently audit every proposed model-authored artifact claim',
       );
-      const isArtifactRequest =
-        isArtifactDraft ||
-        serializedRequest.includes(
-          'previous response failed deterministic validation',
-        );
-      const artifactRequestCount = requests.filter((item) => {
-        const serialized = JSON.stringify(item.body);
-        return (
-          serialized.includes('Produce one evidence-linked draft') ||
-          serialized.includes(
-            'previous response failed deterministic validation',
-          )
-        );
-      }).length;
+      const isArtifactRequest = isArtifactPrompt(serializedRequest);
+      const artifactRequestCount = requests.filter((item) =>
+        isArtifactPrompt(JSON.stringify(item.body)),
+      ).length;
+      const configuredResponse =
+        options.artifactResponses?.[artifactRequestCount - 1];
+      const parseInvalid = isArtifactRequest &&
+        (configuredResponse === 'parse-invalid' ||
+          (configuredResponse === undefined &&
+            artifactRequestCount <= (options.invalidArtifactResponses ?? 0)));
       const renderInvalid =
         isArtifactRequest &&
-        artifactRequestCount <= (options.renderInvalidArtifactResponses ?? 0);
+        (configuredResponse === 'render-invalid' ||
+          (configuredResponse === undefined &&
+            artifactRequestCount <=
+              (options.renderInvalidArtifactResponses ?? 0)));
       response.end(
         JSON.stringify({
           id: `chatcmpl_${requests.length}`,
@@ -112,18 +116,9 @@ async function createCompletionServer(
                           : []),
                       ],
                     })
-                  : isArtifactDraft &&
-                  requests.filter((item) =>
-                    JSON.stringify(item.body).includes(
-                      'Produce one evidence-linked draft',
-                    ) || JSON.stringify(item.body).includes(
-                      'previous response failed deterministic validation',
-                    ),
-                  ).length <= (options.invalidArtifactResponses ?? 0)
+                  : parseInvalid
                   ? 'not valid artifact json'
-                  : isArtifactDraft || serializedRequest.includes(
-                      'previous response failed deterministic validation',
-                    )
+                  : isArtifactRequest
                   ? JSON.stringify({
                       schemaVersion: 1,
                       title: {
@@ -791,6 +786,32 @@ test('PR workflow repairs a draft that fails deterministic rendering', async (co
   );
 });
 
+test('PR workflow discards a render-invalid draft when its repair cannot be parsed', async (context) => {
+  const directory = createRepository(context);
+  git(directory, ['switch', '--quiet', '-c', 'feature']);
+  fs.appendFileSync(path.join(directory, 'README.md'), 'failed repair fixture\n');
+  git(directory, ['add', 'README.md']);
+  git(directory, ['commit', '--quiet', '-m', 'fix: add failed repair fixture']);
+  const output = path.join(directory, 'summary.md');
+  const server = await createCompletionServer(context, {
+    artifactResponses: ['render-invalid', 'parse-invalid'],
+  });
+
+  const result = await run(
+    directory,
+    ['pr', '--base', 'main', '--out', output],
+    customEnvironment(server.baseURL),
+  );
+
+  assert.equal(result.status, 1, result.stderr || result.stdout);
+  assert.match(
+    result.stderr,
+    /invalid evidence-linked artifact after one repair/i,
+  );
+  assert.equal(server.requests.length, 2);
+  assert.equal(fs.existsSync(output), false);
+});
+
 test('PR critic vetoes dishonest supporting prose before output or GitHub mutation', async (context) => {
   const directory = createRepository(context);
   addPrMutationFixture(context, directory);
@@ -803,8 +824,6 @@ test('PR critic vetoes dishonest supporting prose before output or GitHub mutati
   const env = customEnvironment(server.baseURL);
   env.PATH = `${fakeBin}${path.delimiter}${env.PATH ?? ''}`;
   env.GH_CAPTURE_PATH = capture;
-  env.GH_REPO = 'github.com/attacker/wrong-repository';
-  env.GH_EXPECT_REPO = 'github.com/diffwright/fixture';
 
   const result = await run(
     directory,
@@ -887,6 +906,8 @@ test('PR creation links an issue in the body without passing an unsupported gh f
   const env = customEnvironment(server.baseURL);
   env.PATH = `${fakeBin}${path.delimiter}${env.PATH ?? ''}`;
   env.GH_CAPTURE_PATH = capture;
+  env.GH_REPO = 'github.com/attacker/wrong-repository';
+  env.GH_EXPECT_REPO = 'github.com/diffwright/fixture';
 
   const result = await run(
     directory,

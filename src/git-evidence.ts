@@ -470,6 +470,9 @@ function collectPatch(
   }
 }
 
+// Custom CommandRunner.exec implementations must retain native maxBuffer
+// failures with code ENOBUFS and a syscall beginning with "spawnSync ". Both
+// fields are required so unrelated ENOBUFS errors are never misclassified.
 function isNodeMaxBufferError(error: unknown): boolean {
   if (!nodeTypes.isNativeError(error)) {
     return false;
