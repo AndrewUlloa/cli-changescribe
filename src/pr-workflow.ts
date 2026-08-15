@@ -233,10 +233,11 @@ async function generateArtifactDraft(
   policy: RepositoryPolicy,
   timings: OperationTimings,
   initialRepairInstruction?: string,
+  maxAttempts = 2,
 ): Promise<ArtifactDraft> {
   let draft: ArtifactDraft | undefined;
   let repairInstruction = initialRepairInstruction;
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const completion = await timings.measure(
       repairInstruction === undefined ? 'provider-draft' : 'provider-repair',
       async () =>
@@ -280,7 +281,9 @@ async function generateArtifactDraft(
   }
   if (draft === undefined) {
     throw new Error(
-      'Provider returned an invalid evidence-linked artifact after one repair.',
+      initialRepairInstruction === undefined
+        ? 'Provider returned an invalid evidence-linked artifact after one repair.'
+        : 'Provider returned an invalid grounded primary replacement.',
     );
   }
   return draft;
@@ -1085,6 +1088,7 @@ async function main(argv: string[], timings: OperationTimings): Promise<void> {
       repositoryPolicy.policy,
       timings,
       PRIMARY_GROUNDING_REPAIR_INSTRUCTION,
+      1,
     );
     filtered = await critiqueDraft(draft);
   }

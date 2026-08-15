@@ -893,6 +893,30 @@ test('PR critic re-audits one grounded replacement for an unsupported primary cl
   assert.equal(fs.existsSync(output), true);
 });
 
+test('PR critic fails closed after one invalid grounded replacement', async (context) => {
+  const directory = createRepository(context);
+  git(directory, ['switch', '--quiet', '-c', 'feature']);
+  fs.appendFileSync(path.join(directory, 'README.md'), 'invalid grounded repair fixture\n');
+  git(directory, ['add', 'README.md']);
+  git(directory, ['commit', '--quiet', '-m', 'fix: add invalid repair fixture']);
+  const output = path.join(directory, 'summary.md');
+  const server = await createCompletionServer(context, {
+    artifactResponses: ['valid', 'parse-invalid'],
+    primaryRejectedCritiques: 1,
+  });
+
+  const result = await run(
+    directory,
+    ['pr', '--base', 'main', '--out', output],
+    customEnvironment(server.baseURL),
+  );
+
+  assert.equal(result.status, 1, result.stderr || result.stdout);
+  assert.match(result.stderr, /invalid grounded primary replacement/i);
+  assert.equal(server.requests.length, 3);
+  assert.equal(fs.existsSync(output), false);
+});
+
 test('PR workflow skips provider and output when branch history reverts to base', async (context) => {
   const directory = createRepository(context);
   git(directory, ['switch', '--quiet', '-c', 'feature']);

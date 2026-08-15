@@ -21,22 +21,26 @@ exit without running a workflow.
 ## `commit`
 
 ```text
-diffwright commit [--dry-run] [--all] [--context-file <path>]
+diffwright commit [--dry-run] [--all] [--timings] [--context-file <path>]
 ```
 
 | Option | Meaning |
 |---|---|
 | `--dry-run` | Generate and print a candidate without committing or pushing. |
 | `--all` | Explicitly stage all tracked and untracked working-tree changes before analysis. |
+| `--timings` | Print privacy-safe phase durations after success or failure. |
 | `--context-file <path>` | Add bounded source-agnostic intent from a regular project file. Repeatable. |
 
 Diffwright reads only the staged diff by default. An empty index stops before
 provider resolution and leaves the working tree unchanged. `--all` is the only
 stage-all path and uses `git add --all`; combining it with `--dry-run` still
 changes the index. Generation normally makes two provider requests: one
-structured draft and one separate terminal evidence critique. If deterministic draft
-validation fails, one repair request is possible before the terminal critique.
-Critic rejection or failure never triggers another generation request.
+structured draft and one separate terminal evidence critique. If deterministic
+draft validation fails, one repair request is possible. Unsupported optional
+claims and trailers are removed. If the critic rejects the primary claim,
+Diffwright requests one smaller replacement from the original evidence and
+audits it again; a second rejection is terminal. The bounded failure path can
+therefore make up to five provider requests.
 
 Without `--dry-run`, Diffwright creates a commit from the staged snapshot and
 verifies that Git hooks did not change its tree, parent, or message. It pushes
@@ -180,6 +184,7 @@ diffwright pr [options]
 | `--mode <mode>` | `release` only for branch `staging` with base `main`; otherwise `feature` | `feature` or `release`. |
 | `--context-file <path>` | none | Add bounded source-agnostic intent from a regular project file. Repeatable. |
 | `--dry-run` | off | Print the resolved range and plan without model calls or summary writes. |
+| `--timings` | off | Print privacy-safe phase durations after success or failure. |
 | `--create-pr` | off | Run project gates and create or update a PR with `gh`. |
 | `--yes` | off | Approve GitHub mutation noninteractively after validation. Required with `--create-pr` outside a TTY. |
 | `--skip-format` | off | Skip the optional format script. |
@@ -188,11 +193,17 @@ diffwright pr [options]
 Normal PR generation sends one bounded final net-diff evidence bundle and
 expects an evidence-linked JSON draft. It then makes one separate terminal critic
 request over the original evidence and every renderable model-authored claim.
-The critic uses the same resolved provider and model as the draft.
-Deterministic validation can trigger one draft-repair request; critic rejection
-is terminal. Incomplete, binary, or oversized evidence stops explicitly instead
-of being silently summarized. Diffwright renders Markdown locally and writes
-the detailed output, a sibling `.final.md` file, and a temporary backup.
+The critic uses the same resolved provider and model as the draft. Deterministic
+validation can trigger one draft-repair request. Diffwright removes unsupported
+optional claims and trailers. A rejected primary claim triggers one smaller
+replacement generated from the original evidence and a second critique; another
+rejection is terminal. Incomplete, binary, or oversized evidence stops explicitly
+instead of being silently summarized. Diffwright renders Markdown locally and
+writes the detailed output, a sibling `.final.md` file, and a temporary backup.
+
+For both `commit` and `pr`, `--timings` prints fixed phase names and millisecond
+durations in a final local report. The report contains no paths, evidence text,
+credentials, or telemetry and is printed even when the workflow fails.
 
 PR dry-run attempts an explicit fetch into `refs/remotes/origin/<base>` before
 it prints the plan. It uses local refs if fetch fails. It does not call the
@@ -260,8 +271,10 @@ only a successful receipt renders as Passed.
 After deterministic parsing and rendering, a separate critic checks every
 renderable model-authored claim and trailer against only its cited original
 evidence. Verification text is excluded from that model audit because it is
-rendered from receipts. The critic cannot rewrite. Missing, malformed,
-duplicate, mismatched, or negative verdicts stop before preview or mutation.
+rendered from receipts. The critic cannot rewrite. A negative verdict removes
+an optional claim or trailer. A negative primary verdict permits one grounded
+replacement and second audit; malformed, missing, duplicate, mismatched, or a
+second negative primary verdict stops before preview or mutation.
 
 This is a grounding and provenance contract, not proof that arbitrary prose is
 true and not a claim of formal ASD-STE100 compliance. Editorial checks are

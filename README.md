@@ -226,12 +226,14 @@ Closes #123
 | `diffwright commit --dry-run` | Generate from the staged diff and print a candidate; no index mutation, commit, or push. |
 | `diffwright commit --all --dry-run` | Explicitly stage all changes, then generate and print a candidate. |
 | `diffwright commit --context-file <path>` | Add bounded source-agnostic intent from a regular project file. |
+| `diffwright commit --timings` | Print local phase durations after success or failure. |
 | `diffwright commit` | Generate from the staged diff, commit it, and push the current branch. |
 | `diffwright commit --all` | Explicitly stage all changes, then generate, commit, and push. |
 | `diffwright pr --dry-run` | Fetch when possible, resolve the commit range, and print the plan; no provider call or output write. |
 | `diffwright pr` | Generate detailed and PR-ready summaries. |
 | `diffwright pr --create-pr` | Run project gates, then create or update the GitHub PR with `gh`. |
 | `diffwright pr --create-pr --yes` | Explicitly approve validated GitHub mutation in noninteractive automation. |
+| `diffwright pr --timings` | Print local phase durations after success or failure. |
 | `diffwright init` | Guide an interactive TTY through project setup; preserve legacy script-only behavior in a no-argument non-TTY. |
 | `diffwright --version` | Print the exact installed Diffwright version. |
 
@@ -245,12 +247,12 @@ documents every flag, default, alias, side effect, and exit behavior.
 |---|---:|---|---|
 | `doctor` | 0 | none | none |
 | `doctor --live` | 1 | none | calls the resolved endpoint |
-| `commit --dry-run` | 2 normally; 3 when the draft needs one repair | reads the staged diff only | no commit or push |
-| `commit --all --dry-run` | 2 normally; 3 when the draft needs one repair | explicitly stages all changes | no commit or push |
-| `commit` | 2 normally; 3 when the draft needs one repair | reads the staged diff and creates an exact snapshot-bound commit | pushes the verified commit SHA |
-| `commit --all` | 2 normally; 3 when the draft needs one repair | explicitly stages all changes and creates an exact snapshot-bound commit | pushes the verified commit SHA |
+| `commit --dry-run` | 2 normally; up to 5 across bounded draft and primary-claim repairs | reads the staged diff only | no commit or push |
+| `commit --all --dry-run` | 2 normally; up to 5 across bounded draft and primary-claim repairs | explicitly stages all changes | no commit or push |
+| `commit` | 2 normally; up to 5 across bounded draft and primary-claim repairs | reads the staged diff and creates an exact snapshot-bound commit | pushes the verified commit SHA |
+| `commit --all` | 2 normally; up to 5 across bounded draft and primary-claim repairs | explicitly stages all changes and creates an exact snapshot-bound commit | pushes the verified commit SHA |
 | `pr --dry-run` | 0 | no summary files | attempts an explicit base-ref fetch; falls back to local refs |
-| `pr` | 2 normally; 3 when the draft needs one repair | overwrites the requested file, a sibling `.final.md`, and a temporary backup | attempts to fetch the base |
+| `pr` | 2 normally; up to 5 across bounded draft and primary-claim repairs | overwrites the requested file, a sibling `.final.md`, and a temporary backup | attempts to fetch the base |
 | `pr --create-pr` | Same structured generation | may run format, always runs the detected package manager's test/build scripts (`npm test` and `npm run build` for npm), then reviews and writes the exact final artifact | pushes the reviewed SHA when creating; an update requires the remote PR head to already equal it |
 | `init --dry-run` | 0 | none | previews the redacted setup plan; no install or live request |
 | no-argument non-TTY `init` | 0 | edits `package.json` only when generic scripts are added or migrated | none |
@@ -259,10 +261,16 @@ documents every flag, default, alias, side effect, and exit behavior.
 Commit and PR synthesis send complete bounded evidence for a structured draft,
 then send the same original evidence and every renderable model-authored claim
 to a separate terminal critic call. The critic uses the same resolved provider
-and model as the draft, and it can only accept or reject; it cannot
-rewrite. One draft repair is possible when deterministic validation rejects the
-first response. Critic rejection is terminal. Oversized or incomplete evidence
-stops instead of being silently truncated.
+and model as the draft and cannot rewrite prose. Diffwright removes critic-
+rejected optional claims and trailers before rendering. If the primary claim is
+rejected, Diffwright requests one smaller replacement from the original evidence
+and audits it again; a second rejection is terminal. One separate draft repair
+is possible when deterministic validation rejects a provider response. Oversized
+or incomplete evidence stops instead of being silently truncated.
+
+`--timings` is opt-in for `commit` and `pr`. It prints fixed phase names and
+millisecond durations after success or failure. Reports stay local and contain
+no repository paths, evidence text, credentials, or telemetry.
 
 `--create-pr` uses the detected package manager. It runs
 `format` only when that script exists unless you skip it; test and build always
@@ -295,7 +303,8 @@ append `-- --yes` deliberately.
   reviewed tree, parent, and message.
 
 This contract reduces unsupported prose; it does not prove that an arbitrary
-natural-language interpretation is true. The critic is a veto, not an oracle.
+natural-language interpretation is true. The critic can remove optional prose
+or require one newly audited primary replacement, but it is not an oracle.
 
 ### Repository policy
 

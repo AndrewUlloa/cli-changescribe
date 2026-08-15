@@ -7,6 +7,17 @@ and Diffwright uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Added opt-in, privacy-safe `--timings` reports for commit and pull-request
+  workflows.
+
+### Changed
+
+- Improved provider recovery with bounded validation categories, conservative
+  removal of unsupported optional artifact items, and one independently audited
+  replacement when the primary claim fails evidence review.
+
 ## [0.6.0] - 2026-08-15
 
 ### Added
