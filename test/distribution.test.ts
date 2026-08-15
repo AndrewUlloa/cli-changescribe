@@ -71,13 +71,16 @@ function packPackage(
 function expectedDiffwrightFiles(): string[] {
   const files = [
     'CONTRIBUTING.md',
+    'CHANGELOG.md',
     'LICENSE',
+    'NOTICE',
     'README.md',
     'SECURITY.md',
     'SUPPORT.md',
     'bin/diffwright.js',
     'documentation/cli-reference.md',
     'documentation/providers.md',
+    'documentation/releases.md',
     'documentation/troubleshooting.md',
     'package.json',
   ];

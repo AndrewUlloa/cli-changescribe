@@ -9,12 +9,13 @@ Gateway, Cerebras, Groq, Ollama, or any compatible endpoint.</p>
 
 <a href="https://www.npmjs.com/package/diffwright"><img alt="npm version" src="https://img.shields.io/npm/v/diffwright?style=flat-square"></a>
 <a href="https://www.npmjs.com/package/diffwright"><img alt="npm downloads" src="https://img.shields.io/npm/dw/diffwright?style=flat-square"></a>
+<a href="https://github.com/AndrewUlloa/diffwright/releases/latest"><img alt="GitHub release" src="https://img.shields.io/github/v/release/AndrewUlloa/diffwright?style=flat-square"></a>
 <a href="https://github.com/AndrewUlloa/diffwright/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/AndrewUlloa/diffwright?style=flat-square"></a>
-<a href="https://github.com/AndrewUlloa/diffwright/blob/main/LICENSE"><img alt="MIT license" src="https://img.shields.io/npm/l/diffwright?style=flat-square"></a>
+<a href="https://github.com/AndrewUlloa/diffwright/blob/main/LICENSE"><img alt="Apache 2.0 license" src="https://img.shields.io/npm/l/diffwright?style=flat-square"></a>
 
 </div>
 
-[Quick start](#quick-start) · [Commands](#commands) · [Providers](#providers) · [Security](#security-and-privacy) · [Documentation](#documentation)
+[Quick start](#quick-start) · [Commands](#commands) · [Providers](#providers) · [Security](#security-and-privacy) · [Documentation](#documentation) · [Releases](https://github.com/AndrewUlloa/diffwright/releases)
 
 Run guided setup with the package runner already used by your project:
 
@@ -359,6 +360,8 @@ in a bug report.
 - [CLI reference](https://github.com/AndrewUlloa/diffwright/blob/main/documentation/cli-reference.md)
 - [Provider setup](https://github.com/AndrewUlloa/diffwright/blob/main/documentation/providers.md)
 - [Troubleshooting](https://github.com/AndrewUlloa/diffwright/blob/main/documentation/troubleshooting.md)
+- [Release process](https://github.com/AndrewUlloa/diffwright/blob/main/documentation/releases.md)
+- [Changelog](https://github.com/AndrewUlloa/diffwright/blob/main/CHANGELOG.md)
 - [Contributing](https://github.com/AndrewUlloa/diffwright/blob/main/CONTRIBUTING.md)
 - [Support](https://github.com/AndrewUlloa/diffwright/blob/main/SUPPORT.md)
 - [Security policy](https://github.com/AndrewUlloa/diffwright/blob/main/SECURITY.md)
@@ -393,4 +396,8 @@ for npm and ChangeScribe compatibility.
 - [Source](https://github.com/AndrewUlloa/diffwright)
 - [Issues](https://github.com/AndrewUlloa/diffwright/issues)
 - [npm](https://www.npmjs.com/package/diffwright)
-- [MIT license](https://github.com/AndrewUlloa/diffwright/blob/main/LICENSE)
+- [Apache 2.0 license](https://github.com/AndrewUlloa/diffwright/blob/main/LICENSE)
+- [Attribution notice](https://github.com/AndrewUlloa/diffwright/blob/main/NOTICE)
+
+Diffwright `0.5.0` and later are licensed under Apache 2.0. Versions through
+`0.4.4` remain available under the MIT license that accompanied those releases.

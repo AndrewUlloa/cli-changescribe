@@ -17,6 +17,7 @@ const packageRunnerPreviewCommands = packageRunnerCommands.map(
 const readmeBadgeUrls = [
   'https://img.shields.io/npm/v/diffwright?style=flat-square',
   'https://img.shields.io/npm/dw/diffwright?style=flat-square',
+  'https://img.shields.io/github/v/release/AndrewUlloa/diffwright?style=flat-square',
   'https://img.shields.io/github/stars/AndrewUlloa/diffwright?style=flat-square',
   'https://img.shields.io/npm/l/diffwright?style=flat-square',
 ] as const;
@@ -100,6 +101,9 @@ test('published README preserves provider, command, and security reference mater
   assert.match(readme, /Ollama/);
   assert.match(readme, /stages changes if nothing is staged/i);
   assert.match(readme, /directly from your machine/i);
+  assert.match(readme, /Apache 2\.0 license/);
+  assert.match(readme, /0\.4\.4.*MIT license/is);
+  assert.doesNotMatch(readme, /MIT license.*blob\/main\/LICENSE/i);
 });
 
 test('published README navigation and project links are npm-safe', () => {
@@ -141,6 +145,9 @@ test('README links to shipped reference and community documentation', () => {
     'documentation/cli-reference.md',
     'documentation/providers.md',
     'documentation/troubleshooting.md',
+    'documentation/releases.md',
+    'CHANGELOG.md',
+    'NOTICE',
     'SECURITY.md',
     'CONTRIBUTING.md',
     'SUPPORT.md',

@@ -1,6 +1,6 @@
 {
   "name": "diffwright",
-  "version": "0.4.4",
+  "version": "0.5.0",
   "description": "Generate Conventional Commits and PR summaries from Git diffs with your own AI provider",
   "bin": {
     "diffwright": "bin/diffwright.js"
@@ -24,11 +24,13 @@
     "bin",
     "dist",
     "documentation",
+    "CHANGELOG.md",
     "README.md",
     "SECURITY.md",
     "SUPPORT.md",
     "CONTRIBUTING.md",
-    "LICENSE"
+    "LICENSE",
+    "NOTICE"
   ],
   "keywords": [
     "cli",
@@ -46,7 +48,7 @@
     "openrouter",
     "vercel-ai-gateway"
   ],
-  "license": "MIT",
+  "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/AndrewUlloa/diffwright.git"

@@ -1,0 +1,108 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.repository == 'AndrewUlloa/diffwright' && !github.event.release.prerelease
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Check out the release tag
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          package-manager-cache: false
+          registry-url: https://registry.npmjs.org
+
+      - name: Verify tag and package versions
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: node scripts/verify-release.mjs
+
+      - name: Verify the release commit belongs to main
+        run: git merge-base --is-ancestor HEAD origin/main
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev
+
+      - name: Verify dependency signatures
+        run: npm audit signatures
+
+      - name: Pack the exact release artifact
+        id: pack
+        shell: bash
+        run: |
+          mkdir release-assets
+          npm pack --json --pack-destination release-assets > release-pack.json
+          package_file="$(node -e "const fs=require('node:fs'); const result=JSON.parse(fs.readFileSync('release-pack.json','utf8')); if(result.length!==1||typeof result[0].filename!=='string') process.exit(1); process.stdout.write('release-assets/'+result[0].filename)")"
+          test -f "$package_file"
+          echo "package_file=$package_file" >> "$GITHUB_OUTPUT"
+
+      - name: Preserve the exact release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: diffwright-${{ github.event.release.tag_name }}
+          path: ${{ steps.pack.outputs.package_file }}
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 30
+
+      - name: Publish to npm with trusted provenance
+        env:
+          PACKAGE_FILE: ${{ steps.pack.outputs.package_file }}
+        run: npm publish "$PACKAGE_FILE" --access public
+
+  attach:
+    name: Attach npm package to GitHub Release
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+
+    steps:
+      - name: Download the exact published artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: diffwright-${{ github.event.release.tag_name }}
+          path: release-assets
+
+      - name: Attach the npm package to the GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          package_files=(release-assets/*.tgz)
+          test "${#package_files[@]}" -eq 1
+          gh release upload "$RELEASE_TAG" "${package_files[0]}" --repo "$GITHUB_REPOSITORY" --clobber
