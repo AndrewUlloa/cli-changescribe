@@ -47,5 +47,9 @@ Explain the user-visible outcome, test evidence, security/privacy effect, and
 compatibility implications. Keep refactors separate from behavior changes when
 possible. CI must pass on Node.js 18, 20, and 22.
 
-By contributing, you agree that your contribution is provided under the MIT
-license used by this repository.
+Unless you explicitly state otherwise, intentionally submitted contributions
+are provided under the Apache License 2.0 used by this repository, without
+additional terms or conditions.
+
+The legacy package under `compat/cli-changescribe` retains the separate license
+included in that package directory.

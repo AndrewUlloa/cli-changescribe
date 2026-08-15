@@ -1,0 +1,76 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+  id-token: write
+
+concurrency:
+  group: release-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.repository == 'AndrewUlloa/diffwright' && !github.event.release.prerelease
+    runs-on: ubuntu-latest
+    environment: npm
+
+    steps:
+      - name: Check out the release tag
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          package-manager-cache: false
+          registry-url: https://registry.npmjs.org
+
+      - name: Verify tag and package versions
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: node scripts/verify-release.mjs
+
+      - name: Verify the release commit belongs to main
+        run: git merge-base --is-ancestor HEAD origin/main
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev
+
+      - name: Verify dependency signatures
+        run: npm audit signatures
+
+      - name: Pack the exact release artifact
+        id: pack
+        shell: bash
+        run: |
+          mkdir release-assets
+          npm pack --json --pack-destination release-assets > release-pack.json
+          package_file="$(node -e "const fs=require('node:fs'); const result=JSON.parse(fs.readFileSync('release-pack.json','utf8')); if(result.length!==1||typeof result[0].filename!=='string') process.exit(1); process.stdout.write('release-assets/'+result[0].filename)")"
+          test -f "$package_file"
+          echo "package_file=$package_file" >> "$GITHUB_OUTPUT"
+
+      - name: Publish to npm with trusted provenance
+        run: npm publish "${{ steps.pack.outputs.package_file }}" --access public
+
+      - name: Attach the npm package to the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          PACKAGE_FILE: ${{ steps.pack.outputs.package_file }}
+        run: gh release upload "$RELEASE_TAG" "$PACKAGE_FILE" --clobber
