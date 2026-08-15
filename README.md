@@ -2,7 +2,7 @@
 
 <h1>Diffwright</h1>
 
-<p><strong>Turn Git diffs into Conventional Commit messages and PR summaries—with your own AI.</strong></p>
+<p><strong>Compile Git evidence into Conventional Commits and PRs—with your own AI.</strong></p>
 
 <p>Bring OpenAI, Anthropic, Gemini, xAI, DeepSeek, OpenRouter, Vercel AI<br>
 Gateway, Cerebras, Groq, Ollama, or any compatible endpoint.</p>
@@ -42,7 +42,10 @@ the exact local installation and generated scripts.
 
 `commit` commits and pushes by default. It reads only the staged diff unless
 `--all` explicitly stages the working tree first. Its dry run prevents commit
-and push but still calls the provider. PR dry run has a different contract: it
+and push but still calls the provider twice: once for a structured draft and
+once for a separate terminal evidence critique. One draft-repair request is
+possible.
+PR dry run has a different contract: it
 does not call the provider or write summaries, but it may fetch the base branch.
 See [Command behavior](#command-behavior) before running Diffwright in automation.
 
@@ -131,7 +134,8 @@ npm run feature:pr -- --dry-run
 ```
 
 Important: a commit dry-run candidate is not reused. Running `diffwright commit`
-afterward calls the provider again, so the final text may differ.
+afterward calls the provider again, so the final text may differ. A successful
+generation normally makes two requests: the draft and its evidence critique.
 
 ### Headless and automation modes
 
@@ -168,34 +172,34 @@ Commit preview:
 
 ```text
 $ diffwright commit --dry-run
-🔍 Analyzing all code changes...
+🔍 Analyzing staged changes...
 🤖 Generating commit message with AI (openrouter)...
 
-feat: add provider-neutral routing
+fix(parser): reject empty tokens
 
-- change: resolve one explicit provider profile per invocation
-- why: let developers bring their preferred model or gateway
-- risk: provider-specific compatibility varies by model
+Preserve the original token offset in validation errors.
 ```
 
 PR-ready output:
 
-```text
-What issue is this PR related to?
-Related: #123
+```markdown
+## Summary
 
-What change does this PR add?
-- Reject unknown CLI options before Git or provider side effects
-- Link issue 123 with a supported Closes directive
+- Reject unknown CLI options before Git or provider side effects.
 
-How did you test your change?
-Testing: unit, wire, packed-install, and Node version matrix
+## Changes
 
-Anything you want reviewers to scrutinize?
-- Argument validation and GitHub CLI boundaries
+- Add a supported `Closes #123` directive to the final body.
 
-Other notes reviewers should know (risks + follow-ups)
-- Existing valid commands keep their previous behavior
+## Verification
+
+- Passed: `npm test`
+
+## Review focus
+
+- Check argument validation and GitHub CLI boundaries.
+
+Closes #123
 ```
 
 ## Why Diffwright
@@ -203,6 +207,9 @@ Other notes reviewers should know (risks + follow-ups)
 | Capability | What it gives you |
 |---|---|
 | Commit and PR workflows | One CLI turns staged changes into commit text and branch history into review-ready summaries. |
+| Evidence-backed claims | Every generated claim cites immutable Git, intent, constraint, history, or verification evidence before rendering. |
+| Terminal critique | A separate call to the resolved provider and model checks all rendered model-authored claims against their cited original evidence. |
+| Deterministic artifacts | Diffwright validates structured JSON, then renders Conventional Commit syntax and PR Markdown locally. |
 | Bring your own AI | Use a direct provider, a gateway, or a local OpenAI-compatible server. |
 | Deterministic routing | One invocation resolves one provider and never silently fails over to another. |
 | Local-first configuration | Keys stay in process memory and requests go directly to the resolved endpoint. |
@@ -218,11 +225,13 @@ Other notes reviewers should know (risks + follow-ups)
 | `diffwright doctor --live` | Make one minimal request through the production transport. |
 | `diffwright commit --dry-run` | Generate from the staged diff and print a candidate; no index mutation, commit, or push. |
 | `diffwright commit --all --dry-run` | Explicitly stage all changes, then generate and print a candidate. |
+| `diffwright commit --context-file <path>` | Add bounded source-agnostic intent from a regular project file. |
 | `diffwright commit` | Generate from the staged diff, commit it, and push the current branch. |
 | `diffwright commit --all` | Explicitly stage all changes, then generate, commit, and push. |
 | `diffwright pr --dry-run` | Fetch when possible, resolve the commit range, and print the plan; no provider call or output write. |
 | `diffwright pr` | Generate detailed and PR-ready summaries. |
 | `diffwright pr --create-pr` | Run project gates, then create or update the GitHub PR with `gh`. |
+| `diffwright pr --create-pr --yes` | Explicitly approve validated GitHub mutation in noninteractive automation. |
 | `diffwright init` | Guide an interactive TTY through project setup; preserve legacy script-only behavior in a no-argument non-TTY. |
 | `diffwright --version` | Print the exact installed Diffwright version. |
 
@@ -236,25 +245,75 @@ documents every flag, default, alias, side effect, and exit behavior.
 |---|---:|---|---|
 | `doctor` | 0 | none | none |
 | `doctor --live` | 1 | none | calls the resolved endpoint |
-| `commit --dry-run` | Usually 1; one repair request is possible | reads the staged diff only | no commit or push |
-| `commit --all --dry-run` | Usually 1; one repair request is possible | explicitly stages all changes | no commit or push |
-| `commit` | Usually 1; one repair request is possible | reads the staged diff and creates a commit | pushes the current branch |
-| `commit --all` | Usually 1; one repair request is possible | explicitly stages all changes and creates a commit | pushes the current branch |
+| `commit --dry-run` | 2 normally; 3 when the draft needs one repair | reads the staged diff only | no commit or push |
+| `commit --all --dry-run` | 2 normally; 3 when the draft needs one repair | explicitly stages all changes | no commit or push |
+| `commit` | 2 normally; 3 when the draft needs one repair | reads the staged diff and creates an exact snapshot-bound commit | pushes the verified commit SHA |
+| `commit --all` | 2 normally; 3 when the draft needs one repair | explicitly stages all changes and creates an exact snapshot-bound commit | pushes the verified commit SHA |
 | `pr --dry-run` | 0 | no summary files | attempts an explicit base-ref fetch; falls back to local refs |
-| `pr` | Usually 1; one repair request is possible | overwrites the requested file, a sibling `.final.md`, and a temporary backup | attempts to fetch the base |
-| `pr --create-pr` | Same structured generation | may run format, always runs the detected package manager's test/build scripts (`npm test` and `npm run build` for npm), then writes summaries | pushes only when creating a new PR; updating an existing PR does not push local commits |
+| `pr` | 2 normally; 3 when the draft needs one repair | overwrites the requested file, a sibling `.final.md`, and a temporary backup | attempts to fetch the base |
+| `pr --create-pr` | Same structured generation | may run format, always runs the detected package manager's test/build scripts (`npm test` and `npm run build` for npm), then reviews and writes the exact final artifact | pushes the reviewed SHA when creating; an update requires the remote PR head to already equal it |
 | `init --dry-run` | 0 | none | previews the redacted setup plan; no install or live request |
 | no-argument non-TTY `init` | 0 | edits `package.json` only when generic scripts are added or migrated | none |
 | guided or `--yes` `init` | 0 by default; 1 only with explicit live consent | may update `package.json`, a lockfile, `.gitignore`, `.env.local`, `CLAUDE.md`, and `AGENTS.md` after interactive confirmation or deterministic `--yes` planning | may install the exact local package; runs offline doctor; live doctor is separately explicit |
 
-PR synthesis sends the complete bounded final net-diff evidence in one
-structured request. One repair request is possible when deterministic
-validation rejects the first draft; oversized or incomplete evidence stops
-instead of being silently truncated. `--create-pr` uses the detected package manager. It runs
+Commit and PR synthesis send complete bounded evidence for a structured draft,
+then send the same original evidence and every renderable model-authored claim
+to a separate terminal critic call. The critic uses the same resolved provider
+and model as the draft, and it can only accept or reject; it cannot
+rewrite. One draft repair is possible when deterministic validation rejects the
+first response. Critic rejection is terminal. Oversized or incomplete evidence
+stops instead of being silently truncated.
+
+`--create-pr` uses the detected package manager. It runs
 `format` only when that script exists unless you skip it; test and build always
 run (`npm test` and `npm run build` in an npm project). Those gates can modify
 files and run arbitrary project code before Diffwright performs its dirty-tree
 check.
+
+In an interactive terminal, GitHub mutation shows the exact Conventional title
+and body and offers Approve, Edit, or Cancel. Editing uses the executable named
+by `DIFFWRIGHT_EDITOR`, then `EDITOR`, then `vi`; the value must be one executable
+without arguments. A noninteractive `--create-pr` requires explicit `--yes`.
+Generated consumer scripts keep this review enabled by default; automation can
+append `-- --yes` deliberately.
+
+### Evidence contract
+
+- Commits use the pinned `HEAD` and Git index tree. Working-tree changes are
+  excluded unless `--all` explicitly stages them.
+- PRs use the final `merge-base...HEAD` net diff. Reverted intermediate work is
+  absent; deletions, renames, copies, type changes, binary metadata, and unusual
+  filenames remain visible to the collector.
+- A changed test file is only a code change. Verification text comes only from
+  a captured command receipt with its exact status.
+- The model returns claims and evidence IDs, not final Markdown. Diffwright
+  validates the links, chooses supported claims, and renders locally.
+- Coverage limits fail closed. Diffwright does not silently slice a file or
+  claim that a partially observed change is complete.
+- Before mutation, Diffwright rechecks the pinned index, local head, remote
+  base, and applicable remote PR head. Git-hook output must still match the
+  reviewed tree, parent, and message.
+
+This contract reduces unsupported prose; it does not prove that an arbitrary
+natural-language interpretation is true. The critic is a veto, not an oracle.
+
+### Repository policy
+
+An optional root `.diffwrightrc.json` can add accepted Conventional Commit
+types, forbid or allowlist scopes, tighten the 50-character title target, and
+configure advisory sentence, absolute-language, duplicate-claim, and
+terminology checks. The 72-character maximum and evidence/security boundaries
+cannot be loosened.
+
+Commits read policy from the last committed `HEAD`; a staged policy change
+applies to the next commit. PRs read policy from the pinned base SHA, so a
+feature branch cannot weaken the rules that review it. Policy patch contents
+are replaced with bounded metadata before any provider request. Warnings never
+rewrite approved text.
+
+See the shipped
+[JSON Schema](https://github.com/AndrewUlloa/diffwright/blob/main/documentation/diffwrightrc.schema.json)
+for the exact version-1 fields and bounds.
 
 The default PR output is `.pr-summaries/PR_SUMMARY.md`; the slim GitHub body is
 `.pr-summaries/PR_SUMMARY.final.md`. A separate temporary backup is also
@@ -336,6 +395,8 @@ the resolved endpoint. It does not operate a proxy or credential vault.
   GitHub CLI, npm, tests, builds, and formatters.
 - Exact configured provider-key values are redacted from prompts, responses,
   diagnostics, console output, and generated files.
+- Repository-policy patch contents stay local; only bounded policy metadata can
+  enter change evidence.
 - Custom remote endpoints require HTTPS; keyless endpoints are loopback-only.
 
 Diffwright does not scan diffs for arbitrary secrets. Review what is staged
@@ -363,6 +424,7 @@ in a bug report.
 ## Documentation
 
 - [CLI reference](https://github.com/AndrewUlloa/diffwright/blob/main/documentation/cli-reference.md)
+- [Repository-policy JSON Schema](https://github.com/AndrewUlloa/diffwright/blob/main/documentation/diffwrightrc.schema.json)
 - [Provider setup](https://github.com/AndrewUlloa/diffwright/blob/main/documentation/providers.md)
 - [Troubleshooting](https://github.com/AndrewUlloa/diffwright/blob/main/documentation/troubleshooting.md)
 - [Release process](https://github.com/AndrewUlloa/diffwright/blob/main/documentation/releases.md)

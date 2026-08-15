@@ -285,13 +285,13 @@ Non-decisions:
     `src/pr-review.ts`, and focused contract/workflow tests
   - **Size:** M
 
-- [ ] **Task 12: Document the evidence contract and migrate examples**
+- [x] **Task 12: Document the evidence contract and migrate examples**
   - **Description:** Update public CLI, workflow, provider/privacy, and
     troubleshooting guidance without overclaiming truth or STE compliance.
   - **Acceptance:**
-    - [ ] Every public option and behavior is documented.
-    - [ ] Examples use adaptive commits and evidence-backed PR sections.
-    - [ ] Migration notes cover staged-only direct use and automated scripts.
+    - [x] Every public option and behavior is documented.
+    - [x] Examples use adaptive commits and evidence-backed PR sections.
+    - [x] Migration notes cover staged-only direct use and automated scripts.
   - **Verify:**
     - `node --test .test-dist/npm-page.test.js`
     - `git diff --check`

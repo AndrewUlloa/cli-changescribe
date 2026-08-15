@@ -79,6 +79,7 @@ function expectedDiffwrightFiles(): string[] {
     'SUPPORT.md',
     'bin/diffwright.js',
     'documentation/cli-reference.md',
+    'documentation/diffwrightrc.schema.json',
     'documentation/providers.md',
     'documentation/releases.md',
     'documentation/troubleshooting.md',

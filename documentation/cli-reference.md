@@ -21,23 +21,27 @@ exit without running a workflow.
 ## `commit`
 
 ```text
-diffwright commit [--dry-run] [--all]
+diffwright commit [--dry-run] [--all] [--context-file <path>]
 ```
 
 | Option | Meaning |
 |---|---|
 | `--dry-run` | Generate and print a candidate without committing or pushing. |
 | `--all` | Explicitly stage all tracked and untracked working-tree changes before analysis. |
+| `--context-file <path>` | Add bounded source-agnostic intent from a regular project file. Repeatable. |
 
 Diffwright reads only the staged diff by default. An empty index stops before
 provider resolution and leaves the working tree unchanged. `--all` is the only
 stage-all path and uses `git add --all`; combining it with `--dry-run` still
-changes the index. Generation makes one provider request; if the response
-violates the commit contract, one repair request is possible.
+changes the index. Generation normally makes two provider requests: one
+structured draft and one separate terminal evidence critique. If deterministic draft
+validation fails, one repair request is possible before the terminal critique.
+Critic rejection or failure never triggers another generation request.
 
 Without `--dry-run`, Diffwright creates a commit from the staged snapshot and
-pushes the current branch. A dry-run candidate is not cached or reused by a
-later live command.
+verifies that Git hooks did not change its tree, parent, or message. It pushes
+that exact commit SHA to the current branch. A dry-run candidate is not cached
+or reused by a later live command.
 
 ## `doctor`
 
@@ -174,16 +178,21 @@ diffwright pr [options]
 | `--limit <number>` | `PR_SUMMARY_LIMIT` or `400` | Retained positive legacy history cap; never limits final net-diff evidence. |
 | `--issue <number>` | `PR_SUMMARY_ISSUE` or empty | Add issue context and, with `--create-pr`, append `Closes #NUMBER` to the PR body. Accepts `123` or `#123`. |
 | `--mode <mode>` | `release` only for branch `staging` with base `main`; otherwise `feature` | `feature` or `release`. |
+| `--context-file <path>` | none | Add bounded source-agnostic intent from a regular project file. Repeatable. |
 | `--dry-run` | off | Print the resolved range and plan without model calls or summary writes. |
 | `--create-pr` | off | Run project gates and create or update a PR with `gh`. |
+| `--yes` | off | Approve GitHub mutation noninteractively after validation. Required with `--create-pr` outside a TTY. |
 | `--skip-format` | off | Skip the optional format script. |
 | `--no-format` | off | Alias for `--skip-format`. |
 
 Normal PR generation sends one bounded final net-diff evidence bundle and
-expects an evidence-linked JSON draft. Deterministic validation can trigger one
-repair request. Incomplete, binary, or oversized evidence stops explicitly
-instead of being silently summarized. It writes the detailed output, a sibling
-`.final.md` file, and a temporary backup.
+expects an evidence-linked JSON draft. It then makes one separate terminal critic
+request over the original evidence and every renderable model-authored claim.
+The critic uses the same resolved provider and model as the draft.
+Deterministic validation can trigger one draft-repair request; critic rejection
+is terminal. Incomplete, binary, or oversized evidence stops explicitly instead
+of being silently summarized. Diffwright renders Markdown locally and writes
+the detailed output, a sibling `.final.md` file, and a temporary backup.
 
 PR dry-run attempts an explicit fetch into `refs/remotes/origin/<base>` before
 it prints the plan. It uses local refs if fetch fails. It does not call the
@@ -197,13 +206,25 @@ provider or write output.
 3. Always run its test script (`npm test` for npm).
 4. Always run its build script (`npm run build` for npm).
 5. Reject a dirty working tree.
-6. Generate and write summaries.
-7. Update an existing PR, or push the current branch and create a PR.
+6. Generate and separately critique an evidence-linked artifact.
+7. In a TTY, preview the exact title/body and choose Approve, Edit, or Cancel;
+   outside a TTY, require explicit `--yes`.
+8. Revalidate local and remote evidence snapshots, then write summaries.
+9. Update the matching PR, or push the reviewed SHA and create a PR.
 
-Project gates can execute arbitrary project code and may modify files. When an
-open PR already exists, Diffwright updates its title and body but does not push
-local commits. Issue linkage uses the body directive `Closes #NUMBER`; no
-unsupported GitHub CLI issue flag is used.
+Project gates can execute arbitrary project code and may modify files. An
+existing PR must be same-repository and its remote head SHA must exactly match
+the reviewed local evidence; updates do not push local commits. New PR creation
+pushes the immutable reviewed SHA, not a branch name resolved later. The base
+and remote head are rechecked before GitHub mutation. Issue linkage uses the
+body directive `Closes #NUMBER`; that exact suffix is included before review and
+in both the `.final.md` file and GitHub body.
+
+Editing uses `DIFFWRIGHT_EDITOR`, then `EDITOR`, then `vi`. The setting must be
+one executable name without arguments. The edited title and body are
+revalidated, including Conventional Commit grammar, repository policy, UTF-8,
+control characters, size, and known-secret checks. Approved bytes are not
+trimmed or rewritten afterward.
 
 ## Aliases
 
@@ -214,6 +235,83 @@ unsupported GitHub CLI issue flag is used.
 | `staging:pr` | `pr --base main --create-pr --mode release` |
 
 Explicit options placed after an alias override its prepended defaults.
+Because the PR aliases include `--create-pr`, they require interactive review in
+a TTY or an explicitly appended `--yes` in headless automation. Guided setup
+generates consumer package scripts without `--yes` by default.
+
+## Evidence and rendering contract
+
+Commit evidence pins `HEAD` and the index tree; PR evidence pins the fetched
+base SHA, merge base, and final branch `HEAD`. PR material changes come from the
+final net diff, not a chain of per-commit summaries. Deletions, renames, copies,
+type changes, binary metadata, and NUL-delimited unusual filenames are handled
+explicitly. The retained `--limit` option caps supplemental history only.
+
+The provider returns a strict JSON draft of claims and evidence IDs. Diffwright
+requires one observed primary change as the sole Summary/title anchor, prevents
+supporting documentation, tests, manifests, and lockfiles from displacing source
+work, rejects unknown evidence IDs, and omits unsupported inference. It renders
+the Conventional title and adaptive body locally. Empty sections are absent.
+
+Verification is never inferred from a changed test file or model prose. PR gate
+commands produce receipts with exact command, status, exit code, and duration;
+only a successful receipt renders as Passed.
+
+After deterministic parsing and rendering, a separate critic checks every
+renderable model-authored claim and trailer against only its cited original
+evidence. Verification text is excluded from that model audit because it is
+rendered from receipts. The critic cannot rewrite. Missing, malformed,
+duplicate, mismatched, or negative verdicts stop before preview or mutation.
+
+This is a grounding and provenance contract, not proof that arbitrary prose is
+true and not a claim of formal ASD-STE100 compliance. Editorial checks are
+bounded advisories and never silently rewrite the artifact.
+
+## Repository policy
+
+Diffwright optionally reads `.diffwrightrc.json` from the repository root. The
+file is strict UTF-8 JSON, at most 64 KiB, versioned, tracked at the applicable
+Git revision, and must use only documented keys. Unsafe Git entries, duplicate
+keys, unknown fields, unsupported controls, and out-of-range values fail closed.
+
+```json
+{
+  "$schema": "https://raw.githubusercontent.com/AndrewUlloa/diffwright/main/documentation/diffwrightrc.schema.json",
+  "version": 1,
+  "title": {
+    "additionalTypes": ["security"],
+    "scopeMode": "optional",
+    "allowedScopes": ["cli", "release"],
+    "targetLength": 50
+  },
+  "editorial": {
+    "maxSentenceWords": 25,
+    "duplicateClaimMinWords": 4,
+    "vagueAbsolutes": ["always", "never", "guarantees"],
+    "terminologyGroups": [
+      { "name": "pull request", "terms": ["pull request", "PR"] }
+    ]
+  }
+}
+```
+
+`additionalTypes` extends the standard Conventional Commit types; it cannot
+remove `feat` or `fix`. `scopeMode` is `optional` or `forbidden`; an allowlist
+can further restrict optional scopes. `targetLength` may tighten the advisory
+target but cannot exceed the immutable 72-character header maximum. Editorial
+findings cover sentence length, vague absolutes, normalized duplicate claims,
+and mixed terminology. They are warnings only.
+
+Commit generation loads policy from the last committed `HEAD`, before staging;
+a staged policy change applies on the next commit. PR generation loads policy
+from the pinned base commit, not the feature branch. When the policy itself is
+changed, its raw patch is replaced with digest-bearing metadata before provider
+serialization. Policy values are enforced locally and are not added as a
+free-form prompt suffix.
+
+See the shipped
+[JSON Schema](https://github.com/AndrewUlloa/diffwright/blob/main/documentation/diffwrightrc.schema.json)
+for exact bounds.
 
 ## Configuration precedence
 
