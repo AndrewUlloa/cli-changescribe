@@ -75,6 +75,15 @@ const CLAIM_SIGNIFICANCE = new Set<DraftClaim['significance']>([
   'supporting',
   'incidental',
 ]);
+const SECTION_CLAIM_KINDS: Readonly<Record<ArtifactSectionKind, ReadonlySet<DraftClaim['kind']>>> = {
+  summary: new Set(['change']),
+  changes: new Set(['change']),
+  rationale: new Set(['rationale']),
+  verification: new Set(['verification']),
+  'review-focus': new Set(['review-focus']),
+  risks: new Set(['risk']),
+  'follow-ups': new Set(['follow-up']),
+};
 
 export function parseArtifactDraft(
   input: string,
@@ -111,7 +120,10 @@ export function parseArtifactDraft(
   assertSupportedClaims(evidence, claims);
 
   const rawSections = boundedArray(root.sections, 'Artifact sections', 7);
-  const sections = rawSections.map((value) => parseSection(value, claimIds));
+  const claimKinds = new Map(claims.map((claim) => [claim.id, claim.kind]));
+  const sections = rawSections.map((value) =>
+    parseSection(value, claimIds, claimKinds),
+  );
   const sectionKinds = new Set(sections.map((section) => section.kind));
   if (sectionKinds.size !== sections.length) {
     throw new Error('Artifact draft contains duplicate sections.');
@@ -230,6 +242,7 @@ function parseClaim(value: unknown): DraftClaim {
 function parseSection(
   value: unknown,
   claimIds: ReadonlySet<string>,
+  claimKinds: ReadonlyMap<string, DraftClaim['kind']>,
 ): ArtifactSectionDraft {
   const section = objectRecord(value, 'Artifact section');
   requireExactKeys(section, ['kind', 'claimIds']);
@@ -250,8 +263,17 @@ function parseSection(
   if (new Set(claimIdsForSection).size !== claimIdsForSection.length) {
     throw new Error('Artifact section contains duplicate claim references.');
   }
+  const kind = section.kind as ArtifactSectionKind;
+  if (
+    claimIdsForSection.some((claimId) => {
+      const claimKind = claimKinds.get(claimId);
+      return claimKind === undefined || !SECTION_CLAIM_KINDS[kind].has(claimKind);
+    })
+  ) {
+    throw new Error('Artifact claim is assigned to an incompatible section.');
+  }
   return {
-    kind: section.kind as ArtifactSectionKind,
+    kind,
     claimIds: claimIdsForSection,
   };
 }
