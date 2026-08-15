@@ -55,7 +55,7 @@ function dependencies(capture: {
   resolveCalls: number;
   completionCalls: number;
   prompt: string;
-}, responses = [JSON.stringify(validDraft())], critique = JSON.stringify({
+}, responses = [JSON.stringify(validDraft())], critique: string | readonly string[] = JSON.stringify({
   schemaVersion: 1,
   candidates: [{
     candidateId: 'claim:claim-change',
@@ -64,6 +64,7 @@ function dependencies(capture: {
   }],
 })): CommitDependencies {
   let artifactResponseIndex = 0;
+  let criticResponseIndex = 0;
   return {
     loadRuntimeConfig: () => ({
       values: { CEREBRAS_API_KEY: 'test-key' },
@@ -88,8 +89,14 @@ function dependencies(capture: {
       capture.completionCalls += 1;
       const prompt = JSON.stringify(input.messages);
       if (prompt.includes('independently audit')) {
+        const criticResponse = Array.isArray(critique)
+          ? critique[
+            Math.min(criticResponseIndex, critique.length - 1)
+          ] ?? ''
+          : critique;
+        criticResponseIndex += 1;
         return {
-          content: critique,
+          content: criticResponse,
           reasoning: '',
           finishReason: 'stop',
         };
@@ -340,19 +347,49 @@ test('critic still blocks an unsupported primary claim', async (context) => {
       dependencies(
         capture,
         [JSON.stringify(validDraft())],
-        JSON.stringify({
+        [JSON.stringify({
           schemaVersion: 1,
           candidates: [{
             candidateId: 'claim:claim-change',
             evidenceIds: ['change-1'],
             supported: false,
           }],
-        }),
+        })],
       ),
     ),
     /critique rejected the primary claim/i,
   );
-  assert.equal(capture.completionCalls, 2);
+  assert.equal(capture.completionCalls, 4);
+  assert.match(capture.prompt, /Repair category: primary-grounding/);
+});
+
+test('critic re-audits one grounded replacement for an unsupported primary claim', async (context) => {
+  const directory = repository(context);
+  useRepository(context, directory);
+  fs.writeFileSync(path.join(directory, 'source.ts'), 'export const value = 1;\n');
+  git(directory, ['add', 'source.ts']);
+  const capture = { resolveCalls: 0, completionCalls: 0, prompt: '' };
+  const verdict = (supported: boolean) => JSON.stringify({
+    schemaVersion: 1,
+    candidates: [{
+      candidateId: 'claim:claim-change',
+      evidenceIds: ['change-1'],
+      supported,
+    }],
+  });
+
+  await runCommit(
+    ['--dry-run'],
+    dependencies(
+      capture,
+      [JSON.stringify(validDraft()), JSON.stringify(validDraft())],
+      [verdict(false), verdict(true)],
+    ),
+  );
+
+  assert.equal(capture.completionCalls, 4);
+  assert.match(capture.prompt, /previous primary claim failed evidence review/i);
+  assert.match(capture.prompt, /Repair category: primary-grounding/);
 });
 
 test('critic transport failure is terminal and never triggers draft repair', async (context) => {

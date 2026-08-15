@@ -19,6 +19,15 @@ export interface FilteredArtifactCritique {
   readonly removedCandidateIds: readonly string[];
 }
 
+export class UnsupportedPrimaryArtifactClaimError extends Error {
+  readonly code = 'unsupported_primary_artifact_claim';
+
+  constructor() {
+    super('Artifact critique rejected the primary claim.');
+    this.name = 'UnsupportedPrimaryArtifactClaimError';
+  }
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -283,7 +292,7 @@ export function filterArtifactDraftByCritique(
     return Object.freeze({ draft, removedCandidateIds });
   }
   if (removedCandidateIds.includes(`claim:${draft.title.claimId}`)) {
-    throw new Error('Artifact critique rejected the primary claim.');
+    throw new UnsupportedPrimaryArtifactClaimError();
   }
 
   const removedClaims = new Set(

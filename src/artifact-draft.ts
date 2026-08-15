@@ -50,6 +50,9 @@ export interface ArtifactDraft {
   readonly trailers: readonly ArtifactTrailerDraft[];
 }
 
+export const PRIMARY_GROUNDING_REPAIR_INSTRUCTION =
+  'Repair category: primary-grounding. Replace the title and primary claim with the smallest conservative factual change supported by every cited evidence ID. Prefer one direct evidence ID. Omit optional claims and trailers.';
+
 export function artifactRepairInstruction(error: unknown): string {
   const message = error instanceof Error ? error.message : '';
   if (

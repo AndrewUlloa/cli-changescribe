@@ -5,11 +5,13 @@ import type { ChatCompletionMessageParam } from 'openai/resources/chat/completio
 import {
   artifactRepairInstruction,
   parseArtifactDraft,
+  PRIMARY_GROUNDING_REPAIR_INSTRUCTION,
   type ArtifactDraft,
 } from './artifact-draft';
 import {
   buildArtifactCriticMessages,
   filterArtifactDraftByCritique,
+  UnsupportedPrimaryArtifactClaimError,
 } from './artifact-critic';
 import { renderPullRequestArtifact } from './artifact-renderer';
 import {
@@ -199,6 +201,8 @@ function buildArtifactMessages(
         `Mode: ${mode}`,
         repairInstruction === undefined
           ? 'Produce one evidence-linked draft.'
+          : repairInstruction === PRIMARY_GROUNDING_REPAIR_INSTRUCTION
+          ? 'The previous primary claim failed evidence review. Produce one replacement draft from the original evidence.'
           : 'The previous response failed deterministic validation. Produce one corrected draft from the original evidence.',
         ...(repairInstruction === undefined
           ? []
@@ -228,12 +232,13 @@ async function generateArtifactDraft(
   knownSecrets: readonly string[],
   policy: RepositoryPolicy,
   timings: OperationTimings,
+  initialRepairInstruction?: string,
 ): Promise<ArtifactDraft> {
   let draft: ArtifactDraft | undefined;
-  let repairInstruction: string | undefined;
+  let repairInstruction = initialRepairInstruction;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const completion = await timings.measure(
-      attempt === 0 ? 'provider-draft' : 'provider-repair',
+      repairInstruction === undefined ? 'provider-draft' : 'provider-repair',
       async () =>
         await createCompletionSafe(
           resolved,
@@ -1034,7 +1039,7 @@ async function main(argv: string[], timings: OperationTimings): Promise<void> {
     context,
   );
   step('Generating one structured draft from original evidence...');
-  const draft = await generateArtifactDraft(
+  let draft = await generateArtifactDraft(
     resolved,
     evidence,
     branch,
@@ -1044,24 +1049,48 @@ async function main(argv: string[], timings: OperationTimings): Promise<void> {
     repositoryPolicy.policy,
     timings,
   );
-  const filtered = await timings.measure('provider-critic', async () => {
-    const critique = await createCompletionSafe(
-      resolved,
-      buildArtifactCriticMessages(evidence, draft),
-      8_192,
-      knownSecrets,
-    );
-    return filterArtifactDraftByCritique(
-      redactSecretValues(
-        critique.content || critique.reasoning,
+  const critiqueDraft = async (candidate: ArtifactDraft) =>
+    await timings.measure('provider-critic', async () => {
+      const critique = await createCompletionSafe(
+        resolved,
+        buildArtifactCriticMessages(evidence, candidate),
+        8_192,
         knownSecrets,
-      ).trim(),
-      draft,
+      );
+      return filterArtifactDraftByCritique(
+        redactSecretValues(
+          critique.content || critique.reasoning,
+          knownSecrets,
+        ).trim(),
+        candidate,
+      );
+    });
+  let filtered;
+  try {
+    filtered = await critiqueDraft(draft);
+  } catch (error) {
+    if (!(error instanceof UnsupportedPrimaryArtifactClaimError)) {
+      throw error;
+    }
+    warn(
+      'Primary claim failed evidence review; requesting one grounded replacement...',
     );
-  });
+    draft = await generateArtifactDraft(
+      resolved,
+      evidence,
+      branch,
+      args.base,
+      mode,
+      knownSecrets,
+      repositoryPolicy.policy,
+      timings,
+      PRIMARY_GROUNDING_REPAIR_INSTRUCTION,
+    );
+    filtered = await critiqueDraft(draft);
+  }
   if (filtered.removedCandidateIds.length > 0) {
     warn(
-      `Critic removed ${String(filtered.removedCandidateIds.length)} unsupported optional ${filtered.removedCandidateIds.length === 1 ? 'claim' : 'claims'}.`,
+      `Critic removed ${String(filtered.removedCandidateIds.length)} unsupported optional ${filtered.removedCandidateIds.length === 1 ? 'item' : 'items'}.`,
     );
   }
   const filteredDraft = parseArtifactDraft(

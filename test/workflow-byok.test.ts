@@ -13,7 +13,8 @@ type ArtifactResponseKind = 'parse-invalid' | 'render-invalid' | 'valid';
 
 function isArtifactPrompt(serialized: string): boolean {
   return serialized.includes('Produce one evidence-linked draft') ||
-    serialized.includes('previous response failed deterministic validation');
+    serialized.includes('previous response failed deterministic validation') ||
+    serialized.includes('previous primary claim failed evidence review');
 }
 
 function git(cwd: string, args: string[]): string {
@@ -48,6 +49,7 @@ async function createCompletionServer(
     artifactResponses?: readonly ArtifactResponseKind[];
     scope?: string;
     dishonestSupporting?: boolean;
+    primaryRejectedCritiques?: number;
   } = {},
 ): Promise<{
   baseURL: string;
@@ -71,6 +73,11 @@ async function createCompletionServer(
         'independently audit every proposed model-authored artifact claim',
       );
       const isArtifactRequest = isArtifactPrompt(serializedRequest);
+      const criticRequestCount = requests.filter((item) =>
+        JSON.stringify(item.body).includes(
+          'independently audit every proposed model-authored artifact claim',
+        ),
+      ).length;
       const artifactRequestCount = requests.filter((item) =>
         isArtifactPrompt(JSON.stringify(item.body)),
       ).length;
@@ -105,7 +112,8 @@ async function createCompletionServer(
                         {
                           candidateId: 'claim:claim-change',
                           evidenceIds: ['change-1'],
-                          supported: true,
+                          supported: criticRequestCount >
+                            (options.primaryRejectedCritiques ?? 0),
                         },
                         ...(options.dishonestSupporting
                           ? [{
@@ -849,13 +857,40 @@ test('PR critic removes dishonest supporting prose before GitHub mutation', asyn
   );
 
   assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /Critic removed 1 unsupported optional claim/i);
+  assert.match(result.stdout, /Critic removed 1 unsupported optional item/i);
   assert.equal(server.requests.length, 2);
   assert.doesNotMatch(fs.readFileSync(output, 'utf8'), /mark the plan/i);
   assert.doesNotMatch(
     JSON.parse(fs.readFileSync(capture, 'utf8')).body as string,
     /mark the plan/i,
   );
+});
+
+test('PR critic re-audits one grounded replacement for an unsupported primary claim', async (context) => {
+  const directory = createRepository(context);
+  git(directory, ['switch', '--quiet', '-c', 'feature']);
+  fs.appendFileSync(path.join(directory, 'README.md'), 'grounded repair fixture\n');
+  git(directory, ['add', 'README.md']);
+  git(directory, ['commit', '--quiet', '-m', 'fix: add grounded repair fixture']);
+  const output = path.join(directory, 'summary.md');
+  const server = await createCompletionServer(context, {
+    primaryRejectedCritiques: 1,
+  });
+
+  const result = await run(
+    directory,
+    ['pr', '--base', 'main', '--out', output],
+    customEnvironment(server.baseURL),
+  );
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.equal(server.requests.length, 4);
+  assert.match(result.stdout, /requesting one grounded replacement/i);
+  assert.match(
+    JSON.stringify(server.requests[2].body),
+    /Repair category: primary-grounding/,
+  );
+  assert.equal(fs.existsSync(output), true);
 });
 
 test('PR workflow skips provider and output when branch history reverts to base', async (context) => {

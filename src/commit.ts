@@ -5,11 +5,13 @@ import type { ChatCompletionMessageParam } from 'openai/resources/chat/completio
 import {
   artifactRepairInstruction,
   parseArtifactDraft,
+  PRIMARY_GROUNDING_REPAIR_INSTRUCTION,
   type ArtifactDraft,
 } from './artifact-draft';
 import {
   buildArtifactCriticMessages,
   filterArtifactDraftByCritique,
+  UnsupportedPrimaryArtifactClaimError,
 } from './artifact-critic';
 import {
   renderCommitArtifact,
@@ -176,6 +178,8 @@ function buildArtifactMessages(
       content: [
         repairInstruction === undefined
           ? 'Produce one evidence-linked draft.'
+          : repairInstruction === PRIMARY_GROUNDING_REPAIR_INSTRUCTION
+          ? 'The previous primary claim failed evidence review. Produce one replacement draft from the original evidence.'
           : 'The previous response failed deterministic validation. Produce one corrected evidence-linked draft from the original evidence.',
         ...(repairInstruction === undefined
           ? []
@@ -258,31 +262,80 @@ async function requestArtifact(
     );
   }
   const validatedDraft = draft;
-  const filtered = await timings.measure('provider-critic', async () => {
-    const critique = await dependencies.completeChat(resolved, {
-      messages: redactMessageSecrets(
-        buildArtifactCriticMessages(evidence, validatedDraft),
-        knownSecrets,
-      ),
-      outputLimit: 8_192,
-      intent: 'workflow',
+  const critiqueDraft = async (candidate: ArtifactDraft) =>
+    await timings.measure('provider-critic', async () => {
+      const critique = await dependencies.completeChat(resolved, {
+        messages: redactMessageSecrets(
+          buildArtifactCriticMessages(evidence, candidate),
+          knownSecrets,
+        ),
+        outputLimit: 8_192,
+        intent: 'workflow',
+      });
+      return filterArtifactDraftByCritique(
+        redactSecretValues(
+          critique.content || critique.reasoning,
+          knownSecrets,
+        ).trim(),
+        candidate,
+      );
     });
-    return filterArtifactDraftByCritique(
-      redactSecretValues(
-        critique.content || critique.reasoning,
-        knownSecrets,
-      ).trim(),
-      validatedDraft,
+
+  let reviewedDraft = validatedDraft;
+  let filtered;
+  try {
+    filtered = await critiqueDraft(reviewedDraft);
+  } catch (error) {
+    if (!(error instanceof UnsupportedPrimaryArtifactClaimError)) {
+      throw error;
+    }
+    console.log(
+      '⚠️  Primary claim failed evidence review; requesting one grounded replacement...',
     );
-  });
+    const completion = await timings.measure('provider-repair', async () =>
+      await dependencies.completeChat(resolved, {
+        messages: redactMessageSecrets(
+          buildArtifactMessages(
+            evidence,
+            PRIMARY_GROUNDING_REPAIR_INSTRUCTION,
+          ),
+          knownSecrets,
+        ),
+        outputLimit: 4_096,
+        intent: 'workflow',
+      }),
+    );
+    const repairedCandidate = redactSecretValues(
+      completion.content || completion.reasoning,
+      knownSecrets,
+    ).trim();
+    const repaired = timings.measureSync('render', () => {
+      const repairedDraft = parseArtifactDraft(repairedCandidate, evidence);
+      return {
+        draft: repairedDraft,
+        rendered: renderCommitArtifact(
+          repairedDraft,
+          evidence,
+          policy.title,
+          policy.editorial,
+        ),
+      };
+    });
+    reviewedDraft = repaired.draft;
+    rendered = repaired.rendered;
+    filtered = await critiqueDraft(reviewedDraft);
+  }
   if (filtered.removedCandidateIds.length > 0) {
     console.log(
-      `⚠️  Critic removed ${String(filtered.removedCandidateIds.length)} unsupported optional ${filtered.removedCandidateIds.length === 1 ? 'claim' : 'claims'}.`,
+      `⚠️  Critic removed ${String(filtered.removedCandidateIds.length)} unsupported optional ${filtered.removedCandidateIds.length === 1 ? 'item' : 'items'}.`,
     );
-    draft = parseArtifactDraft(JSON.stringify(filtered.draft), evidence);
+    reviewedDraft = parseArtifactDraft(
+      JSON.stringify(filtered.draft),
+      evidence,
+    );
     rendered = timings.measureSync('render', () =>
       renderCommitArtifact(
-        draft as ArtifactDraft,
+        reviewedDraft,
         evidence,
         policy.title,
         policy.editorial,
