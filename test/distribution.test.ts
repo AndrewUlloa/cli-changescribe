@@ -106,6 +106,7 @@ function expectedDiffwrightFiles(): string[] {
     'transport',
     'subprocess',
     'setup-files',
+    'staged-evidence',
   ]) {
     files.push(`dist/${moduleName}.js`, `dist/${moduleName}.js.map`);
   }

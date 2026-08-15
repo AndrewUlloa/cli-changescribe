@@ -376,7 +376,7 @@ test('commit workflow uses explicit custom provider through the shared transport
 
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /Generating commit message with AI \(custom\)/);
-  assert.match(result.stdout, /fix: support provider-neutral configuration/);
+  assert.match(result.stdout, /fix: route provider-neutral completions/);
   assert.doesNotMatch(result.stdout, /workflow-secret|ambient-secret/);
   assert.equal(server.requests.length, 1);
   assert.equal(server.requests[0].url, '/v1/chat/completions');
