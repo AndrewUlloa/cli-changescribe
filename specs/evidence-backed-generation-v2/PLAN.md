@@ -207,14 +207,14 @@ Non-decisions:
     `test/init-wizard.test.ts`, `test/distribution.test.ts`
   - **Size:** M
 
-- [ ] **Task 8: Render adaptive Conventional Commits from structured drafts**
+- [x] **Task 8: Render adaptive Conventional Commits from structured drafts**
   - **Description:** Replace the forced body parser with configurable standard
     types, optional scopes, breaking markers, extensible trailers, adaptive
     prose, and deterministic 50/72 validation.
   - **Acceptance:**
-    - [ ] Subject-only output is valid.
-    - [ ] Scopes and trailers follow Conventional Commits syntax.
-    - [ ] Unknown rationale/risk is omitted; no placeholder filler is emitted.
+    - [x] Subject-only output is valid.
+    - [x] Scopes and trailers follow Conventional Commits syntax.
+    - [x] Unknown rationale/risk is omitted; no placeholder filler is emitted.
   - **Verify:**
     - `node --test .test-dist/commit-v2.test.js`
     - `node --test .test-dist/workflow-byok.test.js`
@@ -241,10 +241,10 @@ Non-decisions:
 
 ### Checkpoint: Commit v2
 
-- [ ] Commit grammar matrix passes
-- [ ] Staged-only and explicit-all flows pass
-- [ ] Guided scripts dogfood explicit staging
-- [ ] Full suite remains green
+- [x] Commit grammar matrix passes
+- [x] Staged-only and explicit-all flows pass
+- [x] Guided scripts dogfood explicit staging
+- [x] Full suite remains green
 
 ### Phase 5: Human Review and Editorial Policy
 

@@ -55,7 +55,7 @@ function dependencies(capture: {
   resolveCalls: number;
   completionCalls: number;
   prompt: string;
-}): CommitDependencies {
+}, responses = [JSON.stringify(validDraft())]): CommitDependencies {
   return {
     loadRuntimeConfig: () => ({
       values: { CEREBRAS_API_KEY: 'test-key' },
@@ -80,11 +80,36 @@ function dependencies(capture: {
       capture.completionCalls += 1;
       capture.prompt = JSON.stringify(input.messages);
       return {
-        content: 'fix: describe staged change',
+        content:
+          responses[Math.min(capture.completionCalls - 1, responses.length - 1)] ??
+          '',
         reasoning: '',
         finishReason: 'stop',
       };
     },
+  };
+}
+
+function validDraft(): Record<string, unknown> {
+  return {
+    schemaVersion: 1,
+    title: {
+      type: 'fix',
+      breaking: false,
+      subject: 'describe staged change',
+    },
+    claims: [
+      {
+        id: 'claim-change',
+        kind: 'change',
+        text: 'Describe the staged change.',
+        evidenceIds: ['change-1'],
+        basis: 'observed',
+        significance: 'primary',
+      },
+    ],
+    sections: [{ kind: 'summary', claimIds: ['claim-change'] }],
+    trailers: [],
   };
 }
 
@@ -155,4 +180,64 @@ test('a clean repository exits without resolving or calling a provider', async (
 
   assert.equal(capture.resolveCalls, 0);
   assert.equal(capture.completionCalls, 0);
+});
+
+test('repairs one invalid draft from the original staged evidence', async (context) => {
+  const directory = repository(context);
+  useRepository(context, directory);
+  fs.writeFileSync(path.join(directory, 'value.txt'), 'evidence-value\n');
+  git(directory, ['add', 'value.txt']);
+  const capture = { resolveCalls: 0, completionCalls: 0, prompt: '' };
+
+  await runCommit(
+    ['--dry-run'],
+    dependencies(capture, ['not-json', JSON.stringify(validDraft())]),
+  );
+
+  assert.equal(capture.completionCalls, 2);
+  assert.match(capture.prompt, /previous response failed deterministic validation/);
+  assert.match(capture.prompt, /evidence-value/);
+  assert.doesNotMatch(capture.prompt, /not-json/);
+});
+
+test('rejects an invented breaking change after one repair', async (context) => {
+  const directory = repository(context);
+  useRepository(context, directory);
+  fs.writeFileSync(path.join(directory, 'value.txt'), 'ordinary change\n');
+  git(directory, ['add', 'value.txt']);
+  const capture = { resolveCalls: 0, completionCalls: 0, prompt: '' };
+  const breakingDraft = validDraft();
+  (breakingDraft.title as Record<string, unknown>).breaking = true;
+
+  await assert.rejects(
+    runCommit(
+      ['--dry-run'],
+      dependencies(capture, [JSON.stringify(breakingDraft)]),
+    ),
+    /invalid evidence-linked commit draft after one repair/,
+  );
+  assert.equal(capture.completionCalls, 2);
+});
+
+test('aborts before commit when the staged index moves during generation', async (context) => {
+  const directory = repository(context);
+  useRepository(context, directory);
+  fs.writeFileSync(path.join(directory, 'value.txt'), 'first staged value\n');
+  git(directory, ['add', 'value.txt']);
+  const head = git(directory, ['rev-parse', 'HEAD']).trim();
+  const capture = { resolveCalls: 0, completionCalls: 0, prompt: '' };
+  const injected = dependencies(capture);
+  const complete = injected.completeChat;
+  injected.completeChat = async (resolved, input) => {
+    const completion = await complete(resolved, input);
+    fs.writeFileSync(path.join(directory, 'later.txt'), 'later staged value\n');
+    git(directory, ['add', 'later.txt']);
+    return completion;
+  };
+
+  await assert.rejects(
+    runCommit([], injected),
+    /Repository index changed after evidence collection/,
+  );
+  assert.equal(git(directory, ['rev-parse', 'HEAD']).trim(), head);
 });

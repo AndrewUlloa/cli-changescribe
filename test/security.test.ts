@@ -201,11 +201,28 @@ test('commit dry-run treats staged filenames as data and never commits', async (
     completeChat: async () => {
       completionCalls += 1;
       return {
-        content:
-          'fix: prevent unsafe command parsing\n\n' +
-          '- change: pass untrusted values as process arguments\n' +
-          '- why: prevent shell evaluation\n' +
-          '- risk: low',
+        content: JSON.stringify({
+          schemaVersion: 1,
+          title: {
+            type: 'fix',
+            breaking: false,
+            subject: 'prevent unsafe command parsing',
+          },
+          claims: [
+            {
+              id: 'claim-change',
+              kind: 'change',
+              text: 'Treat staged filenames as data.',
+              evidenceIds: ['change-1'],
+              basis: 'observed',
+              significance: 'primary',
+            },
+          ],
+          sections: [
+            { kind: 'summary', claimIds: ['claim-change'] },
+          ],
+          trailers: [],
+        }),
         reasoning: '',
         finishReason: 'stop',
       };
