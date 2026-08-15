@@ -86,6 +86,7 @@ test('compiler contract is strict CommonJS for Node 18', () => {
 test('all application sources are TypeScript and compiled output exists', () => {
   const expectedModules = [
     'arguments',
+    'artifact-draft',
     'change-evidence',
     'cli',
     'commit',
