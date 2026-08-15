@@ -396,10 +396,15 @@ test('pre-commit hook changes remain local and are never pushed', async (context
   );
   const capture = { resolveCalls: 0, completionCalls: 0, prompt: '' };
 
-  await assert.rejects(
-    runCommit([], dependencies(capture)),
-    /Git hooks changed the reviewed commit.*not pushed/i,
-  );
+  await assert.rejects(runCommit([], dependencies(capture)), (error: unknown) => {
+    assert.ok(error instanceof Error);
+    assert.equal(
+      error.message,
+      'Git hooks changed the reviewed commit. The local commit was not pushed.',
+    );
+    assert.doesNotMatch(error.message, /Failed to commit changes/);
+    return true;
+  });
 
   assert.equal(git(remote, ['rev-parse', 'refs/heads/main']).trim(), remoteBefore);
   assert.match(

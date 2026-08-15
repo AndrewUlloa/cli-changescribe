@@ -51,6 +51,8 @@ const execFileSync = defaultCommandRunner.exec;
 const LARGE_BUFFER_SIZE = 10 * 1024 * 1024;
 const MAX_MODEL_EVIDENCE_CHARS = 256 * 1024;
 
+class ReviewedCommitIntegrityError extends Error {}
+
 interface CommitDependencies {
   loadRuntimeConfig(): RuntimeConfig;
   resolveProvider(options: ResolveProviderOptions): ResolvedProvider | null;
@@ -206,11 +208,7 @@ async function requestArtifact(
       knownSecrets,
     ).trim();
     try {
-      draft = parseArtifactDraft(
-        candidate,
-        evidence,
-        policy.selection,
-      );
+      draft = parseArtifactDraft(candidate, evidence);
       rendered = renderCommitArtifact(
         draft,
         evidence,
@@ -303,12 +301,15 @@ function commitMessage(
       createdParents !== evidence.snapshot.headSha ||
       createdMessage !== message.trimEnd()
     ) {
-      throw new Error(
+      throw new ReviewedCommitIntegrityError(
         'Git hooks changed the reviewed commit. The local commit was not pushed.',
       );
     }
     return createdSha;
   } catch (error) {
+    if (error instanceof ReviewedCommitIntegrityError) {
+      throw error;
+    }
     throw new Error(`Failed to commit changes: ${errorMessage(error)}`);
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
