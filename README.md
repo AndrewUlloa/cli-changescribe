@@ -282,7 +282,7 @@ append `-- --yes` deliberately.
 - Commits use the pinned `HEAD` and Git index tree. Working-tree changes are
   excluded unless `--all` explicitly stages them.
 - PRs use the final `merge-base...HEAD` net diff. Reverted intermediate work is
-  absent; deletions, renames, copies, type changes, binary metadata, and unusual
+  absent; deletions, renames, type changes, binary metadata, and unusual
   filenames remain visible to the collector.
 - A changed test file is only a code change. Verification text comes only from
   a captured command receipt with its exact status.
@@ -300,10 +300,14 @@ natural-language interpretation is true. The critic is a veto, not an oracle.
 ### Repository policy
 
 An optional root `.diffwrightrc.json` can add accepted Conventional Commit
-types, forbid or allowlist scopes, tighten the 50-character title target, and
-configure advisory sentence, absolute-language, duplicate-claim, and
-terminology checks. The 72-character maximum and evidence/security boundaries
-cannot be loosened.
+types, forbid or allowlist scopes, set the advisory title target from 1 through
+72 characters, and configure advisory sentence, absolute-language,
+duplicate-claim, and terminology checks. The 72-character maximum and
+evidence/security boundaries cannot be loosened.
+
+Additional types extend local validation and the interactive PR editing path.
+Automatic generation intentionally asks for the standard Conventional Commit
+types in this release; repository policy is not copied into provider prompts.
 
 Commits read policy from the last committed `HEAD`; a staged policy change
 applies to the next commit. PRs read policy from the pinned base SHA, so a

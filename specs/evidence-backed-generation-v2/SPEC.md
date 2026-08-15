@@ -154,6 +154,90 @@ export interface SupportedClaim {
 }
 ```
 
+### Evidence-to-artifact example
+
+The runtime uses the richer discriminated types in `src/change-evidence.ts`,
+but the following compact example shows the trust boundary end to end:
+
+```json
+{
+  "evidence": [
+    {
+      "id": "change-parser",
+      "kind": "change",
+      "basis": "observed",
+      "source": { "kind": "git-index", "locator": "src/parser.ts" },
+      "payload": {
+        "status": "modified",
+        "path": "src/parser.ts",
+        "additions": 3,
+        "deletions": 1,
+        "binary": false,
+        "patch": "+if (token.length === 0) throw new Error('Empty token');"
+      }
+    },
+    {
+      "id": "intent-empty-input",
+      "kind": "intent",
+      "basis": "provided",
+      "source": { "kind": "context-file", "locator": "intent.md" },
+      "payload": { "text": "Reject empty parser tokens." }
+    },
+    {
+      "id": "verification-test",
+      "kind": "verification",
+      "basis": "observed",
+      "source": { "kind": "gate", "locator": "npm test" },
+      "payload": { "receiptId": "receipt-test" }
+    }
+  ],
+  "receipt": {
+    "id": "receipt-test",
+    "command": {
+      "file": "npm",
+      "args": ["test"],
+      "display": "npm test"
+    },
+    "status": "passed",
+    "exitCode": 0,
+    "durationMs": 412,
+    "source": "diffwright"
+  },
+  "validatedClaims": [
+    {
+      "id": "claim-change",
+      "kind": "change",
+      "text": "Reject empty parser tokens",
+      "evidenceIds": ["change-parser"],
+      "basis": "observed",
+      "significance": "primary"
+    },
+    {
+      "id": "claim-rationale",
+      "kind": "rationale",
+      "text": "Match the supplied empty-input behavior",
+      "evidenceIds": ["intent-empty-input"],
+      "basis": "provided",
+      "significance": "supporting"
+    },
+    {
+      "id": "claim-verification",
+      "kind": "verification",
+      "text": "npm test passed",
+      "evidenceIds": ["verification-test"],
+      "basis": "observed",
+      "significance": "supporting"
+    }
+  ],
+  "renderedTitle": "fix(parser): reject empty parser tokens"
+}
+```
+
+By contrast, a verification claim such as `npm test passed` that cites only
+`change-parser` is rejected: editing a test or production file is not evidence
+that a command ran successfully. Only `verification-test`, backed by the
+zero-exit `receipt-test`, can support that statement.
+
 Key conventions:
 
 - External data is untrusted until parsed and bounded.

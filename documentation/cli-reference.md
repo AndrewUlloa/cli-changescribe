@@ -243,7 +243,7 @@ generates consumer package scripts without `--yes` by default.
 
 Commit evidence pins `HEAD` and the index tree; PR evidence pins the fetched
 base SHA, merge base, and final branch `HEAD`. PR material changes come from the
-final net diff, not a chain of per-commit summaries. Deletions, renames, copies,
+final net diff, not a chain of per-commit summaries. Deletions, renames,
 type changes, binary metadata, and NUL-delimited unusual filenames are handled
 explicitly. The retained `--limit` option caps supplemental history only.
 
@@ -297,15 +297,21 @@ keys, unknown fields, unsupported controls, and out-of-range values fail closed.
 
 `additionalTypes` extends the standard Conventional Commit types; it cannot
 remove `feat` or `fix`. `scopeMode` is `optional` or `forbidden`; an allowlist
-can further restrict optional scopes. `targetLength` may tighten the advisory
-target but cannot exceed the immutable 72-character header maximum. Editorial
+can further restrict optional scopes. `targetLength` sets the advisory target
+from 1 through 72 characters and cannot exceed the immutable 72-character
+header maximum. Editorial
 findings cover sentence length, vague absolutes, normalized duplicate claims,
 and mixed terminology. They are warnings only.
+
+Additional types extend local validation and can be selected during
+interactive PR editing. Automatic generation continues to request only the
+standard Conventional Commit types in this release because repository policy is
+not sent to the configured provider.
 
 Commit generation loads policy from the last committed `HEAD`, before staging;
 a staged policy change applies on the next commit. PR generation loads policy
 from the pinned base commit, not the feature branch. When the policy itself is
-changed, its raw patch is replaced with digest-bearing metadata before provider
+changed, its raw patch is replaced with bounded change metadata before provider
 serialization. Policy values are enforced locally and are not added as a
 free-form prompt suffix.
 
