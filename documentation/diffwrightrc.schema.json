@@ -48,6 +48,23 @@
           "uniqueItems": true,
           "items": {
             "$ref": "#/$defs/typeToken"
+          },
+          "not": {
+            "contains": {
+              "enum": [
+                "build",
+                "chore",
+                "ci",
+                "docs",
+                "feat",
+                "fix",
+                "perf",
+                "refactor",
+                "revert",
+                "style",
+                "test"
+              ]
+            }
           }
         },
         "scopeMode": {
@@ -64,7 +81,7 @@
           }
         },
         "targetLength": {
-          "description": "Advisory title-length target. The immutable hard maximum remains 72 characters.",
+          "description": "Advisory title-length target from 1 through 72 characters. The immutable hard maximum remains 72 characters.",
           "type": "integer",
           "minimum": 1,
           "maximum": 72

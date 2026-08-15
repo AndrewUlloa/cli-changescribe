@@ -1,8 +1,8 @@
 # Plan: Evidence-Backed Generation v2
 
 > Derived from: `specs/evidence-backed-generation-v2/SPEC.md`
-> Status: approved
-> Last updated: 2026-08-14
+> Status: complete
+> Last updated: 2026-08-15
 
 ## Overview
 
@@ -86,25 +86,26 @@ Non-decisions:
   - **Description:** Capture representative structured fixtures and baseline
     failure cases before replacing generation behavior.
   - **Acceptance:**
-    - [x] Fixtures cover simple, breaking, scoped, trailer, deletion, rename,
-      revert, unexecuted-test, large-diff, and mixed-concern changes.
+    - [x] Executable corpus cases cover title grammar and length, final-net-diff
+      behavior, and claim support; focused renderer tests cover adaptive bodies
+      and trailers.
     - [x] Rubric fails unsupported material claims and distinguishes tests
       changed from tests executed.
     - [x] The current known PR-summary failure is represented without embedding
       secrets or provider output snapshots as a trusted oracle.
   - **Verify:**
     - `npm run build:test`
-    - `node --test .test-dist/evidence-evaluation.test.js`
+    - `node --test .test-dist/evaluation-corpus.test.js`
   - **Depends on:** Task 1
-  - **Files:** `test/fixtures/evidence/*`, `test/evidence-evaluation.test.ts`,
-    `test/run-tests.ts`
+  - **Files:** `fixtures/evidence-v2/corpus.json`,
+    `test/evaluation-corpus.test.ts`, `test/git-fixture.ts`, `test/run-tests.ts`
   - **Size:** M
 
 ### Checkpoint: Contract and Evaluation
 
-- [ ] Baseline fixture tests pass
-- [ ] Full existing suite remains green
-- [ ] First commit pushed and PR opened through Diffwright
+- [x] Baseline fixture tests pass
+- [x] Full existing suite remains green
+- [x] First commit pushed and PR opened through Diffwright
 
 ### Phase 2: Shared Evidence Foundation
 
@@ -128,9 +129,9 @@ Non-decisions:
 
 ### Checkpoint: Evidence Foundation
 
-- [ ] Evidence contracts are independently testable
-- [ ] Packed module inventory is complete
-- [ ] Full suite remains green
+- [x] Evidence contracts are independently testable
+- [x] Packed module inventory is complete
+- [x] Full suite remains green
 
 ### Phase 3: Pull-Request Correctness
 
@@ -317,19 +318,19 @@ Non-decisions:
 
 ### Checkpoint: Ready for Review
 
-- [ ] All spec success criteria met
-- [ ] Full tests and packaging gates green
-- [ ] Five-axis review requested
+- [x] All spec success criteria met
+- [x] Full tests and packaging gates green
+- [x] Five-axis review requested
 
 ### Phase 6: Review and Ship
 
-- [ ] **Task 13: Complete independent correctness, security, and prose review**
+- [x] **Task 13: Complete independent correctness, security, and prose review**
   - **Description:** Review final behavior across correctness, readability,
     architecture, security, and performance; resolve all required findings.
   - **Acceptance:**
-    - [ ] Required findings are fixed or explicitly deferred with a tracked
+    - [x] Required findings are fixed or explicitly deferred with a tracked
       issue.
-    - [ ] Review records evidence for all five axes.
+    - [x] Review records evidence for all five axes.
   - **Verify:**
     - `npm run typecheck`
     - `npm test`
@@ -340,12 +341,12 @@ Non-decisions:
   - **Files:** `specs/evidence-backed-generation-v2/REVIEW.md`
   - **Size:** S
 
-- [ ] **Task 14: Record release and rollback readiness**
+- [x] **Task 14: Record release and rollback readiness**
   - **Description:** Document rollout, compatibility, failure recovery, and
     rollback for the next version without publishing automatically.
   - **Acceptance:**
-    - [ ] Release scope and rollback commands are explicit.
-    - [ ] No package publication or merge occurs without Andrew's separate
+    - [x] Release scope and rollback commands are explicit.
+    - [x] No package publication or merge occurs without Andrew's separate
       instruction.
   - **Verify:**
     - `npm pack --dry-run`

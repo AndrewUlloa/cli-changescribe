@@ -217,6 +217,25 @@ test('repository policy schema is shipped and matches the documented v1 surface'
   ]);
   assert.ok(schema.$defs?.titlePolicy);
   assert.ok(schema.$defs?.editorialPolicy);
+  const titlePolicy = schema.$defs?.titlePolicy as {
+    properties?: Record<string, unknown>;
+  };
+  const additionalTypes = titlePolicy.properties?.additionalTypes as {
+    not?: { contains?: { enum?: string[] } };
+  };
+  assert.deepEqual(additionalTypes.not?.contains?.enum, [
+    'build',
+    'chore',
+    'ci',
+    'docs',
+    'feat',
+    'fix',
+    'perf',
+    'refactor',
+    'revert',
+    'style',
+    'test',
+  ]);
   assert.match(readme, /diffwrightrc\.schema\.json/);
   assert.match(
     repositoryFile('documentation/cli-reference.md'),
