@@ -103,8 +103,9 @@ Options:
   --skip-format       Skip the optional package-manager format script
   --no-format         Alias for --skip-format
 
-Dry runs may fetch the base branch. Normal runs use one structured provider
-request, with at most one repair, and write detailed and PR-ready summary files.
+Dry runs may fetch the base branch. Normal runs use a structured draft request
+and one terminal critic request. One deterministic draft repair can raise the
+maximum to three requests. They write detailed and PR-ready summary files.
 
 Complete reference: ${CLI_REFERENCE}
 `);
