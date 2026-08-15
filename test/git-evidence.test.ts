@@ -62,6 +62,18 @@ interface GitEvidenceModule {
     cwd?: string,
     runner?: CommandRunner,
   ): void;
+  assertRemoteEvidenceBaseCurrent(
+    snapshot: EvidenceBundle['snapshot'],
+    baseBranch: string,
+    cwd?: string,
+    runner?: CommandRunner,
+  ): void;
+  assertRemoteEvidenceHeadCurrent(
+    snapshot: EvidenceBundle['snapshot'],
+    headBranch: string,
+    cwd?: string,
+    runner?: CommandRunner,
+  ): void;
 }
 
 interface CommandRunner {
@@ -407,5 +419,138 @@ test('rechecks a pinned snapshot before downstream mutation', (context) => {
         repository.directory,
       ),
     /HEAD changed after evidence collection/,
+  );
+});
+
+test('rechecks the pinned base before downstream mutation', (context) => {
+  const repository = materializeRepository(fixture('delete-only'));
+  context.after(() =>
+    fs.rmSync(repository.directory, { recursive: true, force: true }),
+  );
+  const bundle = gitEvidence.collectPullRequestEvidence({
+    cwd: repository.directory,
+    baseBranch: repository.baseBranch,
+    fetch: false,
+  });
+  const baseRef = bundle.snapshot.baseRef;
+  const baseSha = bundle.snapshot.baseSha;
+  assert.notEqual(baseRef, undefined);
+  assert.notEqual(baseSha, undefined);
+  const tree = git(repository.directory, ['rev-parse', `${baseSha}^{tree}`]).trim();
+  const movedBase = git(repository.directory, [
+    'commit-tree',
+    tree,
+    '-p',
+    baseSha!,
+    '-m',
+    'chore: move base after evidence',
+  ]).trim();
+  git(repository.directory, ['update-ref', baseRef!, movedBase]);
+
+  assert.throws(
+    () =>
+      gitEvidence.assertEvidenceSnapshotCurrent(
+        bundle.snapshot,
+        repository.directory,
+      ),
+    /base changed after evidence collection/,
+  );
+});
+
+test('rechecks the actual remote base before GitHub mutation', (context) => {
+  const repository = materializeRepository(fixture('delete-only'));
+  const remote = fs.mkdtempSync(path.join(path.dirname(repository.directory), 'remote-'));
+  context.after(() => {
+    fs.rmSync(repository.directory, { recursive: true, force: true });
+    fs.rmSync(remote, { recursive: true, force: true });
+  });
+  git(remote, ['init', '--quiet', '--bare']);
+  git(repository.directory, ['remote', 'add', 'origin', remote]);
+  git(repository.directory, ['push', '--quiet', 'origin', 'main']);
+  const bundle = gitEvidence.collectPullRequestEvidence({
+    cwd: repository.directory,
+    baseBranch: repository.baseBranch,
+    fetch: false,
+  });
+
+  assert.doesNotThrow(() =>
+    gitEvidence.assertRemoteEvidenceBaseCurrent(
+      bundle.snapshot,
+      repository.baseBranch,
+      repository.directory,
+    ),
+  );
+  const baseSha = bundle.snapshot.baseSha;
+  assert.notEqual(baseSha, undefined);
+  const tree = git(repository.directory, ['rev-parse', `${baseSha}^{tree}`]).trim();
+  const movedBase = git(repository.directory, [
+    'commit-tree',
+    tree,
+    '-p',
+    baseSha!,
+    '-m',
+    'chore: move remote base after evidence',
+  ]).trim();
+  git(repository.directory, [
+    'push',
+    '--quiet',
+    'origin',
+    `+${movedBase}:refs/heads/${repository.baseBranch}`,
+  ]);
+
+  assert.throws(
+    () =>
+      gitEvidence.assertRemoteEvidenceBaseCurrent(
+        bundle.snapshot,
+        repository.baseBranch,
+        repository.directory,
+      ),
+    /Remote base changed after evidence collection/,
+  );
+});
+
+test('rechecks the actual remote feature branch before GitHub mutation', (context) => {
+  const repository = materializeRepository(fixture('delete-only'));
+  const remote = fs.mkdtempSync(path.join(path.dirname(repository.directory), 'remote-'));
+  context.after(() => {
+    fs.rmSync(repository.directory, { recursive: true, force: true });
+    fs.rmSync(remote, { recursive: true, force: true });
+  });
+  git(remote, ['init', '--quiet', '--bare']);
+  git(repository.directory, ['remote', 'add', 'origin', remote]);
+  git(repository.directory, [
+    'push',
+    '--quiet',
+    'origin',
+    repository.featureBranch,
+  ]);
+  const bundle = gitEvidence.collectPullRequestEvidence({
+    cwd: repository.directory,
+    baseBranch: repository.baseBranch,
+    fetch: false,
+  });
+
+  assert.doesNotThrow(() =>
+    gitEvidence.assertRemoteEvidenceHeadCurrent(
+      bundle.snapshot,
+      repository.featureBranch,
+      repository.directory,
+    ),
+  );
+  assert.notEqual(bundle.snapshot.baseSha, undefined);
+  git(repository.directory, [
+    'push',
+    '--quiet',
+    'origin',
+    `+${bundle.snapshot.baseSha!}:refs/heads/${repository.featureBranch}`,
+  ]);
+  assert.throws(
+    () =>
+      gitEvidence.assertRemoteEvidenceHeadCurrent(
+        bundle.snapshot,
+        repository.featureBranch,
+        repository.directory,
+      ),
+    /does not match the reviewed evidence/,
   );
 });

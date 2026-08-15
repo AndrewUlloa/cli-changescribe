@@ -103,22 +103,22 @@ export interface InitDependencies {
 const SCRIPT_MAP: Readonly<Record<string, string>> = {
   commit: 'diffwright commit --all',
   'pr:summary': 'diffwright pr:summary',
-  'feature:pr': 'diffwright feature:pr --yes',
-  'staging:pr': 'diffwright staging:pr --yes',
+  'feature:pr': 'diffwright feature:pr',
+  'staging:pr': 'diffwright staging:pr',
 };
 
 const LEGACY_SCRIPT_VALUES: Readonly<Record<string, ReadonlySet<string>>> = {
   commit: new Set(['changescribe commit']),
   'pr:summary': new Set(['changescribe pr:summary']),
   'feature:pr': new Set([
-    'diffwright feature:pr',
     'changescribe feature:pr',
     'changescribe feature:pr --yes',
+    'diffwright feature:pr --yes',
   ]),
   'staging:pr': new Set([
-    'diffwright staging:pr',
     'changescribe staging:pr',
     'changescribe staging:pr --yes',
+    'diffwright staging:pr --yes',
   ]),
 };
 

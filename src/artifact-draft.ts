@@ -20,6 +20,17 @@ export interface ConventionalTitleDraft {
   subject: string;
 }
 
+export interface ArtifactTitleDraft extends ConventionalTitleDraft {
+  claimId: string;
+}
+
+export interface ArtifactSelectionPolicy {
+  readonly supportingPaths?: readonly string[];
+  readonly primaryPaths?: readonly string[];
+}
+
+export type ChangeEvidenceRole = 'substantive' | 'supporting';
+
 export interface ArtifactSectionDraft {
   kind: ArtifactSectionKind;
   claimIds: readonly string[];
@@ -33,7 +44,7 @@ export interface ArtifactTrailerDraft {
 
 export interface ArtifactDraft {
   readonly schemaVersion: 1;
-  readonly title: Readonly<ConventionalTitleDraft>;
+  readonly title: Readonly<ArtifactTitleDraft>;
   readonly claims: readonly DraftClaim[];
   readonly sections: readonly ArtifactSectionDraft[];
   readonly trailers: readonly ArtifactTrailerDraft[];
@@ -44,6 +55,8 @@ const MAX_CLAIMS = 128;
 const MAX_CLAIM_TEXT_CHARS = 8_192;
 const MAX_SUBJECT_CHARS = 256;
 const MAX_TRAILER_VALUE_CHARS = 8_192;
+const MAX_SELECTION_PATTERNS = 128;
+const MAX_SELECTION_PATTERN_CHARS = 512;
 const ID_RE = /^[a-z][a-z0-9-]{0,63}$/u;
 const TYPE_RE = /^[a-z][a-z0-9-]{0,31}$/u;
 const SCOPE_RE = /^[a-z0-9][a-z0-9._/-]{0,63}$/u;
@@ -85,10 +98,60 @@ const SECTION_CLAIM_KINDS: Readonly<Record<ArtifactSectionKind, ReadonlySet<Draf
   risks: new Set(['risk']),
   'follow-ups': new Set(['follow-up']),
 };
+const DEFAULT_SUPPORTING_PATHS = Object.freeze([
+  'docs/**',
+  'documentation/**',
+  'spec/**',
+  'specs/**',
+  'test/**',
+  'tests/**',
+  'README*',
+  'CHANGELOG*',
+  'CONTRIBUTING*',
+  'SECURITY*',
+  'SUPPORT*',
+  'LICENSE*',
+  'NOTICE*',
+  '*.md',
+  '*.mdx',
+  '*.test.*',
+  '*.spec.*',
+  '*.snap',
+  '**/*.test.*',
+  '**/*.spec.*',
+  '**/*.snap',
+  '**/__tests__/**',
+  '**/__snapshots__/**',
+  'package-lock.json',
+  'npm-shrinkwrap.json',
+  'pnpm-lock.yaml',
+  'yarn.lock',
+  'bun.lock',
+  'bun.lockb',
+  'deno.lock',
+  'Cargo.lock',
+  'Gemfile.lock',
+  'composer.lock',
+  'poetry.lock',
+  'uv.lock',
+  '**/package-lock.json',
+  '**/npm-shrinkwrap.json',
+  '**/pnpm-lock.yaml',
+  '**/yarn.lock',
+  '**/bun.lock',
+  '**/bun.lockb',
+  '**/deno.lock',
+  '**/Cargo.lock',
+  '**/Gemfile.lock',
+  '**/composer.lock',
+  '**/poetry.lock',
+  '**/uv.lock',
+]);
 
 export function parseArtifactDraft(
   input: string,
   evidence: EvidenceBundle,
+  selectionPolicy: ArtifactSelectionPolicy = {},
 ): ArtifactDraft {
   if (input.length === 0 || input.length > MAX_DRAFT_CHARS) {
     throw new Error('Artifact draft is empty or exceeds its size limit.');
@@ -132,14 +195,6 @@ export function parseArtifactDraft(
       'A breaking title requires an explicit breaking-change constraint.',
     );
   }
-  if (
-    !claims.some(
-      (claim) => claim.kind === 'change' && claim.significance === 'primary',
-    )
-  ) {
-    throw new Error('Artifact draft requires a primary change claim.');
-  }
-
   const rawSections = boundedArray(root.sections, 'Artifact sections', 7);
   const claimKinds = new Map(claims.map((claim) => [claim.id, claim.kind]));
   const sections = rawSections.map((value) =>
@@ -159,6 +214,13 @@ export function parseArtifactDraft(
   ) {
     throw new Error('Every artifact claim must appear in exactly one section.');
   }
+  assertPrimarySelection(
+    title,
+    claims,
+    sections,
+    evidence,
+    selectionPolicy,
+  );
 
   const rawTrailers = boundedArray(root.trailers, 'Artifact trailers', 64);
   const evidenceById = new Map(evidence.items.map((item) => [item.id, item]));
@@ -174,11 +236,11 @@ export function parseArtifactDraft(
   });
 }
 
-function parseTitle(value: unknown): ConventionalTitleDraft {
+function parseTitle(value: unknown): ArtifactTitleDraft {
   const title = objectRecord(value, 'Artifact title');
   const allowedKeys = title.scope === undefined
-    ? ['type', 'breaking', 'subject']
-    : ['type', 'scope', 'breaking', 'subject'];
+    ? ['type', 'breaking', 'subject', 'claimId']
+    : ['type', 'scope', 'breaking', 'subject', 'claimId'];
   requireExactKeys(title, allowedKeys);
   const type = boundedString(title.type, 'Artifact title type', 32);
   if (!TYPE_RE.test(type)) {
@@ -198,12 +260,166 @@ function parseTitle(value: unknown): ConventionalTitleDraft {
     'Artifact title subject',
     MAX_SUBJECT_CHARS,
   );
+  const claimId = boundedString(title.claimId, 'Artifact title claim id', 64);
+  if (!ID_RE.test(claimId)) {
+    throw new Error('Artifact title claim id is invalid.');
+  }
   return {
     type,
     ...(scope === undefined ? {} : { scope }),
     breaking: title.breaking,
     subject,
+    claimId,
   };
+}
+
+function assertPrimarySelection(
+  title: ArtifactTitleDraft,
+  claims: readonly DraftClaim[],
+  sections: readonly ArtifactSectionDraft[],
+  evidence: EvidenceBundle,
+  policy: ArtifactSelectionPolicy,
+): void {
+  const primaryClaims = claims.filter(
+    (claim) => claim.significance === 'primary',
+  );
+  if (
+    primaryClaims.length !== 1 ||
+    primaryClaims[0]?.kind !== 'change' ||
+    primaryClaims[0].basis !== 'observed'
+  ) {
+    throw new Error(
+      'Artifact draft requires exactly one observed primary change claim.',
+    );
+  }
+  const primary = primaryClaims[0];
+  const summarySections = sections.filter((section) => section.kind === 'summary');
+  if (
+    summarySections.length !== 1 ||
+    summarySections[0]?.claimIds.length !== 1 ||
+    summarySections[0].claimIds[0] !== primary.id
+  ) {
+    throw new Error(
+      'Artifact summary must contain only the observed primary change claim.',
+    );
+  }
+  if (title.claimId !== primary.id) {
+    throw new Error('Artifact title must reference the primary change claim.');
+  }
+  if (
+    normalizeTitleAnchor(title.subject) !== normalizeTitleAnchor(primary.text)
+  ) {
+    throw new Error(
+      'Artifact title subject must match the primary change claim.',
+    );
+  }
+
+  const changes = evidence.items.filter(
+    (item): item is Extract<EvidenceBundle['items'][number], { kind: 'change' }> =>
+      item.kind === 'change',
+  );
+  const substantiveIds = new Set(
+    changes
+      .filter((item) => !isSupportingChange(item, policy))
+      .map((item) => item.id),
+  );
+  const changeIds = new Set(changes.map((item) => item.id));
+  if (primary.evidenceIds.some((evidenceId) => !changeIds.has(evidenceId))) {
+    throw new Error(
+      'Artifact primary change may cite only observed change evidence.',
+    );
+  }
+  if (
+    substantiveIds.size > 0 &&
+    primary.evidenceIds.some((evidenceId) => !substantiveIds.has(evidenceId))
+  ) {
+    throw new Error(
+      'Artifact primary change may cite only substantive change evidence when available.',
+    );
+  }
+}
+
+function normalizeTitleAnchor(value: string): string {
+  return value.replace(/\.$/u, '');
+}
+
+function isSupportingChange(
+  item: Extract<EvidenceBundle['items'][number], { kind: 'change' }>,
+  policy: ArtifactSelectionPolicy,
+): boolean {
+  if (!isSupportingPath(item.payload.path, policy)) {
+    return false;
+  }
+  return item.payload.oldPath === undefined ||
+    isSupportingPath(item.payload.oldPath, policy);
+}
+
+export function classifyChangeEvidenceRole(
+  item: Extract<EvidenceBundle['items'][number], { kind: 'change' }>,
+  policy: ArtifactSelectionPolicy = {},
+): ChangeEvidenceRole {
+  return isSupportingChange(item, policy) ? 'supporting' : 'substantive';
+}
+
+function isSupportingPath(
+  path: string,
+  policy: ArtifactSelectionPolicy,
+): boolean {
+  const primaryPaths = validateSelectionPatterns(
+    policy.primaryPaths ?? [],
+    'primary',
+  );
+  if (primaryPaths.some((pattern) => matchesGlob(path, pattern))) {
+    return false;
+  }
+  const supportingPaths = validateSelectionPatterns(
+    policy.supportingPaths ?? DEFAULT_SUPPORTING_PATHS,
+    'supporting',
+  );
+  return supportingPaths.some((pattern) => matchesGlob(path, pattern));
+}
+
+function validateSelectionPatterns(
+  patterns: readonly string[],
+  label: string,
+): readonly string[] {
+  if (!Array.isArray(patterns) || patterns.length > MAX_SELECTION_PATTERNS) {
+    throw new Error(`Artifact ${label} path policy is invalid.`);
+  }
+  for (const pattern of patterns) {
+    if (
+      typeof pattern !== 'string' ||
+      pattern.length === 0 ||
+      pattern.length > MAX_SELECTION_PATTERN_CHARS ||
+      CONTROL_RE.test(pattern) ||
+      pattern.startsWith('/') ||
+      pattern.includes('\\')
+    ) {
+      throw new Error(`Artifact ${label} path policy is invalid.`);
+    }
+  }
+  return patterns;
+}
+
+function matchesGlob(path: string, pattern: string): boolean {
+  let source = '^';
+  for (let index = 0; index < pattern.length; index += 1) {
+    const character = pattern[index];
+    if (character === '*') {
+      if (pattern[index + 1] === '*') {
+        source += '.*';
+        index += 1;
+      } else {
+        source += '[^/]*';
+      }
+    } else if (character === '?') {
+      source += '[^/]';
+    } else {
+      source += character?.replace(/[|\\{}()[\]^$+?.]/gu, '\\$&') ?? '';
+    }
+  }
+  source += '$';
+  return new RegExp(source, 'u').test(path);
 }
 
 function parseClaim(value: unknown): DraftClaim {

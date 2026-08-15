@@ -6,6 +6,7 @@ type ReviewDecision = 'approve' | 'edit' | 'cancel';
 interface RenderedPullRequest {
   readonly title: string;
   readonly body: string;
+  readonly warnings?: readonly string[];
 }
 
 interface SelectChoice<T extends string> {
@@ -42,8 +43,19 @@ interface ReviewModule {
       readonly knownSecrets?: readonly string[];
       readonly titlePolicy?: {
         readonly allowedTypes?: readonly string[];
+        readonly scopeMode?: 'optional' | 'required' | 'forbidden';
+        readonly allowedScopes?: readonly string[];
         readonly targetLength?: number;
         readonly maximumLength?: number;
+      };
+      readonly editorialPolicy?: {
+        readonly maxSentenceWords?: number;
+        readonly duplicateClaimMinWords?: number;
+        readonly vagueAbsolutes?: readonly string[];
+        readonly terminologyGroups?: readonly {
+          readonly name: string;
+          readonly terms: readonly string[];
+        }[];
       };
     },
     dependencies?: {
@@ -114,7 +126,9 @@ test('interactive approval previews the exact title and body', async () => {
     { prompter },
   );
 
-  assert.equal(result, original);
+  assert.equal(result.title, original.title);
+  assert.equal(result.body, original.body);
+  assert.deepEqual(result.warnings, []);
   assert.equal(prompter.previews.length, 1);
   assert.match(prompter.previews[0] ?? '', /fix\(parser\): handle empty tokens/);
   assert.match(
@@ -151,7 +165,7 @@ test('cancellation throws a typed error before the editor can run', async () => 
 
 test('a valid edit is revalidated and previewed again before approval', async () => {
   const edited = Object.freeze({
-    title: 'feat(cli)!: add guarded PR review',
+    title: 'feat(cli)!: validate reviewed pull requests before mutation',
     body: '## Summary\r\n\r\n- Add an explicit review step.\r\n',
   });
   const prompter = new FakePrompter(['edit', 'approve']);
@@ -171,13 +185,19 @@ test('a valid edit is revalidated and previewed again before approval', async ()
     },
   );
 
-  assert.deepEqual(seenByEditor, [original]);
-  assert.deepEqual(result, edited);
+  assert.equal(seenByEditor.length, 1);
+  assert.equal(seenByEditor[0]?.title, original.title);
+  assert.equal(result.title, edited.title);
+  assert.equal(result.body, edited.body);
+  assert.deepEqual(result.warnings, [
+    'Header exceeds the 50-character target.',
+  ]);
   assert.equal(prompter.previews.length, 2);
   assert.match(prompter.previews[0] ?? '', /fix\(parser\)/);
-  assert.doesNotMatch(prompter.previews[0] ?? '', /guarded PR review/);
-  assert.match(prompter.previews[1] ?? '', /feat\(cli\)!: add guarded PR review/);
+  assert.doesNotMatch(prompter.previews[0] ?? '', /reviewed pull requests/);
+  assert.match(prompter.previews[1] ?? '', /reviewed pull requests/);
   assert.match(prompter.previews[1] ?? '', /explicit review step/);
+  assert.match(prompter.previews[1] ?? '', /50-character target/);
 });
 
 test('invalid edited titles and bodies fail closed', async () => {
@@ -206,6 +226,26 @@ test('invalid edited titles and bodies fail closed', async () => {
       'invalid UTF-8 string',
       { title: original.title, body: 'invalid surrogate: \ud800' },
       /UTF-8/i,
+    ],
+    [
+      'invalid UTF-8 title',
+      { title: 'fix: invalid surrogate \ud800', body: original.body },
+      /title must contain valid UTF-8/i,
+    ],
+    [
+      'bidirectional title control',
+      { title: 'fix: safe\u202Etxt', body: original.body },
+      /title contains an unsupported control character/i,
+    ],
+    [
+      'right-to-left title mark',
+      { title: 'fix: safe\u200Ftxt', body: original.body },
+      /title contains an unsupported control character/i,
+    ],
+    [
+      'Arabic letter body mark',
+      { title: original.title, body: 'safe\u061Ctxt' },
+      /control character/i,
     ],
     [
       'oversized body',
@@ -259,4 +299,27 @@ test('edited artifacts containing a known secret are rejected without echoing it
   assert.match(caught.message, /known secret/i);
   assert.doesNotMatch(caught.message, new RegExp(secret));
   assert.doesNotMatch(prompter.previews.join('\n'), new RegExp(secret));
+});
+
+test('recomputes advisory editorial warnings for edited bytes', async () => {
+  const prompter = new FakePrompter(['edit', 'approve']);
+  const result = await review.reviewPullRequest(
+    original,
+    { editorialPolicy: { vagueAbsolutes: ['guarantees'] } },
+    {
+      prompter,
+      editor: {
+        edit: async () => ({
+          title: original.title,
+          body: '## Summary\n\n- This guarantees success.',
+        }),
+      },
+    },
+  );
+
+  assert.match(
+    (result.warnings ?? []).join('\n'),
+    /\[vague-absolute\].*guarantees/iu,
+  );
+  assert.match(prompter.previews[1] ?? '', /Advisories:/u);
 });

@@ -4,6 +4,10 @@ import {
   type RenderedPullRequest,
 } from './artifact-renderer';
 import type { Prompter } from './prompts';
+import {
+  reviewEditorialText,
+  type EditorialPolicy,
+} from './editorial-policy';
 
 export const MAX_PR_BODY_BYTES = 64 * 1024;
 
@@ -19,6 +23,7 @@ export interface PrReviewOptions {
   readonly yes?: boolean;
   readonly knownSecrets?: readonly string[];
   readonly titlePolicy?: ConventionalTitlePolicy;
+  readonly editorialPolicy?: Partial<EditorialPolicy>;
 }
 
 export interface PrReviewDependencies {
@@ -38,7 +43,9 @@ export class PrReviewCancelledError extends Error {
 const CONVENTIONAL_TITLE_RE =
   /^(?<type>[a-z][a-z0-9-]{0,31})(?:\((?<scope>[a-z0-9][a-z0-9._/-]{0,63})\))?(?<breaking>!)?: (?<subject>.+)$/u;
 const UNSAFE_BODY_CONTROL_RE =
-  /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/u;
+  /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]/u;
+const UNSAFE_TITLE_CONTROL_RE =
+  /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]/u;
 const BARE_CARRIAGE_RETURN_RE = /\r(?!\n)/u;
 const REVIEW_CHOICES = Object.freeze([
   Object.freeze({
@@ -72,17 +79,23 @@ function assertKnownSecretAbsent(
   }
 }
 
-function assertValidUtf8(value: string): void {
+function assertValidUtf8(value: string, field: 'title' | 'body'): void {
   const encoded = Buffer.from(value, 'utf8');
   if (encoded.toString('utf8') !== value) {
-    throw new Error('Pull-request body must contain valid UTF-8 text.');
+    throw new Error(`Pull-request ${field} must contain valid UTF-8 text.`);
   }
 }
 
-function assertValidTitle(
+function validateTitleWarnings(
   title: string,
   policy: ConventionalTitlePolicy,
-): void {
+): readonly string[] {
+  assertValidUtf8(title, 'title');
+  if (UNSAFE_TITLE_CONTROL_RE.test(title)) {
+    throw new Error(
+      'Pull-request title contains an unsupported control character.',
+    );
+  }
   const match = CONVENTIONAL_TITLE_RE.exec(title);
   const groups = match?.groups;
   if (
@@ -104,12 +117,13 @@ function assertValidTitle(
   if (rendered.header !== title) {
     throw new Error('Pull-request title must be a Conventional Commit title.');
   }
+  return rendered.warnings;
 }
 
 function assertSafeArtifact(
   artifact: RenderedPullRequest,
   options: PrReviewOptions,
-): void {
+): readonly string[] {
   if (
     typeof artifact !== 'object' ||
     artifact === null ||
@@ -119,11 +133,14 @@ function assertSafeArtifact(
     throw new Error('Pull-request editor returned an invalid artifact.');
   }
   assertKnownSecretAbsent(artifact, options.knownSecrets ?? []);
-  assertValidTitle(artifact.title, options.titlePolicy ?? {});
+  const titleWarnings = validateTitleWarnings(
+    artifact.title,
+    options.titlePolicy ?? {},
+  );
   if (artifact.body.trim().length === 0) {
     throw new Error('Pull-request body must not be empty.');
   }
-  assertValidUtf8(artifact.body);
+  assertValidUtf8(artifact.body, 'body');
   if (Buffer.byteLength(artifact.body, 'utf8') > MAX_PR_BODY_BYTES) {
     throw new Error('Pull-request body exceeds its size limit.');
   }
@@ -133,6 +150,11 @@ function assertSafeArtifact(
   ) {
     throw new Error('Pull-request body contains an unsupported control character.');
   }
+  const editorialWarnings = reviewEditorialText(
+    `${artifact.title}\n${artifact.body}`,
+    options.editorialPolicy ?? {},
+  ).warnings.map((warning) => `[${warning.code}] ${warning.message}`);
+  return Object.freeze([...titleWarnings, ...editorialWarnings]);
 }
 
 function previewMessage(artifact: RenderedPullRequest): string {
@@ -144,6 +166,9 @@ function previewMessage(artifact: RenderedPullRequest): string {
     '',
     'Body:',
     artifact.body,
+    ...(artifact.warnings.length === 0
+      ? []
+      : ['', 'Advisories:', ...artifact.warnings.map((warning) => `- ${warning}`)]),
   ].join('\n');
 }
 
@@ -152,7 +177,7 @@ export async function reviewPullRequest(
   options: PrReviewOptions = {},
   dependencies: PrReviewDependencies = {},
 ): Promise<RenderedPullRequest> {
-  assertSafeArtifact(artifact, options);
+  const initialWarnings = assertSafeArtifact(artifact, options);
   if (options.yes === true) {
     return artifact;
   }
@@ -162,7 +187,10 @@ export async function reviewPullRequest(
     throw new Error('Interactive pull-request review requires a prompter.');
   }
 
-  let current = artifact;
+  let current = Object.freeze({
+    ...artifact,
+    warnings: Object.freeze([...initialWarnings]),
+  });
   for (;;) {
     const decision = await prompter.select(
       previewMessage(current),
@@ -181,7 +209,10 @@ export async function reviewPullRequest(
       throw new Error('Editing a pull-request artifact requires an editor.');
     }
     const edited = await editor.edit(current);
-    assertSafeArtifact(edited, options);
-    current = edited;
+    const warnings = assertSafeArtifact(edited, options);
+    current = Object.freeze({
+      ...edited,
+      warnings: Object.freeze([...warnings]),
+    });
   }
 }

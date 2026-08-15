@@ -54,7 +54,7 @@ test('opens one fixed-argv editor and returns the edited artifact', async (conte
       calls.push({ file, args });
       fs.writeFileSync(
         args[0]!,
-        'fix(editor): validate reviewed output\n\n## Summary\n\n- Keep the human in control.\n',
+        'fix(editor): validate reviewed output\r\n\r\n## Summary\r\n\r\n- Keep the human in control.\r\n',
         'utf8',
       );
       return { pid: 1, output: [], stdout: '', stderr: '', status: 0, signal: null };
@@ -77,7 +77,10 @@ test('opens one fixed-argv editor and returns the edited artifact', async (conte
   assert.equal(calls[0]?.args.length, 1);
   assert.match(calls[0]?.args[0] ?? '', /pull-request\.txt$/u);
   assert.equal(edited.title, 'fix(editor): validate reviewed output');
-  assert.match(edited.body, /human in control/);
+  assert.equal(
+    edited.body,
+    '## Summary\r\n\r\n- Keep the human in control.\r\n',
+  );
   assert.deepEqual(edited.warnings, original.warnings);
   assert.deepEqual(fs.readdirSync(temporaryRoot), []);
 });

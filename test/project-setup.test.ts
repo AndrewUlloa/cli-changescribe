@@ -219,7 +219,7 @@ test('builds gate-aware scripts for a main-only external project', () => {
   );
   assert.equal(
     plan.scripts['feature:pr'],
-    'node ./node_modules/diffwright/bin/diffwright.js pr --base main --create-pr --yes --mode feature',
+    'node ./node_modules/diffwright/bin/diffwright.js pr --base main --create-pr --mode feature',
   );
   assert.equal(plan.effective.stagingPr, null);
   assert.equal(plan.scripts.commit, 'custom commit command');
@@ -241,11 +241,11 @@ test('builds explicit staging and self-hosted scripts', () => {
   );
   assert.equal(
     plan.scripts['feature:pr'],
-    'pnpm run build && node ./bin/diffwright.js pr --base staging --create-pr --yes --mode feature',
+    'pnpm run build && node ./bin/diffwright.js pr --base staging --create-pr --mode feature',
   );
   assert.equal(
     plan.scripts['staging:pr'],
-    'pnpm run build && node ./bin/diffwright.js pr --base main --create-pr --yes --mode release',
+    'pnpm run build && node ./bin/diffwright.js pr --base main --create-pr --mode release',
   );
 });
 
@@ -280,7 +280,7 @@ test('targets the detected release branch in a staging topology', () => {
 
   assert.equal(
     plan.scripts['staging:pr'],
-    'node ./node_modules/diffwright/bin/diffwright.js pr --base master --create-pr --yes --mode release',
+    'node ./node_modules/diffwright/bin/diffwright.js pr --base master --create-pr --mode release',
   );
 });
 
@@ -297,7 +297,7 @@ test('Yarn scripts use the package-manager local executable resolver', () => {
   assert.equal(plan.scripts.commit, 'yarn exec -- diffwright commit --all');
   assert.equal(
     plan.scripts['feature:pr'],
-    'yarn exec -- diffwright pr --base main --create-pr --yes --mode feature',
+    'yarn exec -- diffwright pr --base main --create-pr --mode feature',
   );
 });
 
@@ -336,7 +336,7 @@ test('migrates exact managed values and refuses a namespaced custom collision', 
   );
   assert.equal(
     migrated.scripts['feature:pr'],
-    'node ./node_modules/diffwright/bin/diffwright.js pr --base main --create-pr --yes --mode feature',
+    'node ./node_modules/diffwright/bin/diffwright.js pr --base main --create-pr --mode feature',
   );
   assert.equal('staging:pr' in migrated.scripts, false);
 
@@ -366,7 +366,7 @@ test('updates strict previously generated gate and branch-aware script forms', (
         build: 'tsc',
         commit: 'npm run lint && diffwright commit',
         'feature:pr':
-          'diffwright pr --base main --create-pr --mode feature',
+          'diffwright pr --base main --create-pr --yes --mode feature',
       },
     },
     manager: 'npm',
@@ -384,6 +384,6 @@ test('updates strict previously generated gate and branch-aware script forms', (
   );
   assert.equal(
     plan.scripts['feature:pr'],
-    'node ./node_modules/diffwright/bin/diffwright.js pr --base staging --create-pr --yes --mode feature',
+    'node ./node_modules/diffwright/bin/diffwright.js pr --base staging --create-pr --mode feature',
   );
 });

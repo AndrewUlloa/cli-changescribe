@@ -351,7 +351,7 @@ export function buildScriptPlan(options: {
     'feature:pr',
     commandChain([
       ...selfHostBuildCommands,
-      `${cli} pr --base ${options.baseBranch} --create-pr --yes --mode feature`,
+      `${cli} pr --base ${options.baseBranch} --create-pr --mode feature`,
     ]),
     changes,
   );
@@ -363,7 +363,7 @@ export function buildScriptPlan(options: {
       'staging:pr',
       commandChain([
         ...selfHostBuildCommands,
-        `${cli} pr --base ${releaseBranch} --create-pr --yes --mode release`,
+        `${cli} pr --base ${releaseBranch} --create-pr --mode release`,
       ]),
       changes,
     );

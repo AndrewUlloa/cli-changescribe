@@ -255,7 +255,8 @@ Non-decisions:
   - **Acceptance:**
     - [x] Cancellation performs no GitHub mutation.
     - [x] Noninteractive mutation without `--yes` fails clearly.
-    - [x] Generated project scripts include the intentional automation policy.
+    - [x] Generated scripts preserve interactive review; this repository opts
+      into intentional headless approval in its own `feature:pr` script.
   - **Verify:**
     - `node --test .test-dist/pr-review.test.js`
     - `node --test .test-dist/cli-routing.test.js`
@@ -265,21 +266,23 @@ Non-decisions:
     `test/pr-editor.test.ts`, `test/cli-routing.test.ts`
   - **Size:** M
 
-- [ ] **Task 11: Add advisory plain-language checks and repository policy**
+- [x] **Task 11: Add advisory plain-language checks and repository policy**
   - **Description:** Add warnings for excessive sentence length, vague
     absolutes, duplicate claims, and unstable terminology while keeping
     factual/schema violations blocking and repository overrides authoritative.
   - **Acceptance:**
-    - [ ] Style warnings never masquerade as factual proof.
-    - [ ] Precise code identifiers, URLs, and repository terminology are not
+    - [x] Style warnings never masquerade as factual proof.
+    - [x] Precise code identifiers, URLs, and repository terminology are not
       mechanically rewritten.
-    - [ ] Default policy remains useful without configuration.
+    - [x] Default policy remains useful without configuration.
   - **Verify:**
     - `node --test .test-dist/editorial-policy.test.js`
     - `npm run typecheck`
   - **Depends on:** Tasks 8 and 10
-  - **Files:** `src/change-evidence.ts`, `src/commit.ts`, `src/pr-summary.ts`,
-    `test/editorial-policy.test.ts`
+  - **Files:** `src/artifact-draft.ts`, `src/artifact-renderer.ts`,
+    `src/artifact-critic.ts`, `src/editorial-policy.ts`,
+    `src/repository-policy.ts`, `src/commit.ts`, `src/pr-workflow.ts`,
+    `src/pr-review.ts`, and focused contract/workflow tests
   - **Size:** M
 
 - [ ] **Task 12: Document the evidence contract and migrate examples**
