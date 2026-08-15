@@ -131,20 +131,20 @@ Non-decisions:
 
 ### Phase 3: Pull-Request Correctness
 
-- [ ] **Task 4: Collect authoritative final-branch evidence**
+- [x] **Task 4: Collect authoritative final-branch evidence**
   - **Description:** Replace per-commit patch enrichment with a complete,
     file-aware `merge-base...HEAD` evidence collector including deletions and
     renames. Keep commit messages only as optional context.
   - **Acceptance:**
-    - [ ] Reverted intermediate work is absent from final evidence.
-    - [ ] Deleted and renamed paths are represented.
-    - [ ] Coverage is complete or generation stops explicitly.
+    - [x] Reverted intermediate work is absent from final evidence.
+    - [x] Deleted and renamed paths are represented.
+    - [x] Coverage is complete or generation stops explicitly.
   - **Verify:**
-    - `node --test .test-dist/pr-evidence.test.js`
+    - `node --test .test-dist/git-evidence.test.js`
     - `npm run typecheck`
   - **Depends on:** Task 3
-  - **Files:** `src/pr-summary.ts`, `test/pr-evidence.test.ts`,
-    `test/security.test.ts`
+  - **Files:** `src/git-evidence.ts`, `test/git-evidence.test.ts`,
+    `test/typescript-migration.test.ts`, `test/distribution.test.ts`
   - **Size:** M
 
 - [ ] **Task 5: Replace the PR summary chain with evidence-linked synthesis**
