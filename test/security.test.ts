@@ -22,7 +22,10 @@ interface CommitDependencies {
     };
     credential: { value: string; source: 'shell' };
   };
-  completeChat(): Promise<{
+  completeChat(
+    _resolved: unknown,
+    input: { messages: Array<{ content?: unknown }> },
+  ): Promise<{
     content: string;
     reasoning: string;
     finishReason: string | null;
@@ -198,21 +201,36 @@ test('commit dry-run treats staged filenames as data and never commits', async (
       },
       credential: { value: 'test-key', source: 'shell' },
     }),
-    completeChat: async () => {
+    completeChat: async (_resolved, input) => {
       completionCalls += 1;
+      if (JSON.stringify(input.messages).includes('independently audit')) {
+        return {
+          content: JSON.stringify({
+            schemaVersion: 1,
+            candidates: [{
+              candidateId: 'claim:claim-change',
+              evidenceIds: ['change-1'],
+              supported: true,
+            }],
+          }),
+          reasoning: '',
+          finishReason: 'stop',
+        };
+      }
       return {
         content: JSON.stringify({
           schemaVersion: 1,
           title: {
             type: 'fix',
             breaking: false,
-            subject: 'prevent unsafe command parsing',
+            subject: 'treat staged filenames as data',
+            claimId: 'claim-change',
           },
           claims: [
             {
               id: 'claim-change',
               kind: 'change',
-              text: 'Treat staged filenames as data.',
+              text: 'treat staged filenames as data.',
               evidenceIds: ['change-1'],
               basis: 'observed',
               significance: 'primary',
@@ -229,7 +247,7 @@ test('commit dry-run treats staged filenames as data and never commits', async (
     },
   });
 
-  assert.equal(completionCalls, 1);
+  assert.equal(completionCalls, 2);
   assert.equal(fs.existsSync(marker), false);
   assert.equal(git(directory, ['rev-parse', 'HEAD']).trim(), headBefore);
   assert.match(git(directory, ['status', '--porcelain']), /change\$\(touch/);

@@ -28,27 +28,30 @@ function resolveEditorExecutable(env: NodeJS.ProcessEnv): string {
 }
 
 function serializeArtifact(artifact: RenderedPullRequest): string {
-  return `${artifact.title}\n\n${artifact.body.trimEnd()}\n`;
+  return `${artifact.title}\n\n${artifact.body}`;
 }
 
 function parseArtifact(
   contents: string,
   previous: RenderedPullRequest,
 ): RenderedPullRequest {
-  const normalized = contents.replaceAll('\r\n', '\n');
-  const separator = normalized.indexOf('\n\n');
+  const lfSeparator = contents.indexOf('\n\n');
+  const crlfSeparator = contents.indexOf('\r\n\r\n');
+  const usesCrlf = crlfSeparator >= 0 &&
+    (lfSeparator < 0 || crlfSeparator < lfSeparator);
+  const separator = usesCrlf ? crlfSeparator : lfSeparator;
   if (separator < 1) {
     throw new Error(
       'Edited pull-request artifact must keep the title and body separated by a blank line.',
     );
   }
-  const title = normalized.slice(0, separator);
-  if (title.includes('\n')) {
+  const title = contents.slice(0, separator);
+  if (title.includes('\n') || title.includes('\r')) {
     throw new Error('Edited pull-request title must occupy one line.');
   }
   return Object.freeze({
     title,
-    body: normalized.slice(separator + 2).replace(/\n$/u, ''),
+    body: contents.slice(separator + (usesCrlf ? 4 : 2)),
     warnings: previous.warnings,
   });
 }

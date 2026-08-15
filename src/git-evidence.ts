@@ -207,6 +207,95 @@ export function assertEvidenceSnapshotCurrent(
       'Repository HEAD changed after evidence collection. Regenerate the artifact before mutation.',
     );
   }
+  if (snapshot.baseRef !== undefined && snapshot.baseSha !== undefined) {
+    const currentBase = revParse(
+      `${snapshot.baseRef}^{commit}`,
+      cwd,
+      runner,
+      'base',
+    );
+    if (currentBase !== snapshot.baseSha) {
+      throw new Error(
+        'Repository base changed after evidence collection. Regenerate the artifact before mutation.',
+      );
+    }
+    if (snapshot.mergeBaseSha !== undefined) {
+      const currentMergeBase = runGit(
+        ['merge-base', currentBase, currentHead],
+        cwd,
+        runner,
+        'Merge-base revalidation',
+      ).trim();
+      if (currentMergeBase !== snapshot.mergeBaseSha) {
+        throw new Error(
+          'Repository merge base changed after evidence collection. Regenerate the artifact before mutation.',
+        );
+      }
+    }
+  }
+}
+
+export function assertRemoteEvidenceBaseCurrent(
+  snapshot: EvidenceBundle['snapshot'],
+  baseBranch: string,
+  cwd = process.cwd(),
+  runner: CommandRunner = defaultCommandRunner,
+): void {
+  const validatedBase = validateBaseBranch(baseBranch, cwd, runner);
+  if (snapshot.baseSha === undefined) {
+    throw new Error(
+      'Pull-request evidence did not pin a base commit before mutation.',
+    );
+  }
+  const remoteRef = `refs/heads/${validatedBase}`;
+  const remoteSha = remoteRefSha(remoteRef, cwd, runner);
+  if (remoteSha !== snapshot.baseSha) {
+    throw new Error(
+      'Remote base changed after evidence collection. Regenerate the artifact before mutation.',
+    );
+  }
+}
+
+export function assertRemoteEvidenceHeadCurrent(
+  snapshot: EvidenceBundle['snapshot'],
+  headBranch: string,
+  cwd = process.cwd(),
+  runner: CommandRunner = defaultCommandRunner,
+): void {
+  const validatedHead = validateBaseBranch(headBranch, cwd, runner);
+  const remoteSha = remoteRefSha(
+    `refs/heads/${validatedHead}`,
+    cwd,
+    runner,
+  );
+  if (remoteSha !== snapshot.headSha) {
+    throw new Error(
+      'Remote feature branch does not match the reviewed evidence. Push the reviewed HEAD and retry.',
+    );
+  }
+}
+
+function remoteRefSha(
+  remoteRef: string,
+  cwd: string,
+  runner: CommandRunner,
+): string {
+  const output = runGit(
+    ['ls-remote', '--exit-code', 'origin', remoteRef],
+    cwd,
+    runner,
+    'Remote base revalidation',
+  );
+  const match = /^(?<sha>[0-9a-f]{40,64})\t(?<ref>refs\/heads\/.+)\r?\n?$/u.exec(
+    output,
+  );
+  if (
+    match?.groups?.sha === undefined ||
+    match.groups.ref !== remoteRef
+  ) {
+    throw new Error('Remote reference revalidation returned an invalid result.');
+  }
+  return match.groups.sha;
 }
 
 function validateBaseBranch(

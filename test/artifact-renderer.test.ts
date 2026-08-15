@@ -6,6 +6,8 @@ interface RendererModule {
     draft: { type: string; scope?: string; breaking: boolean; subject: string },
     policy?: {
       allowedTypes?: readonly string[];
+      scopeMode?: 'optional' | 'required' | 'forbidden';
+      allowedScopes?: readonly string[];
       targetLength?: number;
       maximumLength?: number;
     },
@@ -13,10 +15,14 @@ interface RendererModule {
   renderPullRequestArtifact(
     draft: unknown,
     evidence: unknown,
+    titlePolicy?: object,
+    editorialPolicy?: object,
   ): { title: string; body: string; warnings: readonly string[] };
   renderCommitArtifact(
     draft: unknown,
     evidence: unknown,
+    titlePolicy?: object,
+    editorialPolicy?: object,
   ): { title: string; message: string; warnings: readonly string[] };
 }
 
@@ -106,13 +112,14 @@ function draftJson(options: { includeVerification?: boolean } = {}): string {
       type: 'fix',
       scope: 'parser',
       breaking: false,
-      subject: 'handle empty tokens',
+      subject: 'handle empty tokens in the parser',
+      claimId: 'claim-change',
     },
     claims: [
       {
         id: 'claim-change',
         kind: 'change',
-        text: 'Handle empty tokens in the parser.',
+        text: 'handle empty tokens in the parser.',
         evidenceIds: ['change-1'],
         basis: 'observed',
         significance: 'primary',
@@ -171,6 +178,53 @@ test('renders standard, scoped, and breaking Conventional Commit titles', () => 
   );
 });
 
+test('enforces repository type and scope policy without changing grammar', () => {
+  assert.equal(
+    renderer.renderConventionalTitle(
+      {
+        type: 'security',
+        scope: 'cli',
+        breaking: false,
+        subject: 'reject unsafe configuration',
+      },
+      {
+        allowedTypes: ['security'],
+        scopeMode: 'required',
+        allowedScopes: ['cli'],
+      },
+    ).header,
+    'security(cli): reject unsafe configuration',
+  );
+  assert.throws(
+    () =>
+      renderer.renderConventionalTitle(
+        {
+          type: 'security',
+          breaking: false,
+          subject: 'reject unsafe configuration',
+        },
+        {
+          allowedTypes: ['security'],
+          scopeMode: 'required',
+          allowedScopes: ['cli'],
+        },
+      ),
+    /scope is required/i,
+  );
+  assert.equal(
+    renderer.renderConventionalTitle(
+      {
+        type: 'fix',
+        scope: 'cli',
+        breaking: false,
+        subject: 'reject unsafe configuration',
+      },
+      { scopeMode: 'forbidden' },
+    ).header,
+    'fix: reject unsafe configuration',
+  );
+});
+
 test('renders an adaptive wrapped commit without forced filler', () => {
   const evidence = bundle();
   const draft = artifactDraft.parseArtifactDraft(
@@ -180,13 +234,14 @@ test('renders an adaptive wrapped commit without forced filler', () => {
         type: 'fix',
         scope: 'parser',
         breaking: false,
-        subject: 'handle empty tokens',
+        subject: 'handle empty tokens without throwing from the parser',
+        claimId: 'claim-change',
       },
       claims: [
         {
           id: 'claim-change',
           kind: 'change',
-          text: 'Handle empty tokens without throwing from the parser.',
+          text: 'handle empty tokens without throwing from the parser.',
           evidenceIds: ['change-1'],
           basis: 'observed',
           significance: 'primary',
@@ -212,11 +267,14 @@ test('renders an adaptive wrapped commit without forced filler', () => {
   );
   const artifact = renderer.renderCommitArtifact(draft, evidence);
 
-  assert.equal(artifact.title, 'fix(parser): handle empty tokens');
+  assert.equal(
+    artifact.title,
+    'fix(parser): handle empty tokens without throwing from the parser',
+  );
   assert.equal(
     artifact.message,
     [
-      'fix(parser): handle empty tokens',
+      'fix(parser): handle empty tokens without throwing from the parser',
       '',
       'Keep empty input compatible with existing parser callers.',
       '',
@@ -237,7 +295,7 @@ test('uses a subject-only commit when no durable body context is supported', () 
   );
   assert.equal(
     renderer.renderCommitArtifact(draft, evidence).message,
-    'fix(parser): handle empty tokens',
+    'fix(parser): handle empty tokens in the parser',
   );
 });
 
@@ -282,13 +340,53 @@ test('treats 50 as a target and 72 as the hard default maximum', () => {
   );
 });
 
+test('rejects Unicode controls and invalid UTF-8 in canonical titles', () => {
+  for (const subject of [
+    'spoof\u202Etxt',
+    'isolate\u2066txt',
+    'arabic-mark\u061Ctxt',
+    'right-to-left-mark\u200Ftxt',
+    'control\u0085txt',
+    'surrogate\ud800txt',
+  ]) {
+    assert.throws(
+      () =>
+        renderer.renderConventionalTitle({
+          type: 'fix',
+          breaking: false,
+          subject,
+        }),
+      /subject is invalid/i,
+    );
+  }
+});
+
+test('adds editorial findings as warnings without rewriting rendered bytes', () => {
+  const evidence = bundle();
+  const draft = artifactDraft.parseArtifactDraft(
+    draftJson({ includeVerification: false }),
+    evidence,
+  );
+  const baseline = renderer.renderCommitArtifact(draft, evidence);
+  const reviewed = renderer.renderCommitArtifact(draft, evidence, {}, {
+    vagueAbsolutes: ['handle'],
+  });
+
+  assert.equal(reviewed.message, baseline.message);
+  assert.equal(reviewed.title, baseline.title);
+  assert.match(
+    reviewed.warnings.join('\n'),
+    /\[vague-absolute\].*handle/i,
+  );
+});
+
 test('renders adaptive PR sections and exact receipts, not model test prose', () => {
   const evidence = bundle();
   const draft = artifactDraft.parseArtifactDraft(draftJson(), evidence);
   const artifact = renderer.renderPullRequestArtifact(draft, evidence);
 
-  assert.equal(artifact.title, 'fix(parser): handle empty tokens');
-  assert.match(artifact.body, /## Summary\n\n- Handle empty tokens/);
+  assert.equal(artifact.title, 'fix(parser): handle empty tokens in the parser');
+  assert.match(artifact.body, /## Summary\n\n- handle empty tokens in the parser\./);
   assert.match(artifact.body, /## Verification\n\n- Passed: `npm test`/);
   assert.doesNotMatch(artifact.body, /Tests passed somehow/);
   assert.doesNotMatch(artifact.body, /## Risks/);

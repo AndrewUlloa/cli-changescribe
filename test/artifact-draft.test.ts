@@ -2,9 +2,22 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 interface ArtifactDraftModule {
-  parseArtifactDraft(input: string, evidence: unknown): {
+  parseArtifactDraft(
+    input: string,
+    evidence: unknown,
+    selectionPolicy?: {
+      supportingPaths?: readonly string[];
+      primaryPaths?: readonly string[];
+    },
+  ): {
     schemaVersion: 1;
-    title: { type: string; scope?: string; breaking: boolean; subject: string };
+    title: {
+      type: string;
+      scope?: string;
+      breaking: boolean;
+      subject: string;
+      claimId: string;
+    };
     claims: Array<{ id: string; text: string }>;
     sections: Array<{ kind: string; claimIds: string[] }>;
     trailers: Array<{ token: string; value: string; evidenceIds: string[] }>;
@@ -79,13 +92,14 @@ function validDraft(): Record<string, unknown> {
       type: 'fix',
       scope: 'parser',
       breaking: false,
-      subject: 'handle empty tokens',
+      subject: 'handle empty tokens in src/parser.ts',
+      claimId: 'claim-change',
     },
     claims: [
       {
         id: 'claim-change',
         kind: 'change',
-        text: 'Handle empty tokens in src/parser.ts.',
+        text: 'handle empty tokens in src/parser.ts.',
         evidenceIds: ['change-1'],
         basis: 'observed',
         significance: 'primary',
@@ -124,6 +138,7 @@ test('parses a bounded evidence-linked JSON draft and freezes it', () => {
     evidenceBundle(),
   );
   assert.equal(draft.title.scope, 'parser');
+  assert.equal(draft.title.claimId, 'claim-change');
   assert.equal(draft.claims.length, 3);
   assert.equal(draft.trailers[0].token, 'Refs');
   assert.deepEqual(draft.trailers[0].evidenceIds, ['constraint-issue']);
@@ -235,6 +250,459 @@ test('requires each claim exactly once and rejects duplicate references', () => 
         evidenceBundle(),
       ),
     /more than one section/,
+  );
+});
+
+test('requires one observed primary change as the sole summary and title anchor', () => {
+  const duplicatePrimary = validDraft();
+  const duplicateClaims = duplicatePrimary.claims as Array<
+    Record<string, unknown>
+  >;
+  duplicateClaims[1].significance = 'primary';
+  assert.throws(
+    () =>
+      artifactDraft.parseArtifactDraft(
+        JSON.stringify(duplicatePrimary),
+        evidenceBundle(),
+      ),
+    /exactly one observed primary change claim/,
+  );
+
+  const providedPrimary = validDraft();
+  const providedClaims = providedPrimary.claims as Array<
+    Record<string, unknown>
+  >;
+  providedClaims[0].basis = 'provided';
+  providedClaims[0].evidenceIds = ['change-1', 'intent-1'];
+  assert.throws(
+    () =>
+      artifactDraft.parseArtifactDraft(
+        JSON.stringify(providedPrimary),
+        evidenceBundle(),
+      ),
+    /exactly one observed primary change claim/,
+  );
+
+  const extraSummaryClaim = validDraft();
+  const summary = (
+    extraSummaryClaim.sections as Array<{
+      kind: string;
+      claimIds: string[];
+    }>
+  ).find((section) => section.kind === 'summary');
+  assert.ok(summary);
+  summary.claimIds.push('claim-rationale');
+  const rationale = (
+    extraSummaryClaim.sections as Array<{
+      kind: string;
+      claimIds: string[];
+    }>
+  ).find((section) => section.kind === 'rationale');
+  assert.ok(rationale);
+  rationale.claimIds = [];
+  assert.throws(
+    () =>
+      artifactDraft.parseArtifactDraft(
+        JSON.stringify(extraSummaryClaim),
+        evidenceBundle(),
+      ),
+    /incompatible section|summary must contain only/i,
+  );
+
+  const wrongTitleClaim = validDraft();
+  (wrongTitleClaim.title as Record<string, unknown>).claimId =
+    'claim-rationale';
+  assert.throws(
+    () =>
+      artifactDraft.parseArtifactDraft(
+        JSON.stringify(wrongTitleClaim),
+        evidenceBundle(),
+      ),
+    /title must reference the primary change claim/,
+  );
+
+  const unrelatedTitle = validDraft();
+  (unrelatedTitle.title as Record<string, unknown>).subject =
+    'update the project plan';
+  assert.throws(
+    () =>
+      artifactDraft.parseArtifactDraft(
+        JSON.stringify(unrelatedTitle),
+        evidenceBundle(),
+      ),
+    /title subject must match the primary change claim/,
+  );
+});
+
+test('prevents supporting plan changes from displacing substantive source changes', () => {
+  const evidence = changeEvidence.createEvidenceBundle({
+    snapshot: { headSha: 'b'.repeat(40) },
+    items: [
+      {
+        id: 'change-source',
+        kind: 'change',
+        basis: 'observed',
+        source: { kind: 'git-diff', locator: 'src/commit.ts' },
+        payload: {
+          status: 'modified',
+          path: 'src/commit.ts',
+          additions: 120,
+          deletions: 60,
+          binary: false,
+          patch: '+export function collectEvidence() {}\n',
+        },
+      },
+      {
+        id: 'change-plan',
+        kind: 'change',
+        basis: 'observed',
+        source: {
+          kind: 'git-diff',
+          locator: 'specs/evidence-backed-generation-v2/PLAN.md',
+        },
+        payload: {
+          status: 'modified',
+          path: 'specs/evidence-backed-generation-v2/PLAN.md',
+          additions: 1,
+          deletions: 1,
+          binary: false,
+          patch: '- [ ] Task\n+ [x] Task\n',
+        },
+      },
+    ],
+    receipts: [],
+    coverage: { complete: true, gaps: [] },
+  });
+  const planPrimary = {
+    schemaVersion: 1,
+    title: {
+      type: 'docs',
+      breaking: false,
+      subject: 'mark the plan task complete',
+      claimId: 'claim-plan',
+    },
+    claims: [
+      {
+        id: 'claim-source',
+        kind: 'change',
+        text: 'collect staged evidence.',
+        evidenceIds: ['change-source'],
+        basis: 'observed',
+        significance: 'supporting',
+      },
+      {
+        id: 'claim-plan',
+        kind: 'change',
+        text: 'mark the plan task complete.',
+        evidenceIds: ['change-plan'],
+        basis: 'observed',
+        significance: 'primary',
+      },
+    ],
+    sections: [
+      { kind: 'summary', claimIds: ['claim-plan'] },
+      { kind: 'changes', claimIds: ['claim-source'] },
+    ],
+    trailers: [],
+  };
+
+  assert.throws(
+    () =>
+      artifactDraft.parseArtifactDraft(JSON.stringify(planPrimary), evidence),
+    /primary change may cite only substantive change evidence/,
+  );
+
+  const paddedPlanPrimary = structuredClone(planPrimary);
+  paddedPlanPrimary.claims[1].evidenceIds = [
+    'change-plan',
+    'change-source',
+  ];
+  assert.throws(
+    () =>
+      artifactDraft.parseArtifactDraft(
+        JSON.stringify(paddedPlanPrimary),
+        evidence,
+      ),
+    /primary change may cite only substantive change evidence/,
+  );
+
+  const sourcePrimary = structuredClone(planPrimary);
+  sourcePrimary.title = {
+    type: 'feat',
+    breaking: false,
+    subject: 'collect staged evidence',
+    claimId: 'claim-source',
+  };
+  sourcePrimary.claims[0].significance = 'primary';
+  sourcePrimary.claims[1].significance = 'supporting';
+  sourcePrimary.sections = [
+    { kind: 'summary', claimIds: ['claim-source'] },
+    { kind: 'changes', claimIds: ['claim-plan'] },
+  ];
+  assert.doesNotThrow(() =>
+    artifactDraft.parseArtifactDraft(JSON.stringify(sourcePrimary), evidence),
+  );
+});
+
+test('treats executable GitHub configuration and substantive rename origins as primary', () => {
+  const evidence = changeEvidence.createEvidenceBundle({
+    snapshot: { headSha: 'f'.repeat(40) },
+    items: [
+      {
+        id: 'change-workflow',
+        kind: 'change',
+        basis: 'observed',
+        source: { kind: 'git-diff', locator: '.github/workflows/release.yml' },
+        payload: {
+          status: 'modified',
+          path: '.github/workflows/release.yml',
+          additions: 4,
+          deletions: 1,
+          binary: false,
+          patch: '+permissions:\n+  contents: write\n',
+        },
+      },
+      {
+        id: 'change-rename',
+        kind: 'change',
+        basis: 'observed',
+        source: { kind: 'git-diff', locator: 'docs/legacy.ts' },
+        payload: {
+          status: 'renamed',
+          oldPath: 'src/legacy.ts',
+          path: 'docs/legacy.ts',
+          additions: 0,
+          deletions: 0,
+          binary: false,
+          patch: 'similarity index 100%\n',
+        },
+      },
+    ],
+    receipts: [],
+    coverage: { complete: true, gaps: [] },
+  });
+  const workflowPrimary = {
+    schemaVersion: 1,
+    title: {
+      type: 'ci',
+      breaking: false,
+      subject: 'grant release workflow write access',
+      claimId: 'claim-workflow',
+    },
+    claims: [
+      {
+        id: 'claim-workflow',
+        kind: 'change',
+        text: 'grant release workflow write access.',
+        evidenceIds: ['change-workflow'],
+        basis: 'observed',
+        significance: 'primary',
+      },
+      {
+        id: 'claim-rename',
+        kind: 'change',
+        text: 'move the legacy source into documentation.',
+        evidenceIds: ['change-rename'],
+        basis: 'observed',
+        significance: 'supporting',
+      },
+    ],
+    sections: [
+      { kind: 'summary', claimIds: ['claim-workflow'] },
+      { kind: 'changes', claimIds: ['claim-rename'] },
+    ],
+    trailers: [],
+  };
+
+  assert.doesNotThrow(() =>
+    artifactDraft.parseArtifactDraft(JSON.stringify(workflowPrimary), evidence),
+  );
+  const renamePrimary = structuredClone(workflowPrimary);
+  renamePrimary.title = {
+    type: 'refactor',
+    breaking: false,
+    subject: 'move the legacy source into documentation',
+    claimId: 'claim-rename',
+  };
+  renamePrimary.claims[0].significance = 'supporting';
+  renamePrimary.claims[1].significance = 'primary';
+  renamePrimary.sections = [
+    { kind: 'summary', claimIds: ['claim-rename'] },
+    { kind: 'changes', claimIds: ['claim-workflow'] },
+  ];
+  assert.doesNotThrow(() =>
+    artifactDraft.parseArtifactDraft(JSON.stringify(renamePrimary), evidence),
+  );
+});
+
+test('allows supporting-only work and honors primary and supporting path overrides', () => {
+  const docsOnlyEvidence = changeEvidence.createEvidenceBundle({
+    snapshot: { headSha: 'd'.repeat(40) },
+    items: [
+      {
+        id: 'change-docs',
+        kind: 'change',
+        basis: 'observed',
+        source: { kind: 'git-diff', locator: 'docs/guide.md' },
+        payload: {
+          status: 'modified',
+          path: 'docs/guide.md',
+          additions: 2,
+          deletions: 0,
+          binary: false,
+          patch: '+Explain setup.\n',
+        },
+      },
+    ],
+    receipts: [],
+    coverage: { complete: true, gaps: [] },
+  });
+  const docsOnlyDraft = {
+    schemaVersion: 1,
+    title: {
+      type: 'docs',
+      breaking: false,
+      subject: 'explain setup',
+      claimId: 'claim-docs',
+    },
+    claims: [
+      {
+        id: 'claim-docs',
+        kind: 'change',
+        text: 'explain setup.',
+        evidenceIds: ['change-docs'],
+        basis: 'observed',
+        significance: 'primary',
+      },
+    ],
+    sections: [{ kind: 'summary', claimIds: ['claim-docs'] }],
+    trailers: [],
+  };
+  assert.doesNotThrow(() =>
+    artifactDraft.parseArtifactDraft(
+      JSON.stringify(docsOnlyDraft),
+      docsOnlyEvidence,
+    ),
+  );
+  const testOnlyEvidence = changeEvidence.createEvidenceBundle({
+    snapshot: { headSha: 'e'.repeat(40) },
+    items: [
+      {
+        id: 'change-test',
+        kind: 'change',
+        basis: 'observed',
+        source: { kind: 'git-diff', locator: 'test/parser.test.ts' },
+        payload: {
+          status: 'modified',
+          path: 'test/parser.test.ts',
+          additions: 3,
+          deletions: 0,
+          binary: false,
+          patch: '+test("empty input", () => {});\n',
+        },
+      },
+    ],
+    receipts: [],
+    coverage: { complete: true, gaps: [] },
+  });
+  const testOnlyDraft = structuredClone(docsOnlyDraft);
+  testOnlyDraft.title.type = 'test';
+  testOnlyDraft.title.subject = 'cover empty parser input';
+  testOnlyDraft.title.claimId = 'claim-test';
+  testOnlyDraft.claims[0].id = 'claim-test';
+  testOnlyDraft.claims[0].text = 'cover empty parser input.';
+  testOnlyDraft.claims[0].evidenceIds = ['change-test'];
+  testOnlyDraft.sections[0].claimIds = ['claim-test'];
+  assert.doesNotThrow(() =>
+    artifactDraft.parseArtifactDraft(
+      JSON.stringify(testOnlyDraft),
+      testOnlyEvidence,
+    ),
+  );
+
+  const evidence = changeEvidence.createEvidenceBundle({
+    snapshot: { headSha: 'c'.repeat(40) },
+    items: [
+      {
+        id: 'change-docs',
+        kind: 'change',
+        basis: 'observed',
+        source: { kind: 'git-diff', locator: 'docs/guide.md' },
+        payload: {
+          status: 'modified',
+          path: 'docs/guide.md',
+          additions: 2,
+          deletions: 0,
+          binary: false,
+          patch: '+Explain setup.\n',
+        },
+      },
+      {
+        id: 'change-generated',
+        kind: 'change',
+        basis: 'observed',
+        source: { kind: 'git-diff', locator: 'generated/client.ts' },
+        payload: {
+          status: 'modified',
+          path: 'generated/client.ts',
+          additions: 1,
+          deletions: 1,
+          binary: false,
+          patch: '-old\n+new\n',
+        },
+      },
+    ],
+    receipts: [],
+    coverage: { complete: true, gaps: [] },
+  });
+  const docsDraft = {
+    schemaVersion: 1,
+    title: {
+      type: 'docs',
+      breaking: false,
+      subject: 'explain setup',
+      claimId: 'claim-docs',
+    },
+    claims: [
+      {
+        id: 'claim-docs',
+        kind: 'change',
+        text: 'explain setup.',
+        evidenceIds: ['change-docs'],
+        basis: 'observed',
+        significance: 'primary',
+      },
+      {
+        id: 'claim-generated',
+        kind: 'change',
+        text: 'Refresh the generated client.',
+        evidenceIds: ['change-generated'],
+        basis: 'observed',
+        significance: 'supporting',
+      },
+    ],
+    sections: [
+      { kind: 'summary', claimIds: ['claim-docs'] },
+      { kind: 'changes', claimIds: ['claim-generated'] },
+    ],
+    trailers: [],
+  };
+
+  assert.throws(
+    () =>
+      artifactDraft.parseArtifactDraft(JSON.stringify(docsDraft), evidence),
+    /primary change may cite only substantive change evidence/,
+  );
+  assert.doesNotThrow(() =>
+    artifactDraft.parseArtifactDraft(JSON.stringify(docsDraft), evidence, {
+      supportingPaths: ['docs/**', 'generated/**'],
+    }),
+  );
+  assert.doesNotThrow(() =>
+    artifactDraft.parseArtifactDraft(JSON.stringify(docsDraft), evidence, {
+      supportingPaths: ['docs/**'],
+      primaryPaths: ['docs/**'],
+    }),
   );
 });
 

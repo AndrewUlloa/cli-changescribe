@@ -9,6 +9,10 @@ import {
   type EvidenceBundle,
   type VerificationReceipt,
 } from './change-evidence';
+import {
+  reviewEditorialText,
+  type EditorialPolicy,
+} from './editorial-policy';
 
 export const STANDARD_COMMIT_TYPES = Object.freeze([
   'build',
@@ -26,6 +30,8 @@ export const STANDARD_COMMIT_TYPES = Object.freeze([
 
 export interface ConventionalTitlePolicy {
   allowedTypes?: readonly string[];
+  scopeMode?: 'optional' | 'required' | 'forbidden';
+  allowedScopes?: readonly string[];
   targetLength?: number;
   maximumLength?: number;
 }
@@ -67,7 +73,8 @@ const SECTION_HEADINGS: Readonly<Record<ArtifactSectionKind, string>> = {
 };
 const TYPE_RE = /^[a-z][a-z0-9-]{0,31}$/u;
 const SCOPE_RE = /^[a-z0-9][a-z0-9._/-]{0,63}$/u;
-const CONTROL_OR_LINE_RE = /[\u0000-\u001f\u007f\u2028\u2029]/u;
+const CONTROL_OR_LINE_RE =
+  /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]/u;
 
 export function renderConventionalTitle(
   draft: ConventionalTitleDraft,
@@ -76,6 +83,31 @@ export function renderConventionalTitle(
   const allowedTypes = new Set(
     policy.allowedTypes ?? STANDARD_COMMIT_TYPES,
   );
+  if (
+    allowedTypes.size === 0 ||
+    [...allowedTypes].some((type) => !TYPE_RE.test(type))
+  ) {
+    throw new Error('Conventional Commit type policy is invalid.');
+  }
+  const scopeMode = policy.scopeMode ?? 'optional';
+  if (
+    scopeMode !== 'optional' &&
+    scopeMode !== 'required' &&
+    scopeMode !== 'forbidden'
+  ) {
+    throw new Error('Conventional Commit scope policy is invalid.');
+  }
+  const allowedScopes = policy.allowedScopes === undefined
+    ? undefined
+    : new Set(policy.allowedScopes);
+  if (
+    (allowedScopes !== undefined &&
+      (allowedScopes.size === 0 ||
+        [...allowedScopes].some((scope) => !SCOPE_RE.test(scope)))) ||
+    (scopeMode === 'forbidden' && allowedScopes !== undefined)
+  ) {
+    throw new Error('Conventional Commit scope policy is invalid.');
+  }
   const targetLength = policy.targetLength ?? 50;
   const maximumLength = policy.maximumLength ?? 72;
   validateLengths(targetLength, maximumLength);
@@ -85,10 +117,30 @@ export function renderConventionalTitle(
   if (draft.scope !== undefined && !SCOPE_RE.test(draft.scope)) {
     throw new Error('Conventional Commit scope is invalid.');
   }
+  let scope = draft.scope;
+  if (scopeMode === 'forbidden') {
+    scope = undefined;
+  }
+  if (
+    scope !== undefined &&
+    allowedScopes !== undefined &&
+    !allowedScopes.has(scope)
+  ) {
+    if (scopeMode === 'required') {
+      throw new Error(
+        'Conventional Commit scope is not allowed by repository policy.',
+      );
+    }
+    scope = undefined;
+  }
+  if (scopeMode === 'required' && scope === undefined) {
+    throw new Error('Conventional Commit scope is required by repository policy.');
+  }
   if (
     draft.subject.trim() !== draft.subject ||
     draft.subject.length === 0 ||
-    CONTROL_OR_LINE_RE.test(draft.subject)
+    CONTROL_OR_LINE_RE.test(draft.subject) ||
+    Buffer.from(draft.subject, 'utf8').toString('utf8') !== draft.subject
   ) {
     throw new Error('Conventional Commit subject is invalid.');
   }
@@ -97,7 +149,7 @@ export function renderConventionalTitle(
   }
 
   const header = `${draft.type}${
-    draft.scope === undefined ? '' : `(${draft.scope})`
+    scope === undefined ? '' : `(${scope})`
   }${draft.breaking ? '!' : ''}: ${draft.subject}`;
   if (header.length > maximumLength) {
     throw new Error(
@@ -118,6 +170,7 @@ export function renderPullRequestArtifact(
   draft: ArtifactDraft,
   evidence: EvidenceBundle,
   policy: ConventionalTitlePolicy = {},
+  editorialPolicy: Partial<EditorialPolicy> = {},
 ): RenderedPullRequest {
   if (!evidence.coverage.complete) {
     throw new Error(
@@ -148,10 +201,18 @@ export function renderPullRequestArtifact(
   if (bodySections.length === 0) {
     throw new Error('Pull-request draft has no supported content to render.');
   }
+  const body = `${bodySections.join('\n\n')}\n`;
+  const editorialWarnings = reviewEditorialText(
+    `${renderedTitle.header}\n${body}`,
+    editorialPolicy,
+  ).warnings.map((warning) => `[${warning.code}] ${warning.message}`);
   return Object.freeze({
     title: renderedTitle.header,
-    body: `${bodySections.join('\n\n')}\n`,
-    warnings: renderedTitle.warnings,
+    body,
+    warnings: Object.freeze([
+      ...renderedTitle.warnings,
+      ...editorialWarnings,
+    ]),
   });
 }
 
@@ -159,6 +220,7 @@ export function renderCommitArtifact(
   draft: ArtifactDraft,
   evidence: EvidenceBundle,
   policy: ConventionalTitlePolicy = {},
+  editorialPolicy: Partial<EditorialPolicy> = {},
 ): RenderedCommit {
   if (!evidence.coverage.complete) {
     throw new Error(
@@ -237,10 +299,17 @@ export function renderCommitArtifact(
     ...bodyBlocks,
     ...(trailerBlock.length === 0 ? [] : [trailerBlock]),
   ].join('\n\n');
+  const editorialWarnings = reviewEditorialText(
+    message,
+    editorialPolicy,
+  ).warnings.map((warning) => `[${warning.code}] ${warning.message}`);
   return Object.freeze({
     title: renderedTitle.header,
     message,
-    warnings: renderedTitle.warnings,
+    warnings: Object.freeze([
+      ...renderedTitle.warnings,
+      ...editorialWarnings,
+    ]),
   });
 }
 
