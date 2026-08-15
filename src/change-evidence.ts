@@ -185,6 +185,14 @@ export function serializeEvidenceBundle(bundle: EvidenceBundle): string {
   return JSON.stringify(bundle);
 }
 
+export function createVerificationReceipt(
+  input: VerificationReceipt,
+): VerificationReceipt {
+  const receipt = structuredClone(input);
+  validateReceipt(receipt);
+  return deepFreeze(receipt);
+}
+
 export function assertSupportedClaims(
   bundle: EvidenceBundle,
   claims: readonly DraftClaim[],
