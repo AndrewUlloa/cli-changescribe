@@ -199,6 +199,24 @@ test('requires each claim exactly once and rejects duplicate references', () => 
   );
 });
 
+test('rejects claims assigned to semantically incompatible sections', () => {
+  const candidate = validDraft();
+  const sections = candidate.sections as Array<{
+    kind: string;
+    claimIds: string[];
+  }>;
+  sections[0] = { kind: 'verification', claimIds: ['claim-change'] };
+  sections[2] = { kind: 'summary', claimIds: ['claim-verification'] };
+  assert.throws(
+    () =>
+      artifactDraft.parseArtifactDraft(
+        JSON.stringify(candidate),
+        evidenceBundle(),
+      ),
+    /incompatible section/,
+  );
+});
+
 test('does not echo rejected claim text or unexpected field values', () => {
   const secret = 'gsk_sensitive_value';
   const candidate = validDraft();

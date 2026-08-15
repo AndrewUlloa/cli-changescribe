@@ -87,6 +87,7 @@ test('all application sources are TypeScript and compiled output exists', () => 
   const expectedModules = [
     'arguments',
     'artifact-draft',
+    'artifact-renderer',
     'change-evidence',
     'cli',
     'commit',
