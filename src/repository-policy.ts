@@ -24,15 +24,10 @@ export interface RepositoryTitlePolicy {
   readonly maximumLength: number;
 }
 
-export interface RepositorySelectionPolicy {
-  readonly primaryPaths?: readonly string[];
-}
-
 export interface RepositoryPolicy {
   readonly version: 1;
   readonly title: Readonly<RepositoryTitlePolicy>;
   readonly editorial: Readonly<EditorialPolicy>;
-  readonly selection: Readonly<RepositorySelectionPolicy>;
 }
 
 export interface RepositoryPolicySource {
@@ -92,15 +87,11 @@ const DEFAULT_TITLE_POLICY: Readonly<RepositoryTitlePolicy> = Object.freeze({
   maximumLength: 72,
 });
 
-const DEFAULT_SELECTION_POLICY: Readonly<RepositorySelectionPolicy> =
-  Object.freeze({});
-
 export const DEFAULT_REPOSITORY_POLICY: Readonly<RepositoryPolicy> =
   Object.freeze({
     version: 1,
     title: DEFAULT_TITLE_POLICY,
     editorial: DEFAULT_EDITORIAL_POLICY,
-    selection: DEFAULT_SELECTION_POLICY,
   });
 
 const DEFAULT_DIGEST = digest(
@@ -395,8 +386,7 @@ function resolvePolicy(value: unknown): Readonly<RepositoryPolicy> {
   }
   const title = resolveTitlePolicy(root.title);
   const editorial = resolveEditorialPolicy(root.editorial);
-  const selection = DEFAULT_SELECTION_POLICY;
-  return deepFreeze({ version: 1, title, editorial, selection });
+  return deepFreeze({ version: 1, title, editorial });
 }
 
 function resolveTitlePolicy(value: unknown): RepositoryTitlePolicy {

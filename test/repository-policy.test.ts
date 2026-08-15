@@ -36,9 +36,6 @@ interface RepositoryPolicyModule {
           terms: readonly string[];
         }[];
       };
-      selection: {
-        primaryPaths?: readonly string[];
-      };
     };
     source: {
       kind: 'defaults' | 'repository';
@@ -107,7 +104,6 @@ test('a missing tracked policy resolves deeply frozen defaults at pinned HEAD', 
   assert.equal(Object.isFrozen(result.policy), true);
   assert.equal(Object.isFrozen(result.policy.title.allowedTypes), true);
   assert.equal(Object.isFrozen(result.policy.editorial.vagueAbsolutes), true);
-  assert.deepEqual(result.policy.selection, {});
 });
 
 test('loads all bounded data-only fields and replaces configured arrays', (context) => {
@@ -161,10 +157,8 @@ test('loads all bounded data-only fields and replaces configured arrays', (conte
     'guarantees',
     'always',
   ]);
-  assert.deepEqual(result.policy.selection, {});
   assert.equal(Object.isFrozen(result.policy.title.allowedTypes), true);
   assert.equal(Object.isFrozen(result.policy.editorial.terminologyGroups[0]), true);
-  assert.equal(Object.isFrozen(result.policy.selection), true);
 });
 
 test('uses the requested full commit id instead of HEAD or working-tree bytes', (context) => {
@@ -254,7 +248,7 @@ test('strict JSON rejects duplicate keys, unknown fields, and unsafe strings wit
   }
 });
 
-test('rejects out-of-bounds grammar, ambiguous scopes, and unsafe selection globs', (context) => {
+test('rejects out-of-bounds grammar, ambiguous scopes, and unknown selection fields', (context) => {
   const invalidPolicies: Record<string, unknown>[] = [
     { title: { maximumLength: 80 } },
     { title: { targetLength: 73 } },
