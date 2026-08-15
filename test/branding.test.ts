@@ -152,6 +152,41 @@ test('init migrates generated ChangeScribe scripts without replacing custom scri
   });
 });
 
+test('init migrates the unflagged Diffwright commit script', (context) => {
+  const fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), 'diffwright-unflagged-'));
+  context.after(() => fs.rmSync(fixtureDir, { recursive: true, force: true }));
+  fs.writeFileSync(
+    path.join(fixtureDir, 'package.json'),
+    `${JSON.stringify(
+      {
+        name: 'fixture',
+        scripts: {
+          commit: 'diffwright commit',
+          'pr:summary': 'diffwright pr:summary',
+          'feature:pr': 'diffwright feature:pr',
+          'staging:pr': 'diffwright staging:pr',
+        },
+      },
+      null,
+      2,
+    )}\n`,
+  );
+
+  const result = runCli(['init'], { cwd: fixtureDir });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Migrated npm scripts to Diffwright: commit/);
+  const fixturePackage: FixturePackage = JSON.parse(
+    fs.readFileSync(path.join(fixtureDir, 'package.json'), 'utf8'),
+  );
+  assert.deepEqual(fixturePackage.scripts, {
+    commit: 'diffwright commit --all',
+    'pr:summary': 'diffwright pr:summary',
+    'feature:pr': 'diffwright feature:pr',
+    'staging:pr': 'diffwright staging:pr',
+  });
+});
+
 test('init preserves existing Diffwright scripts and remains idempotent', (context) => {
   const fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), 'diffwright-idempotent-'));
   context.after(() => fs.rmSync(fixtureDir, { recursive: true, force: true }));
