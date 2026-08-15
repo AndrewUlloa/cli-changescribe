@@ -171,6 +171,7 @@ test('release automation publishes one verified package with trusted provenance'
   assert.match(workflow, /release:\s*\n\s+types: \[published\]/);
   assert.match(workflow, /id-token: write/);
   assert.match(workflow, /environment: npm/);
+  assert.match(workflow, /persist-credentials: false/);
   assert.match(workflow, /node scripts\/verify-release\.mjs/);
   assert.match(workflow, /git merge-base --is-ancestor HEAD origin\/main/);
   assert.match(workflow, /npm run typecheck/);
@@ -178,8 +179,16 @@ test('release automation publishes one verified package with trusted provenance'
   assert.match(workflow, /npm audit --omit=dev/);
   assert.match(workflow, /npm audit signatures/);
   assert.match(workflow, /npm publish .*--access public/);
+  assert.match(workflow, /actions\/upload-artifact@v4/);
+  assert.match(workflow, /actions\/download-artifact@v4/);
+  assert.match(workflow, /overwrite: true/);
+  assert.match(workflow, /needs: publish/);
   assert.match(workflow, /gh release upload/);
   assert.doesNotMatch(workflow, /NPM_TOKEN/);
+  assert.doesNotMatch(
+    workflow,
+    /run: npm publish "\$\{\{ steps\.pack\.outputs\.package_file \}\}"/,
+  );
 
   assert.match(verifier, /RELEASE_TAG/);
   assert.match(verifier, /package\.json/);

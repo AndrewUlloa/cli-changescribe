@@ -5,8 +5,7 @@ on:
     types: [published]
 
 permissions:
-  contents: write
-  id-token: write
+  contents: read
 
 concurrency:
   group: release-${{ github.event.release.tag_name }}
@@ -17,12 +16,16 @@ jobs:
     if: github.repository == 'AndrewUlloa/diffwright' && !github.event.release.prerelease
     runs-on: ubuntu-latest
     environment: npm
+    permissions:
+      contents: read
+      id-token: write
 
     steps:
       - name: Check out the release tag
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          persist-credentials: false
           ref: ${{ github.event.release.tag_name }}
 
       - name: Set up Node.js
@@ -65,12 +68,41 @@ jobs:
           test -f "$package_file"
           echo "package_file=$package_file" >> "$GITHUB_OUTPUT"
 
+      - name: Preserve the exact release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: diffwright-${{ github.event.release.tag_name }}
+          path: ${{ steps.pack.outputs.package_file }}
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 30
+
       - name: Publish to npm with trusted provenance
-        run: npm publish "${{ steps.pack.outputs.package_file }}" --access public
+        env:
+          PACKAGE_FILE: ${{ steps.pack.outputs.package_file }}
+        run: npm publish "$PACKAGE_FILE" --access public
+
+  attach:
+    name: Attach npm package to GitHub Release
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+
+    steps:
+      - name: Download the exact published artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: diffwright-${{ github.event.release.tag_name }}
+          path: release-assets
 
       - name: Attach the npm package to the GitHub Release
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
-          PACKAGE_FILE: ${{ steps.pack.outputs.package_file }}
-        run: gh release upload "$RELEASE_TAG" "$PACKAGE_FILE" --clobber
+        run: |
+          package_files=(release-assets/*.tgz)
+          test "${#package_files[@]}" -eq 1
+          gh release upload "$RELEASE_TAG" "${package_files[0]}" --repo "$GITHUB_REPOSITORY" --clobber

@@ -30,17 +30,20 @@ the GitHub-hosted runner.
 
 ## Release process
 
-1. Create a branch from `main`.
+1. Synchronize local `main` with `origin/main`, then create the release branch
+   from that up-to-date `main`.
 2. Update `package.json`, `package-lock.json`, and `CHANGELOG.md` to the same
    semantic version.
-3. Run the repository gates and merge the release PR into `main`.
-4. From the repository's **Releases** page, draft a new release targeting
+3. Run the repository gates, then commit and push only with `npm run commit`.
+4. Create or update the release pull request with `npm run feature:pr`. Wait for
+   CI and review feedback, then merge it into `main`.
+5. From the repository's **Releases** page, draft a new release targeting
    `main`. Create the matching `vX.Y.Z` tag, generate release notes, and publish.
-5. Watch the **Release** workflow. It verifies the tag and manifest versions,
+6. Watch the **Release** workflow. It verifies the tag and manifest versions,
    confirms the tagged commit belongs to `main`, reruns all gates, packs one
    tarball, publishes that exact tarball to npm, and attaches it to the GitHub
    Release.
-6. Verify the GitHub Release and `npm view diffwright version` agree.
+7. Verify the GitHub Release and `npm view diffwright version` agree.
 
 Do not publish from a feature branch or create the GitHub Release before the
 version PR is merged. Do not reuse or move a published release tag.
@@ -51,4 +54,6 @@ If validation fails, fix the version metadata in a new PR and publish a new
 patch version. npm versions are immutable and must never be overwritten.
 
 If npm publishing succeeds but the final asset upload fails, rerun only the
-failed GitHub Actions job. Do not publish the same npm version again.
+failed **Attach npm package to GitHub Release** job. The publication job stores
+the exact tarball as a workflow artifact, so recovery does not attempt to
+publish the immutable npm version again.
