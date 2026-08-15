@@ -109,12 +109,18 @@ test('each command exposes focused help with its real options and side effects',
         /Usage: diffwright commit/,
         /--dry-run/,
         /--all/,
+        /--context-file <path>/,
         /only the existing staged diff/i,
       ],
     },
     {
       invocation: ['pr', '--help'],
-      expected: [/Usage: diffwright pr/, /--create-pr/, /--issue <number>/],
+      expected: [
+        /Usage: diffwright pr/,
+        /--create-pr/,
+        /--issue <number>/,
+        /--context-file <path>/,
+      ],
     },
     {
       invocation: ['doctor', '--help'],
@@ -173,10 +179,48 @@ test('unknown commit, doctor, and init options fail before invoking a runner', a
 
   assert.equal(await runCli(['commit', '--dry-rnu'], runners), 1);
   assert.equal(await runCli(['commit', '--dry-run', 'extra'], runners), 1);
+  assert.equal(await runCli(['commit', '--context-file'], runners), 1);
+  assert.equal(await runCli(['pr', '--context-file'], runners), 1);
   assert.equal(await runCli(['doctor', '--network'], runners), 1);
   assert.equal(await runCli(['init', '--force'], runners), 1);
 
   assert.deepEqual(calls, []);
+});
+
+test('commit and PR context files reach their runners unchanged', async () => {
+  const { calls, runners } = recordingRunners();
+  assert.equal(
+    await runCli(
+      ['commit', '--dry-run', '--context-file', 'intent.md'],
+      runners,
+    ),
+    0,
+  );
+  assert.equal(
+    await runCli(
+      [
+        'pr',
+        '--context-file',
+        'intent.md',
+        '--context-file',
+        'constraints.txt',
+      ],
+      runners,
+    ),
+    0,
+  );
+  assert.deepEqual(calls, [
+    ['commit', ['--dry-run', '--context-file', 'intent.md']],
+    [
+      'pr',
+      [
+        '--context-file',
+        'intent.md',
+        '--context-file',
+        'constraints.txt',
+      ],
+    ],
+  ]);
 });
 
 test('valid init options reach the runner unchanged', async () => {

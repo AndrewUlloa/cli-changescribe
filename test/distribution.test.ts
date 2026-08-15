@@ -91,6 +91,7 @@ function expectedDiffwrightFiles(): string[] {
     'change-evidence',
     'cli',
     'commit',
+    'context-evidence',
     'doctor',
     'gate-receipts',
     'git-evidence',

@@ -22,10 +22,17 @@ function requireValue(argv: string[], index: number, option: string): string {
 }
 
 export function validateCommitArguments(argv: string[]): void {
-  for (const argument of argv) {
-    if (argument !== '--dry-run' && argument !== '--all') {
-      rejectUnknown('commit', argument);
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index];
+    if (argument === '--dry-run' || argument === '--all') {
+      continue;
     }
+    if (argument === '--context-file') {
+      requireValue(argv, index, argument);
+      index += 1;
+      continue;
+    }
+    rejectUnknown('commit', argument ?? '');
   }
 }
 
@@ -136,7 +143,14 @@ export function parsePositiveSafeInteger(
 }
 
 export function validatePrArguments(argv: string[]): void {
-  const valueOptions = new Set(['--base', '--out', '--limit', '--issue', '--mode']);
+  const valueOptions = new Set([
+    '--base',
+    '--out',
+    '--limit',
+    '--issue',
+    '--mode',
+    '--context-file',
+  ]);
   const booleanOptions = new Set([
     '--dry-run',
     '--create-pr',

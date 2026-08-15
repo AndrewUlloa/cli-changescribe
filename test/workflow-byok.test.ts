@@ -402,12 +402,24 @@ test('PR workflow uses one evidence-linked custom-provider draft', async (contex
   );
   git(directory, ['add', 'README.md']);
   git(directory, ['commit', '--quiet', '-m', 'feat: add fixture feature']);
+  fs.writeFileSync(
+    path.join(directory, 'intent.txt'),
+    'Keep provider routing source-agnostic.\n',
+  );
   const output = path.join(directory, 'summary.md');
   const server = await createCompletionServer(context);
 
   const result = await run(
     directory,
-    ['pr', '--base', 'main', '--out', output],
+    [
+      'pr',
+      '--base',
+      'main',
+      '--out',
+      output,
+      '--context-file',
+      'intent.txt',
+    ],
     customEnvironment(server.baseURL),
   );
 
@@ -427,6 +439,10 @@ test('PR workflow uses one evidence-linked custom-provider draft', async (contex
   assert.match(
     JSON.stringify(server.requests[0].body),
     /Original evidence bundle.*kind.*change/is,
+  );
+  assert.match(
+    JSON.stringify(server.requests[0].body),
+    /provider routing source-agnostic/,
   );
   assert.match(fs.readFileSync(output, 'utf8'), /## Summary/);
   assert.doesNotMatch(fs.readFileSync(output, 'utf8'), /5Cs|Pass 2/);

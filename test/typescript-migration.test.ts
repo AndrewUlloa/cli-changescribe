@@ -91,6 +91,7 @@ test('all application sources are TypeScript and compiled output exists', () => 
     'change-evidence',
     'cli',
     'commit',
+    'context-evidence',
     'doctor',
     'gate-receipts',
     'git-evidence',
