@@ -178,8 +178,12 @@ export async function reviewPullRequest(
   dependencies: PrReviewDependencies = {},
 ): Promise<RenderedPullRequest> {
   const initialWarnings = assertSafeArtifact(artifact, options);
+  const reviewed = Object.freeze({
+    ...artifact,
+    warnings: Object.freeze([...initialWarnings]),
+  });
   if (options.yes === true) {
-    return artifact;
+    return reviewed;
   }
 
   const prompter = dependencies.prompter;
@@ -187,10 +191,7 @@ export async function reviewPullRequest(
     throw new Error('Interactive pull-request review requires a prompter.');
   }
 
-  let current = Object.freeze({
-    ...artifact,
-    warnings: Object.freeze([...initialWarnings]),
-  });
+  let current = reviewed;
   for (;;) {
     const decision = await prompter.select(
       previewMessage(current),

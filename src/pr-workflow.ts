@@ -222,7 +222,6 @@ async function generateArtifactDraft(
       draft = parseArtifactDraft(
         redactSecretValues(completion.content, knownSecrets).trim(),
         evidence,
-        policy.selection,
       );
       break;
     } catch {
@@ -382,12 +381,14 @@ function checkExistingPr(
     ) {
       throw new Error('GitHub CLI returned an invalid pull-request entry.');
     }
-    if (
-      Reflect.get(first, 'isCrossRepository') ||
-      Reflect.get(first, 'headRefOid') !== expectedHeadSha
-    ) {
+    if (Reflect.get(first, 'isCrossRepository')) {
       throw new Error(
-        'Existing pull request does not match the reviewed branch head.',
+        'Existing pull request belongs to another repository.',
+      );
+    }
+    if (Reflect.get(first, 'headRefOid') !== expectedHeadSha) {
+      throw new Error(
+        'Existing pull request does not match the reviewed branch head. Push the reviewed HEAD and retry.',
       );
     }
     return {
@@ -401,7 +402,10 @@ function checkExistingPr(
       error instanceof Error &&
       (error.message.startsWith('GitHub CLI ') ||
         error.message ===
-          'Existing pull request does not match the reviewed branch head.')
+          'Existing pull request belongs to another repository.' ||
+        error.message.startsWith(
+          'Existing pull request does not match the reviewed branch head.',
+        ))
     ) {
       throw error;
     }

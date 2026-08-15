@@ -1285,7 +1285,39 @@ test('PR update refuses a cross-repository pull request with the same head name'
   );
 
   assert.equal(result.status, 1, result.stderr || result.stdout);
-  assert.match(result.stderr, /does not match the reviewed branch head/i);
+  assert.match(result.stderr, /belongs to another repository/i);
+  assert.equal(server.requests.length, 0);
+  assert.equal(fs.existsSync(capture), false);
+});
+
+test('PR update explains how to resolve a reviewed-head mismatch', async (context) => {
+  const directory = createRepository(context);
+  const { reviewedHead } = addPrMutationFixture(context, directory);
+  const capture = path.join(directory, 'gh-capture.json');
+  const fakeBin = createFakeGh(context, capture);
+  const server = await createCompletionServer(context);
+  const env = customEnvironment(server.baseURL);
+  env.PATH = `${fakeBin}${path.delimiter}${env.PATH ?? ''}`;
+  env.GH_CAPTURE_PATH = capture;
+  env.GH_EXISTING_PR = '1';
+  env.GH_EXISTING_PR_HEAD = git(directory, ['rev-parse', 'main']).trim();
+
+  const result = await run(
+    directory,
+    [
+      'pr',
+      '--base',
+      'main',
+      '--create-pr',
+      '--yes',
+      '--skip-format',
+    ],
+    env,
+  );
+
+  assert.notEqual(env.GH_EXISTING_PR_HEAD, reviewedHead);
+  assert.equal(result.status, 1, result.stderr || result.stdout);
+  assert.match(result.stderr, /Push the reviewed HEAD and retry/i);
   assert.equal(server.requests.length, 0);
   assert.equal(fs.existsSync(capture), false);
 });
