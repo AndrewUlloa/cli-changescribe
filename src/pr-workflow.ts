@@ -192,7 +192,7 @@ function buildArtifactMessages(
         'Allowed section kinds: summary, changes, rationale, verification, review-focus, risks, follow-ups.',
         'Assign change claims only to summary/changes; all other claim kinds to their matching section.',
         'Use exactly one observed primary change claim. Put only that claim in the single summary section, set title.claimId to its id, and make title.subject match that claim text byte-for-byte except for one optional final period on the claim. Each claim must appear in exactly one section.',
-        'When substantive source or configuration changes exist, keep documentation, plans, tests, snapshots, and lockfiles supporting rather than primary. Those files can be primary when they are the whole change.',
+        'When substantive source or configuration changes exist, keep documentation, plans, tests, snapshots, package manifests, and lockfiles supporting rather than primary. Those files can be primary when they are the whole change.',
         'Use basis observed for diff or passed-gate facts, provided for explicit intent/constraints, and inferred only for review questions that the renderer may omit.',
         'Original evidence bundle:',
         serialized,

@@ -122,6 +122,8 @@ const DEFAULT_SUPPORTING_PATHS = Object.freeze([
   '**/*.snap',
   '**/__tests__/**',
   '**/__snapshots__/**',
+  'package.json',
+  '**/package.json',
   'package-lock.json',
   'npm-shrinkwrap.json',
   'pnpm-lock.yaml',
