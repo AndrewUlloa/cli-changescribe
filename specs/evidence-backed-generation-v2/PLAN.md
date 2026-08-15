@@ -79,15 +79,15 @@ Non-decisions:
   - **Files:** `specs/evidence-backed-generation-v2/SPEC.md`, `PLAN.md`
   - **Size:** S
 
-- [ ] **Task 2: Add the editorial and factual evaluation corpus**
+- [x] **Task 2: Add the editorial and factual evaluation corpus**
   - **Description:** Capture representative structured fixtures and baseline
     failure cases before replacing generation behavior.
   - **Acceptance:**
-    - [ ] Fixtures cover simple, breaking, scoped, trailer, deletion, rename,
+    - [x] Fixtures cover simple, breaking, scoped, trailer, deletion, rename,
       revert, unexecuted-test, large-diff, and mixed-concern changes.
-    - [ ] Rubric fails unsupported material claims and distinguishes tests
+    - [x] Rubric fails unsupported material claims and distinguishes tests
       changed from tests executed.
-    - [ ] The current known PR-summary failure is represented without embedding
+    - [x] The current known PR-summary failure is represented without embedding
       secrets or provider output snapshots as a trusted oracle.
   - **Verify:**
     - `npm run build:test`

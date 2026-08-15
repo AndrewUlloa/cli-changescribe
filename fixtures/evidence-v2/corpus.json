@@ -1,0 +1,307 @@
+{
+  "schemaVersion": 1,
+  "commitCases": [
+    {
+      "id": "simple-fix",
+      "candidate": "fix: handle empty tokens",
+      "expected": {
+        "valid": true,
+        "lengthBand": "target",
+        "bodyRequired": false
+      }
+    },
+    {
+      "id": "scoped-fix",
+      "candidate": "fix(parser): handle empty tokens",
+      "expected": {
+        "valid": true,
+        "lengthBand": "target",
+        "bodyRequired": false
+      }
+    },
+    {
+      "id": "standard-types",
+      "candidates": [
+        "docs: explain local setup",
+        "test: cover empty input",
+        "refactor: isolate provider lookup",
+        "perf: reuse parsed configuration",
+        "build: pin the release runtime",
+        "ci: verify packed output"
+      ],
+      "expected": {
+        "valid": true
+      }
+    },
+    {
+      "id": "breaking-trailers",
+      "candidate": "feat(api)!: remove the legacy endpoint\n\nUse the versioned endpoint for new requests.\n\nBREAKING CHANGE: Remove /v1/legacy\nRefs: #42\nCo-authored-by: Example Dev <dev@example.com>",
+      "expected": {
+        "valid": true,
+        "breaking": true,
+        "trailers": [
+          "BREAKING CHANGE",
+          "Refs",
+          "Co-authored-by"
+        ]
+      }
+    },
+    {
+      "id": "title-boundaries",
+      "candidates": [
+        "fix: 12345678901234567890123456789012345678901234",
+        "refactor(parser): 123456789012345678901234567890123456789012345678901",
+        "refactor(parser): 1234567890123456789012345678901234567890123456789012"
+      ],
+      "expected": {
+        "lengthBands": [
+          "target",
+          "advisory",
+          "blocking"
+        ]
+      }
+    },
+    {
+      "id": "mixed-concerns",
+      "changes": [
+        "Change authentication token validation",
+        "Change npm release publication"
+      ],
+      "expected": {
+        "diagnostic": "split-required",
+        "providerCalled": false
+      }
+    }
+  ],
+  "repositoryCases": [
+    {
+      "id": "delete-only",
+      "baseFiles": {
+        "src/legacy.ts": "export const legacy = true;\n"
+      },
+      "commits": [
+        {
+          "message": "refactor: remove legacy module",
+          "operations": [
+            {
+              "kind": "delete",
+              "path": "src/legacy.ts"
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "nameStatus": [
+          "D\tsrc/legacy.ts"
+        ],
+        "patchIncludes": [
+          "-export const legacy = true;"
+        ],
+        "patchExcludes": []
+      }
+    },
+    {
+      "id": "rename",
+      "baseFiles": {
+        "src/old.ts": "export const value = 1;\n"
+      },
+      "commits": [
+        {
+          "message": "refactor: rename value module",
+          "operations": [
+            {
+              "kind": "rename",
+              "from": "src/old.ts",
+              "path": "src/new.ts"
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "nameStatus": [
+          "R100\tsrc/old.ts\tsrc/new.ts"
+        ],
+        "patchIncludes": [
+          "rename from src/old.ts",
+          "rename to src/new.ts"
+        ],
+        "patchExcludes": []
+      }
+    },
+    {
+      "id": "revert-to-base",
+      "baseFiles": {
+        "config.txt": "timeout=30\n"
+      },
+      "commits": [
+        {
+          "message": "feat: increase timeout",
+          "operations": [
+            {
+              "kind": "write",
+              "path": "config.txt",
+              "content": "timeout=60\n"
+            }
+          ]
+        },
+        {
+          "message": "revert: restore timeout",
+          "operations": [
+            {
+              "kind": "write",
+              "path": "config.txt",
+              "content": "timeout=30\n"
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "nameStatus": [],
+        "patchIncludes": [],
+        "patchExcludes": [
+          "timeout=60"
+        ]
+      }
+    },
+    {
+      "id": "revert-then-replace",
+      "baseFiles": {
+        "config.txt": "timeout=30\n"
+      },
+      "commits": [
+        {
+          "message": "feat: increase timeout",
+          "operations": [
+            {
+              "kind": "write",
+              "path": "config.txt",
+              "content": "timeout=60\n"
+            }
+          ]
+        },
+        {
+          "message": "fix: choose bounded timeout",
+          "operations": [
+            {
+              "kind": "write",
+              "path": "config.txt",
+              "content": "timeout=45\n"
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "nameStatus": [
+          "M\tconfig.txt"
+        ],
+        "patchIncludes": [
+          "-timeout=30",
+          "+timeout=45"
+        ],
+        "patchExcludes": [
+          "timeout=60"
+        ]
+      }
+    },
+    {
+      "id": "tests-changed-no-run",
+      "baseFiles": {
+        "src/value.ts": "export const value = 1;\n",
+        "test/value.test.ts": "assert.equal(value, 1);\n"
+      },
+      "commits": [
+        {
+          "message": "test: cover the new value",
+          "operations": [
+            {
+              "kind": "write",
+              "path": "src/value.ts",
+              "content": "export const value = 2;\n"
+            },
+            {
+              "kind": "write",
+              "path": "test/value.test.ts",
+              "content": "assert.equal(value, 2);\n"
+            }
+          ]
+        }
+      ],
+      "receipts": [],
+      "expected": {
+        "nameStatus": [
+          "M\tsrc/value.ts",
+          "M\ttest/value.test.ts"
+        ],
+        "patchIncludes": [
+          "+export const value = 2;",
+          "+assert.equal(value, 2);"
+        ],
+        "patchExcludes": [],
+        "verificationClaims": []
+      }
+    }
+  ],
+  "claimCases": [
+    {
+      "id": "passed-gate",
+      "claimKind": "verification",
+      "statement": "npm test passed",
+      "evidenceKinds": [
+        "verification"
+      ],
+      "expected": {
+        "accepted": true
+      }
+    },
+    {
+      "id": "changed-test-is-not-passed-test",
+      "claimKind": "verification",
+      "statement": "Tests passed",
+      "evidenceKinds": [
+        "change"
+      ],
+      "expected": {
+        "accepted": false,
+        "diagnostic": "verification-requires-passed-receipt"
+      }
+    },
+    {
+      "id": "unsupported-rationale",
+      "claimKind": "rationale",
+      "statement": "The change reduces infrastructure cost",
+      "evidenceKinds": [
+        "change"
+      ],
+      "expected": {
+        "accepted": false,
+        "diagnostic": "rationale-requires-provided-intent"
+      }
+    },
+    {
+      "id": "unsupported-identifier",
+      "claimKind": "change",
+      "statement": "Add the --package-manager option",
+      "evidenceKinds": [
+        "change"
+      ],
+      "evidenceText": "src/package-manager.ts",
+      "expected": {
+        "accepted": false,
+        "diagnostic": "identifier-not-in-evidence"
+      }
+    },
+    {
+      "id": "incomplete-coverage",
+      "claimKind": "change",
+      "statement": "Update all provider integrations",
+      "evidenceKinds": [
+        "change"
+      ],
+      "coverageComplete": false,
+      "expected": {
+        "accepted": false,
+        "diagnostic": "universal-claim-with-incomplete-coverage"
+      }
+    }
+  ]
+}
