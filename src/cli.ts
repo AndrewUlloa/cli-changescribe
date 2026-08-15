@@ -57,7 +57,7 @@ Examples:
   diffwright init
   diffwright doctor
   diffwright doctor --live
-  diffwright commit --dry-run
+  diffwright commit --all --dry-run
   diffwright pr --base main --mode release
   diffwright feature:pr
   diffwright staging:pr
@@ -67,16 +67,16 @@ Complete reference: ${CLI_REFERENCE}
 }
 
 function printCommitHelp(): void {
-  console.log(`Usage: diffwright commit [--dry-run]
+  console.log(`Usage: diffwright commit [--dry-run] [--all]
 
 Generate a Conventional Commit message from the staged diff.
 
 Options:
   --dry-run   Generate and print the message without committing or pushing.
-              If the index is empty, this still stages all changes and calls the provider.
+  --all       Stage every tracked and untracked working-tree change first.
 
-Without --dry-run, Diffwright may stage all changes, calls the selected provider,
-creates a commit, and pushes the current branch.
+Without --all, Diffwright analyzes only the existing staged diff and never changes
+the index. Without --dry-run, it creates a commit and pushes the current branch.
 
 Complete reference: ${CLI_REFERENCE}
 `);
@@ -90,7 +90,7 @@ Generate a pull-request summary for the current branch.
 Options:
   --base <branch>     Base branch (default: main)
   --out <path>        Detailed output file (default: .pr-summaries/PR_SUMMARY.md)
-  --limit <number>    Maximum commits to inspect (default: 400)
+  --limit <number>    Legacy history cap; never limits the final net diff
   --issue <number>    Add issue context and append "Closes #<number>" to the PR body
   --mode <mode>       Summary mode: feature or release
   --dry-run           Show the range and plan without provider calls or output files
@@ -98,8 +98,8 @@ Options:
   --skip-format       Skip the optional package-manager format script
   --no-format         Alias for --skip-format
 
-Dry runs may fetch the base branch. Normal runs call the provider at least three
-times and write both detailed and PR-ready summary files.
+Dry runs may fetch the base branch. Normal runs use one structured provider
+request, with at most one repair, and write detailed and PR-ready summary files.
 
 Complete reference: ${CLI_REFERENCE}
 `);
@@ -178,7 +178,7 @@ export async function runCli(
       ? 'pr'
       : command;
   if (
-    (rest.length === 1 && (rest[0] === '-h' || rest[0] === '--help')) &&
+    (rest.includes('-h') || rest.includes('--help')) &&
     (validatedCommand === 'commit' ||
       validatedCommand === 'doctor' ||
       validatedCommand === 'init' ||

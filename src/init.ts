@@ -101,7 +101,7 @@ export interface InitDependencies {
 }
 
 const SCRIPT_MAP: Readonly<Record<string, string>> = {
-  commit: 'diffwright commit',
+  commit: 'diffwright commit --all',
   'pr:summary': 'diffwright pr:summary',
   'feature:pr': 'diffwright feature:pr',
   'staging:pr': 'diffwright staging:pr',

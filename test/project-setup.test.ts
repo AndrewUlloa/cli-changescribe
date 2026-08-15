@@ -215,7 +215,7 @@ test('builds gate-aware scripts for a main-only external project', () => {
   assert.equal(plan.effective.commit, 'diffwright:commit');
   assert.equal(
     plan.scripts['diffwright:commit'],
-    'npm run lint && npm run test && node ./node_modules/diffwright/bin/diffwright.js commit',
+    'npm run lint && npm run test && node ./node_modules/diffwright/bin/diffwright.js commit --all',
   );
   assert.equal(
     plan.scripts['feature:pr'],
@@ -237,7 +237,7 @@ test('builds explicit staging and self-hosted scripts', () => {
 
   assert.equal(
     plan.scripts.commit,
-    'pnpm run build && node ./bin/diffwright.js commit',
+    'pnpm run build && node ./bin/diffwright.js commit --all',
   );
   assert.equal(
     plan.scripts['feature:pr'],
@@ -294,7 +294,7 @@ test('Yarn scripts use the package-manager local executable resolver', () => {
     selfHosted: false,
   });
 
-  assert.equal(plan.scripts.commit, 'yarn exec -- diffwright commit');
+  assert.equal(plan.scripts.commit, 'yarn exec -- diffwright commit --all');
   assert.equal(
     plan.scripts['feature:pr'],
     'yarn exec -- diffwright pr --base main --create-pr --mode feature',
@@ -332,7 +332,7 @@ test('migrates exact managed values and refuses a namespaced custom collision', 
   });
   assert.equal(
     migrated.scripts.commit,
-    'node ./node_modules/diffwright/bin/diffwright.js commit',
+    'node ./node_modules/diffwright/bin/diffwright.js commit --all',
   );
   assert.equal(
     migrated.scripts['feature:pr'],
@@ -380,7 +380,7 @@ test('updates strict previously generated gate and branch-aware script forms', (
   assert.equal(plan.effective.commit, 'commit');
   assert.equal(
     plan.scripts.commit,
-    'npm run build && node ./node_modules/diffwright/bin/diffwright.js commit',
+    'npm run build && node ./node_modules/diffwright/bin/diffwright.js commit --all',
   );
   assert.equal(
     plan.scripts['feature:pr'],

@@ -110,7 +110,7 @@ test('init adds Diffwright npm scripts', (context) => {
     fs.readFileSync(path.join(fixtureDir, 'package.json'), 'utf8')
   );
   assert.deepEqual(fixturePackage.scripts, {
-    commit: 'diffwright commit',
+    commit: 'diffwright commit --all',
     'pr:summary': 'diffwright pr:summary',
     'feature:pr': 'diffwright feature:pr',
     'staging:pr': 'diffwright staging:pr',
@@ -145,7 +145,7 @@ test('init migrates generated ChangeScribe scripts without replacing custom scri
     fs.readFileSync(path.join(fixtureDir, 'package.json'), 'utf8')
   );
   assert.deepEqual(fixturePackage.scripts, {
-    commit: 'diffwright commit',
+    commit: 'diffwright commit --all',
     'pr:summary': 'node custom-summary.js',
     'feature:pr': 'diffwright feature:pr',
     'staging:pr': 'diffwright staging:pr',
@@ -159,7 +159,7 @@ test('init preserves existing Diffwright scripts and remains idempotent', (conte
   const packageJson = {
     name: 'fixture',
     scripts: {
-      commit: 'diffwright commit',
+      commit: 'diffwright commit --all',
       'pr:summary': 'diffwright pr:summary',
       'feature:pr': 'diffwright feature:pr',
       'staging:pr': 'diffwright staging:pr',

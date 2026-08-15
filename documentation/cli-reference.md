@@ -21,20 +21,23 @@ exit without running a workflow.
 ## `commit`
 
 ```text
-diffwright commit [--dry-run]
+diffwright commit [--dry-run] [--all]
 ```
 
 | Option | Meaning |
 |---|---|
 | `--dry-run` | Generate and print a candidate without committing or pushing. |
+| `--all` | Explicitly stage all tracked and untracked working-tree changes before analysis. |
 
-Diffwright reads the staged diff. If the repository has changes but the index
-is empty, it runs `git add .` before analysis—even in dry-run mode. It then
-makes one provider request; if the response violates the commit contract, one
-repair request is possible.
+Diffwright reads only the staged diff by default. An empty index stops before
+provider resolution and leaves the working tree unchanged. `--all` is the only
+stage-all path and uses `git add --all`; combining it with `--dry-run` still
+changes the index. Generation makes one provider request; if the response
+violates the commit contract, one repair request is possible.
 
-Without `--dry-run`, Diffwright creates a commit and pushes the current branch.
-A dry-run candidate is not cached or reused by a later live command.
+Without `--dry-run`, Diffwright creates a commit from the staged snapshot and
+pushes the current branch. A dry-run candidate is not cached or reused by a
+later live command.
 
 ## `doctor`
 
@@ -168,7 +171,7 @@ diffwright pr [options]
 |---|---|---|
 | `--base <branch>` | `PR_SUMMARY_BASE` or `main` | Compare the current branch with this base. |
 | `--out <path>` | `PR_SUMMARY_OUT` or `.pr-summaries/PR_SUMMARY.md` | Detailed output path. |
-| `--limit <number>` | `PR_SUMMARY_LIMIT` or `400` | Positive maximum commit count. |
+| `--limit <number>` | `PR_SUMMARY_LIMIT` or `400` | Retained positive legacy history cap; never limits final net-diff evidence. |
 | `--issue <number>` | `PR_SUMMARY_ISSUE` or empty | Add issue context and, with `--create-pr`, append `Closes #NUMBER` to the PR body. Accepts `123` or `#123`. |
 | `--mode <mode>` | `release` only for branch `staging` with base `main`; otherwise `feature` | `feature` or `release`. |
 | `--dry-run` | off | Print the resolved range and plan without model calls or summary writes. |
@@ -176,13 +179,15 @@ diffwright pr [options]
 | `--skip-format` | off | Skip the optional format script. |
 | `--no-format` | off | Alias for `--skip-format`. |
 
-Normal PR generation makes at least three provider requests: a 5Cs snapshot,
-one request per 20,000-character commit chunk, and final synthesis. A release
-fallback can add another request. It writes the detailed output, a sibling
+Normal PR generation sends one bounded final net-diff evidence bundle and
+expects an evidence-linked JSON draft. Deterministic validation can trigger one
+repair request. Incomplete, binary, or oversized evidence stops explicitly
+instead of being silently summarized. It writes the detailed output, a sibling
 `.final.md` file, and a temporary backup.
 
-PR dry-run attempts `git fetch -- origin <base>` before it prints the plan. It
-uses local refs if fetch fails. It does not call the provider or write output.
+PR dry-run attempts an explicit fetch into `refs/remotes/origin/<base>` before
+it prints the plan. It uses local refs if fetch fails. It does not call the
+provider or write output.
 
 ### `--create-pr` order
 

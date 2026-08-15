@@ -23,7 +23,7 @@ function requireValue(argv: string[], index: number, option: string): string {
 
 export function validateCommitArguments(argv: string[]): void {
   for (const argument of argv) {
-    if (argument !== '--dry-run') {
+    if (argument !== '--dry-run' && argument !== '--all') {
       rejectUnknown('commit', argument);
     }
   }

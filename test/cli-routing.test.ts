@@ -97,6 +97,7 @@ test('help does not invoke a command runner', async () => {
   const { calls, runners } = recordingRunners();
 
   assert.equal(await runCli(['commit', '--help'], runners), 0);
+  assert.equal(await runCli(['commit', '--all', '--help'], runners), 0);
   assert.deepEqual(calls, []);
 });
 
@@ -104,7 +105,12 @@ test('each command exposes focused help with its real options and side effects',
   const cases = [
     {
       invocation: ['commit', '--help'],
-      expected: [/Usage: diffwright commit/, /--dry-run/, /stages all changes/i],
+      expected: [
+        /Usage: diffwright commit/,
+        /--dry-run/,
+        /--all/,
+        /only the existing staged diff/i,
+      ],
     },
     {
       invocation: ['pr', '--help'],

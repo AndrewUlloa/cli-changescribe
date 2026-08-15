@@ -82,8 +82,8 @@ function errorMessage(error: unknown): string {
 /**
  * Analyze all code changes comprehensively for AI review
  */
-function analyzeAllChanges(): ChangeAnalysisResult {
-  console.log('🔍 Analyzing all code changes...');
+function analyzeAllChanges(stageAll: boolean): ChangeAnalysisResult {
+  console.log('🔍 Analyzing staged changes...');
 
   // Use larger buffer for git commands that may produce large output
   const LARGE_BUFFER_SIZE = 10 * 1024 * 1024; // 10MB
@@ -102,21 +102,22 @@ function analyzeAllChanges(): ChangeAnalysisResult {
     throw new Error(`Failed to get git status: ${errorMessage(error)}`);
   }
 
-  // Stage all changes if nothing is staged
+  if (stageAll) {
+    console.log('📝 Staging all changes (--all)...');
+    execFileSync('git', ['add', '--all'], {
+      encoding: 'utf8',
+      maxBuffer: LARGE_BUFFER_SIZE,
+    });
+  }
+
   let gitDiff = execFileSync('git', ['diff', '--staged', '--name-status'], {
     encoding: 'utf8',
     maxBuffer: LARGE_BUFFER_SIZE,
   });
   if (!gitDiff.trim()) {
-    console.log('📝 Staging all changes for analysis...');
-    execFileSync('git', ['add', '.'], {
-      encoding: 'utf8',
-      maxBuffer: LARGE_BUFFER_SIZE,
-    });
-    gitDiff = execFileSync('git', ['diff', '--staged', '--name-status'], {
-      encoding: 'utf8',
-      maxBuffer: LARGE_BUFFER_SIZE,
-    });
+    throw new Error(
+      'No staged changes. Stage the intended files first or rerun with --all.',
+    );
   }
 
   // Get list of modified files first (needed for other operations)
@@ -134,7 +135,7 @@ function analyzeAllChanges(): ChangeAnalysisResult {
     // Use minimal context (U3) and limit to text files to reduce size
     detailedDiff = execFileSync(
       'git',
-      ['diff', '--staged', '-U3', '--diff-filter=ACMRT'],
+      ['diff', '--staged', '-U3'],
       {
       encoding: 'utf8',
       maxBuffer: LARGE_BUFFER_SIZE,
@@ -267,6 +268,20 @@ async function generateCommitMessage(
   const knownSecrets = knownSecretValues(runtime.values);
   try {
     const isDryRun = argv.includes('--dry-run');
+    const stageAll = argv.includes('--all');
+
+    // Get comprehensive analysis of all changes
+    let changeAnalysis;
+    try {
+      changeAnalysis = analyzeAllChanges(stageAll);
+    } catch (error) {
+      throw new Error(`Failed to analyze changes: ${errorMessage(error)}`);
+    }
+
+    if (!changeAnalysis.hasChanges) {
+      console.log('✅ No changes to commit');
+      return;
+    }
 
     const resolved = dependencies.resolveProvider({
       env: runtime.values,
@@ -279,20 +294,7 @@ async function generateCommitMessage(
       );
     }
 
-    const { id: provider, model } = resolved.profile;
-
-    // Get comprehensive analysis of all changes
-    let changeAnalysis;
-    try {
-      changeAnalysis = analyzeAllChanges();
-    } catch (error) {
-      throw new Error(`Failed to analyze changes: ${errorMessage(error)}`);
-    }
-
-    if (!changeAnalysis.hasChanges) {
-      console.log('✅ No changes to commit');
-      return;
-    }
+    const { id: provider } = resolved.profile;
 
     console.log(`🤖 Generating commit message with AI (${provider})...`);
 

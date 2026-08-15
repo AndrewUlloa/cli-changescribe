@@ -205,7 +205,11 @@ export function discoverProject(options: {
 }
 
 const MANAGED_SCRIPT_VALUES: Readonly<Record<string, ReadonlySet<string>>> = {
-  commit: new Set(['diffwright commit', 'changescribe commit']),
+  commit: new Set([
+    'diffwright commit',
+    'diffwright commit --all',
+    'changescribe commit',
+  ]),
   'pr:summary': new Set(['diffwright pr:summary', 'changescribe pr:summary']),
   'feature:pr': new Set(['diffwright feature:pr', 'changescribe feature:pr']),
   'staging:pr': new Set(['diffwright staging:pr', 'changescribe staging:pr']),
@@ -219,7 +223,7 @@ const SAFE_GENERATED_BRANCH = '[A-Za-z0-9][A-Za-z0-9._/-]*';
 
 function isStrictGeneratedScript(name: string, value: string): boolean {
   const suffixes: Readonly<Record<string, string>> = {
-    commit: 'commit',
+    commit: 'commit(?: --all)?',
     'pr:summary': '(?:pr|pr:summary)',
     'feature:pr':
       `pr --base ${SAFE_GENERATED_BRANCH} --create-pr --mode feature`,
@@ -323,7 +327,7 @@ export function buildScriptPlan(options: {
   const commit = setManagedScript(
     scripts,
     'commit',
-    commandChain([...commitPrelude, `${cli} commit`]),
+    commandChain([...commitPrelude, `${cli} commit --all`]),
     changes,
   );
   const summary = setManagedScript(

@@ -212,7 +212,7 @@ test('--yes configures a validated self-host without a stale global or self-depe
   assert.equal(manifest.devDependencies, undefined);
   assert.equal(
     manifest.scripts.commit,
-    'npm run test && npm run build && node ./bin/diffwright.js commit',
+    'npm run test && npm run build && node ./bin/diffwright.js commit --all',
   );
   assert.equal(
     manifest.scripts['feature:pr'],
@@ -377,7 +377,7 @@ test('--yes pins and verifies the exact running package before writing external 
   assert.equal(manifest.devDependencies.diffwright, '1.2.3');
   assert.equal(
     manifest.scripts.commit,
-    'npm run test && node ./node_modules/diffwright/bin/diffwright.js commit',
+    'npm run test && node ./node_modules/diffwright/bin/diffwright.js commit --all',
   );
   assert.equal(doctorCount, 1);
 });
@@ -536,7 +536,7 @@ test('Yarn PnP verifies and generates the same delimiter-safe local command', as
   );
 
   const manifest = JSON.parse(fs.readFileSync(path.join(cwd, 'package.json'), 'utf8'));
-  assert.equal(manifest.scripts.commit, 'yarn exec -- diffwright commit');
+  assert.equal(manifest.scripts.commit, 'yarn exec -- diffwright commit --all');
   assert.equal(
     manifest.scripts['feature:pr'],
     'yarn exec -- diffwright pr --base main --create-pr --mode feature',
