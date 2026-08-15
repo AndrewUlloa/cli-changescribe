@@ -67,13 +67,14 @@ Complete reference: ${CLI_REFERENCE}
 }
 
 function printCommitHelp(): void {
-  console.log(`Usage: diffwright commit [--dry-run] [--all] [--context-file <path>]
+  console.log(`Usage: diffwright commit [--dry-run] [--all] [--timings] [--context-file <path>]
 
 Generate a Conventional Commit message from the staged diff.
 
 Options:
   --dry-run   Generate and print the message without committing or pushing.
   --all       Stage every tracked and untracked working-tree change first.
+  --timings   Print privacy-safe phase durations after the command finishes.
   --context-file <path>
               Add bounded source-agnostic intent from a regular project file.
 
@@ -102,6 +103,7 @@ Options:
   --yes               Approve GitHub mutation noninteractively after validation
   --skip-format       Skip the optional package-manager format script
   --no-format         Alias for --skip-format
+  --timings           Print privacy-safe phase durations after the command finishes
 
 Dry runs may fetch the base branch. Normal runs use a structured draft request
 and one terminal critic request. One deterministic draft repair can raise the

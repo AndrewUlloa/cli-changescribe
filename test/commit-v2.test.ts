@@ -189,6 +189,33 @@ test('dry-run analyzes only staged content and leaves unrelated files unstaged',
   assert.match(git(directory, ['status', '--porcelain']), /\?\? unstaged\.txt/);
 });
 
+test('prints privacy-safe phase timings only when requested', async (context) => {
+  const directory = repository(context);
+  useRepository(context, directory);
+  fs.writeFileSync(path.join(directory, 'timed.txt'), 'private evidence text\n');
+  git(directory, ['add', 'timed.txt']);
+  const capture = { resolveCalls: 0, completionCalls: 0, prompt: '' };
+  const output: string[] = [];
+  const originalLog = console.log;
+  context.after(() => {
+    console.log = originalLog;
+  });
+  console.log = (...values: unknown[]) => {
+    output.push(values.map(String).join(' '));
+  };
+
+  await runCommit(['--dry-run', '--timings'], dependencies(capture));
+
+  const rendered = output.join('\n');
+  assert.match(rendered, /Diffwright timings \(milliseconds\)/);
+  assert.match(rendered, /git-evidence: \d+\.\d{3}/);
+  assert.match(rendered, /provider-draft: \d+\.\d{3}/);
+  assert.match(rendered, /provider-critic: \d+\.\d{3}/);
+  assert.match(rendered, /render: \d+\.\d{3}/);
+  assert.match(rendered, /total: \d+\.\d{3}/);
+  assert.doesNotMatch(rendered, /private evidence text/);
+});
+
 test('--all is the explicit stage-all path, including during dry-run', async (context) => {
   const directory = repository(context);
   useRepository(context, directory);

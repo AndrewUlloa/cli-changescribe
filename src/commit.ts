@@ -20,6 +20,11 @@ import {
 } from './change-evidence';
 import { loadContextEvidence } from './context-evidence';
 import {
+  createOperationTimings,
+  renderOperationTimings,
+  type OperationTimings,
+} from './operation-timings';
+import {
   resolveProvider,
   type ResolveProviderOptions,
   type ResolvedProvider,
@@ -191,30 +196,42 @@ async function requestArtifact(
   dependencies: CommitDependencies,
   knownSecrets: readonly string[],
   policy: RepositoryPolicy,
+  timings: OperationTimings,
 ): Promise<RenderedCommit> {
   let draft: ArtifactDraft | undefined;
   let rendered: RenderedCommit | undefined;
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const completion = await dependencies.completeChat(resolved, {
-      messages: redactMessageSecrets(
-        buildArtifactMessages(evidence, attempt === 1),
-        knownSecrets,
-      ),
-      outputLimit: 4_096,
-      intent: 'workflow',
-    });
+    const completion = await timings.measure(
+      attempt === 0 ? 'provider-draft' : 'provider-repair',
+      async () =>
+        await dependencies.completeChat(resolved, {
+          messages: redactMessageSecrets(
+            buildArtifactMessages(evidence, attempt === 1),
+            knownSecrets,
+          ),
+          outputLimit: 4_096,
+          intent: 'workflow',
+        }),
+    );
     const candidate = redactSecretValues(
       completion.content || completion.reasoning,
       knownSecrets,
     ).trim();
     try {
-      draft = parseArtifactDraft(candidate, evidence);
-      rendered = renderCommitArtifact(
-        draft,
-        evidence,
-        policy.title,
-        policy.editorial,
-      );
+      const result = timings.measureSync('render', () => {
+        const parsed = parseArtifactDraft(candidate, evidence);
+        return {
+          draft: parsed,
+          rendered: renderCommitArtifact(
+            parsed,
+            evidence,
+            policy.title,
+            policy.editorial,
+          ),
+        };
+      });
+      draft = result.draft;
+      rendered = result.rendered;
       break;
     } catch {
       draft = undefined;
@@ -231,21 +248,23 @@ async function requestArtifact(
       'Provider returned an invalid evidence-linked commit draft after one repair.',
     );
   }
-  const critique = await dependencies.completeChat(resolved, {
-    messages: redactMessageSecrets(
-      buildArtifactCriticMessages(evidence, draft),
-      knownSecrets,
-    ),
-    outputLimit: 8_192,
-    intent: 'workflow',
+  await timings.measure('provider-critic', async () => {
+    const critique = await dependencies.completeChat(resolved, {
+      messages: redactMessageSecrets(
+        buildArtifactCriticMessages(evidence, draft),
+        knownSecrets,
+      ),
+      outputLimit: 8_192,
+      intent: 'workflow',
+    });
+    assertArtifactCritique(
+      redactSecretValues(
+        critique.content || critique.reasoning,
+        knownSecrets,
+      ).trim(),
+      draft,
+    );
   });
-  assertArtifactCritique(
-    redactSecretValues(
-      critique.content || critique.reasoning,
-      knownSecrets,
-    ).trim(),
-    draft,
-  );
   return rendered;
 }
 
@@ -319,6 +338,7 @@ function commitMessage(
 async function generateCommitMessage(
   argv: string[],
   dependencies: CommitDependencies,
+  timings: OperationTimings,
 ): Promise<void> {
   const dryRun = argv.includes('--dry-run');
   const stageAll = argv.includes('--all');
@@ -326,23 +346,27 @@ async function generateCommitMessage(
 
   const runtime = dependencies.loadRuntimeConfig();
   const knownSecrets = knownSecretValues(runtime.values);
-  const context = loadContextEvidence(optionValues(argv, '--context-file'), {
-    knownSecrets,
-  });
+  const context = timings.measureSync('context', () =>
+    loadContextEvidence(optionValues(argv, '--context-file'), {
+      knownSecrets,
+    }),
+  );
 
   const dirty = hasWorkingTreeChanges();
   if (!dirty) {
     console.log('✅ No changes to commit');
     return;
   }
-  const repositoryPolicy = loadRepositoryPolicy({ revision: 'HEAD' });
+  const repositoryPolicy = timings.measureSync('policy', () =>
+    loadRepositoryPolicy({ revision: 'HEAD' }),
+  );
   if (stageAll) {
     console.log('📝 Staging all changes (--all)...');
     stageAllChanges();
   }
 
-  const stagedEvidence = protectRepositoryPolicyEvidence(
-    collectStagedEvidence(),
+  const stagedEvidence = timings.measureSync('git-evidence', () =>
+    protectRepositoryPolicyEvidence(collectStagedEvidence()),
   );
   if (repositoryPolicy.source.revisionSha !== stagedEvidence.snapshot.headSha) {
     throw new Error(
@@ -382,8 +406,11 @@ async function generateCommitMessage(
     dependencies,
     knownSecrets,
     repositoryPolicy.policy,
+    timings,
   );
-  assertStagedEvidenceSnapshotCurrent(evidence.snapshot);
+  timings.measureSync('mutation-validation', () =>
+    assertStagedEvidenceSnapshotCurrent(evidence.snapshot),
+  );
   console.log(`✨ Generated commit message: "${rendered.title}"`);
   for (const warning of rendered.warnings) {
     console.log(`⚠️  ${warning}`);
@@ -395,17 +422,21 @@ async function generateCommitMessage(
     return;
   }
 
-  const createdSha = commitMessage(rendered.message, evidence);
+  const createdSha = timings.measureSync('git-mutation', () =>
+    commitMessage(rendered.message, evidence),
+  );
   console.log('✅ Changes committed successfully');
   try {
-    execFileSync(
-      'git',
-      ['push', 'origin', `${createdSha}:refs/heads/${branch}`],
-      {
-        encoding: 'utf8',
-        maxBuffer: LARGE_BUFFER_SIZE,
-        stdio: 'pipe',
-      },
+    timings.measureSync('git-mutation', () =>
+      execFileSync(
+        'git',
+        ['push', 'origin', `${createdSha}:refs/heads/${branch}`],
+        {
+          encoding: 'utf8',
+          maxBuffer: LARGE_BUFFER_SIZE,
+          stdio: 'pipe',
+        },
+      ),
     );
     console.log(`🚀 Changes pushed to origin/${branch}`);
   } catch (error) {
@@ -420,5 +451,12 @@ export async function runCommit(
   dependencies: CommitDependencies = defaultDependencies,
 ): Promise<void> {
   validateCommitArguments(argv);
-  await generateCommitMessage(argv, dependencies);
+  const timings = createOperationTimings();
+  try {
+    await generateCommitMessage(argv, dependencies, timings);
+  } finally {
+    if (argv.includes('--timings')) {
+      console.log(renderOperationTimings(timings.snapshot()));
+    }
+  }
 }

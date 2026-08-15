@@ -24,7 +24,11 @@ function requireValue(argv: string[], index: number, option: string): string {
 export function validateCommitArguments(argv: string[]): void {
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
-    if (argument === '--dry-run' || argument === '--all') {
+    if (
+      argument === '--dry-run' ||
+      argument === '--all' ||
+      argument === '--timings'
+    ) {
       continue;
     }
     if (argument === '--context-file') {
@@ -157,6 +161,7 @@ export function validatePrArguments(argv: string[]): void {
     '--skip-format',
     '--no-format',
     '--yes',
+    '--timings',
   ]);
 
   for (let index = 0; index < argv.length; index += 1) {

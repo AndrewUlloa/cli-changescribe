@@ -130,7 +130,7 @@ test('PR dry-run inspects a valid range without API calls or output writes', (co
 
   const result = spawnSync(
     bin,
-    ['pr', '--dry-run', '--base', 'main', '--out', output],
+    ['pr', '--dry-run', '--timings', '--base', 'main', '--out', output],
     {
       cwd: directory,
       encoding: 'utf8',
@@ -142,6 +142,9 @@ test('PR dry-run inspects a valid range without API calls or output writes', (co
   assert.match(result.stdout, /Dry run \(no API calls\)/);
   assert.match(result.stdout, /Provider: cerebras/);
   assert.match(result.stdout, /Model: gpt-oss-120b/);
+  assert.match(result.stdout, /Diffwright timings \(milliseconds\)/);
+  assert.match(result.stdout, /git-evidence: \d+\.\d{3}/);
+  assert.match(result.stdout, /total: \d+\.\d{3}/);
   assert.equal(fs.existsSync(output), false);
   assert.equal(git(directory, ['rev-parse', 'HEAD']).trim(), headBefore);
 });

@@ -41,6 +41,11 @@ import {
   type PackageCommand,
   type PackageManagerName,
 } from './package-manager';
+import {
+  createOperationTimings,
+  renderOperationTimings,
+  type OperationTimings,
+} from './operation-timings';
 import { createProcessPrEditor } from './pr-editor';
 import { reviewPullRequest } from './pr-review';
 import { createNodePrompter } from './prompts';
@@ -215,30 +220,37 @@ async function generateArtifactDraft(
   mode: string,
   knownSecrets: readonly string[],
   policy: RepositoryPolicy,
+  timings: OperationTimings,
 ): Promise<ArtifactDraft> {
   let draft: ArtifactDraft | undefined;
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const completion = await createCompletionSafe(
-      resolved,
-      buildArtifactMessages(evidence, branch, base, mode, attempt === 1),
-      4096,
-      knownSecrets,
+    const completion = await timings.measure(
+      attempt === 0 ? 'provider-draft' : 'provider-repair',
+      async () =>
+        await createCompletionSafe(
+          resolved,
+          buildArtifactMessages(evidence, branch, base, mode, attempt === 1),
+          4096,
+          knownSecrets,
+        ),
     );
     try {
-      const candidate = parseArtifactDraft(
-        redactSecretValues(
-          completion.content || completion.reasoning,
-          knownSecrets,
-        ).trim(),
-        evidence,
-      );
-      renderPullRequestArtifact(
-        candidate,
-        evidence,
-        policy.title,
-        policy.editorial,
-      );
-      draft = candidate;
+      draft = timings.measureSync('render', () => {
+        const candidate = parseArtifactDraft(
+          redactSecretValues(
+            completion.content || completion.reasoning,
+            knownSecrets,
+          ).trim(),
+          evidence,
+        );
+        renderPullRequestArtifact(
+          candidate,
+          evidence,
+          policy.title,
+          policy.editorial,
+        );
+        return candidate;
+      });
       break;
     } catch {
       if (attempt === 0) {
@@ -824,12 +836,14 @@ function appendIssueClosingDirective(body: string, issue: string): string {
   return `${body}${separator}Closes ${issue}`;
 }
 
-async function main(argv: string[]): Promise<void> {
+async function main(argv: string[], timings: OperationTimings): Promise<void> {
   validatePrArguments(argv);
   const runtime = loadRuntimeConfig();
   const knownSecrets = knownSecretValues(runtime.values);
   const args = parseArgs(argv, runtime.values);
-  const context = loadContextEvidence(args.contextFiles, { knownSecrets });
+  const context = timings.measureSync('context', () =>
+    loadContextEvidence(args.contextFiles, { knownSecrets }),
+  );
   const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
   if (args.createPr && !args.yes && !interactive) {
     throw new Error(
@@ -854,10 +868,12 @@ async function main(argv: string[]): Promise<void> {
   process.stdout.write(`${banner(branch, args.base, resolved.profile.id)}\n`);
 
   step(`Collecting final branch evidence against ${args.base}...`);
-  const initialEvidence = protectRepositoryPolicyEvidence(
-    collectPullRequestEvidence({
-      baseBranch: args.base,
-    }),
+  const initialEvidence = timings.measureSync('git-evidence', () =>
+    protectRepositoryPolicyEvidence(
+      collectPullRequestEvidence({
+        baseBranch: args.base,
+      }),
+    ),
   );
   const changedFiles = initialEvidence.items.filter(
     (item) => item.kind === 'change',
@@ -896,7 +912,9 @@ async function main(argv: string[]): Promise<void> {
   if (basePolicySha === undefined) {
     throw new Error('Pull-request evidence did not pin a base policy revision.');
   }
-  const repositoryPolicy = loadRepositoryPolicy({ revision: basePolicySha });
+  const repositoryPolicy = timings.measureSync('policy', () =>
+    loadRepositoryPolicy({ revision: basePolicySha }),
+  );
   if (args.createPr && !checkGhCli()) {
     throw new Error(
       'GitHub CLI (gh) is required for --create-pr. Install it from https://cli.github.com/ and run gh auth login.',
@@ -914,6 +932,7 @@ async function main(argv: string[]): Promise<void> {
 
   const receipts: VerificationReceipt[] = [];
   if (args.createPr) {
+    timings.measureSync('project-gates', () => {
     const projectPackage = readProjectPackage();
     const manager = detectPackageManager(
       process.cwd(),
@@ -970,11 +989,14 @@ async function main(argv: string[]): Promise<void> {
     if (existingPr) {
       warn(`Found existing PR #${existingPr.number}: ${existingPr.title}`);
     }
+    });
   }
 
   const freshGitEvidence = args.createPr
-    ? protectRepositoryPolicyEvidence(
-        collectPullRequestEvidence({ baseBranch: args.base, fetch: false }),
+    ? timings.measureSync('git-evidence', () =>
+        protectRepositoryPolicyEvidence(
+          collectPullRequestEvidence({ baseBranch: args.base, fetch: false }),
+        ),
       )
     : initialEvidence;
   if (!freshGitEvidence.coverage.complete) {
@@ -1005,26 +1027,31 @@ async function main(argv: string[]): Promise<void> {
     mode,
     knownSecrets,
     repositoryPolicy.policy,
+    timings,
   );
-  const generatedArtifact = renderPullRequestArtifact(
-    draft,
-    evidence,
-    repositoryPolicy.policy.title,
-    repositoryPolicy.policy.editorial,
+  const generatedArtifact = timings.measureSync('render', () =>
+    renderPullRequestArtifact(
+      draft,
+      evidence,
+      repositoryPolicy.policy.title,
+      repositoryPolicy.policy.editorial,
+    ),
   );
-  const critique = await createCompletionSafe(
-    resolved,
-    buildArtifactCriticMessages(evidence, draft),
-    8_192,
-    knownSecrets,
-  );
-  assertArtifactCritique(
-    redactSecretValues(
-      critique.content || critique.reasoning,
+  await timings.measure('provider-critic', async () => {
+    const critique = await createCompletionSafe(
+      resolved,
+      buildArtifactCriticMessages(evidence, draft),
+      8_192,
       knownSecrets,
-    ).trim(),
-    draft,
-  );
+    );
+    assertArtifactCritique(
+      redactSecretValues(
+        critique.content || critique.reasoning,
+        knownSecrets,
+      ).trim(),
+      draft,
+    );
+  });
   const renderedArtifact = args.issue
     ? Object.freeze({
         ...generatedArtifact,
@@ -1039,23 +1066,27 @@ async function main(argv: string[]): Promise<void> {
   let artifact = renderedArtifact;
   if (args.createPr) {
     if (args.yes) {
-      artifact = await reviewPullRequest(renderedArtifact, {
-        yes: true,
-        knownSecrets,
-        titlePolicy: repositoryPolicy.policy.title,
-        editorialPolicy: repositoryPolicy.policy.editorial,
-      });
+      artifact = await timings.measure('review', async () =>
+        await reviewPullRequest(renderedArtifact, {
+          yes: true,
+          knownSecrets,
+          titlePolicy: repositoryPolicy.policy.title,
+          editorialPolicy: repositoryPolicy.policy.editorial,
+        }),
+      );
     } else {
       const prompter = createNodePrompter();
       try {
-        artifact = await reviewPullRequest(
-          renderedArtifact,
-          {
-            knownSecrets,
-            titlePolicy: repositoryPolicy.policy.title,
-            editorialPolicy: repositoryPolicy.policy.editorial,
-          },
-          { prompter, editor: createProcessPrEditor() },
+        artifact = await timings.measure('review', async () =>
+          await reviewPullRequest(
+            renderedArtifact,
+            {
+              knownSecrets,
+              titlePolicy: repositoryPolicy.policy.title,
+              editorialPolicy: repositoryPolicy.policy.editorial,
+            },
+            { prompter, editor: createProcessPrEditor() },
+          ),
         );
       } finally {
         prompter.close();
@@ -1065,11 +1096,13 @@ async function main(argv: string[]): Promise<void> {
   }
 
   const assertMutationSnapshot = (): void => {
-    assertEvidenceSnapshotCurrent(evidence.snapshot);
-    assertRemoteEvidenceBaseCurrent(evidence.snapshot, args.base);
-    if (githubRepository !== undefined) {
-      assertGitHubRepositoryIdentityCurrent(githubRepository);
-    }
+    timings.measureSync('mutation-validation', () => {
+      assertEvidenceSnapshotCurrent(evidence.snapshot);
+      assertRemoteEvidenceBaseCurrent(evidence.snapshot, args.base);
+      if (githubRepository !== undefined) {
+        assertGitHubRepositoryIdentityCurrent(githubRepository);
+      }
+    });
   };
   const assertRemoteHead = (): void => {
     assertRemoteEvidenceHeadCurrent(evidence.snapshot, branch);
@@ -1110,44 +1143,53 @@ async function main(argv: string[]): Promise<void> {
   warn(`Backup copy saved to ${backupPath}`);
 
   if (args.createPr) {
-    const existingPr = checkExistingPr(
-      args.base,
-      branch,
-      evidence.snapshot.headSha,
-      requireGitHubRepository(),
-    );
-    assertMutationSnapshot();
-    if (existingPr) {
-      assertRemoteHead();
-      updatePrWithGh(
-        existingPr.number,
-        artifact.title,
-        finalSummary,
-        requireGitHubRepository(),
-        () => {
-          assertMutationSnapshot();
-          assertRemoteHead();
-        },
-      );
-    } else {
-      createPrWithGh(
+    timings.measureSync('github-mutation', () => {
+      const existingPr = checkExistingPr(
         args.base,
         branch,
         evidence.snapshot.headSha,
-        artifact.title,
-        finalSummary,
         requireGitHubRepository(),
-        () => {
-          assertMutationSnapshot();
-          assertRemoteHead();
-        },
       );
-    }
+      assertMutationSnapshot();
+      if (existingPr) {
+        assertRemoteHead();
+        updatePrWithGh(
+          existingPr.number,
+          artifact.title,
+          finalSummary,
+          requireGitHubRepository(),
+          () => {
+            assertMutationSnapshot();
+            assertRemoteHead();
+          },
+        );
+      } else {
+        createPrWithGh(
+          args.base,
+          branch,
+          evidence.snapshot.headSha,
+          artifact.title,
+          finalSummary,
+          requireGitHubRepository(),
+          () => {
+            assertMutationSnapshot();
+            assertRemoteHead();
+          },
+        );
+      }
+    });
   }
 }
 
 export async function runPrSummary(
   argv = process.argv.slice(2),
 ): Promise<void> {
-  await main(argv);
+  const timings = createOperationTimings();
+  try {
+    await main(argv, timings);
+  } finally {
+    if (argv.includes('--timings')) {
+      process.stdout.write(`${renderOperationTimings(timings.snapshot())}\n`);
+    }
+  }
 }
