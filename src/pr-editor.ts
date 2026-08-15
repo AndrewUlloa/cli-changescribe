@@ -14,7 +14,13 @@ export interface ProcessPrEditorDependencies {
 }
 
 function resolveEditorExecutable(env: NodeJS.ProcessEnv): string {
-  const executable = env.DIFFWRIGHT_EDITOR ?? env.EDITOR ?? 'vi';
+  const preferred = env.DIFFWRIGHT_EDITOR;
+  const fallback = env.EDITOR;
+  const executable = preferred === undefined || preferred === ''
+    ? fallback === undefined || fallback === ''
+      ? 'vi'
+      : fallback
+    : preferred;
   if (
     executable.length === 0 ||
     executable.startsWith('-') ||

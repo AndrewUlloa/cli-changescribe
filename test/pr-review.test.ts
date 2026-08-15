@@ -94,13 +94,13 @@ class FakePrompter implements ReviewPrompter {
   }
 }
 
-test('--yes bypass returns the exact rendered artifact without prompting or editing', async () => {
+test('--yes recomputes warnings without prompting, editing, or rewriting bytes', async () => {
   const prompter = new FakePrompter([]);
   let edits = 0;
 
   const result = await review.reviewPullRequest(
     original,
-    { yes: true },
+    { yes: true, titlePolicy: { targetLength: 10 } },
     {
       prompter,
       editor: {
@@ -112,7 +112,10 @@ test('--yes bypass returns the exact rendered artifact without prompting or edit
     },
   );
 
-  assert.equal(result, original);
+  assert.notEqual(result, original);
+  assert.equal(result.title, original.title);
+  assert.equal(result.body, original.body);
+  assert.deepEqual(result.warnings, ['Header exceeds the 10-character target.']);
   assert.equal(prompter.previews.length, 0);
   assert.equal(edits, 0);
 });

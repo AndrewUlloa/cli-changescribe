@@ -111,6 +111,51 @@ test('rejects editor command strings instead of invoking a shell', async (contex
   assert.deepEqual(fs.readdirSync(temporaryRoot), []);
 });
 
+test('treats empty editor variables as unset without accepting whitespace commands', async (context) => {
+  const temporaryRoot = temporaryDirectory(context);
+  const calls: string[] = [];
+  const artifact = {
+    title: 'fix: validate output',
+    body: '## Summary\n\n- Validate output.',
+    warnings: [],
+  };
+  const runner: SpawnRunner = {
+    spawn(file) {
+      calls.push(file);
+      return {
+        pid: 1,
+        output: [],
+        stdout: '',
+        stderr: '',
+        status: 0,
+        signal: null,
+      };
+    },
+  };
+
+  await createProcessPrEditor({
+    env: { DIFFWRIGHT_EDITOR: '', EDITOR: 'nano' },
+    runner,
+    temporaryRoot,
+  }).edit(artifact);
+  await createProcessPrEditor({
+    env: { DIFFWRIGHT_EDITOR: '', EDITOR: '' },
+    runner,
+    temporaryRoot,
+  }).edit(artifact);
+  await assert.rejects(
+    createProcessPrEditor({
+      env: { DIFFWRIGHT_EDITOR: '   ', EDITOR: 'nano' },
+      runner,
+      temporaryRoot,
+    }).edit(artifact),
+    /one executable without arguments/,
+  );
+
+  assert.deepEqual(calls, ['nano', 'vi']);
+  assert.deepEqual(fs.readdirSync(temporaryRoot), []);
+});
+
 test('rejects unsuccessful editors and malformed edited files', async (context) => {
   const temporaryRoot = temporaryDirectory(context);
   const artifact = {
