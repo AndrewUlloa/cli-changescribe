@@ -37,6 +37,7 @@ async function createCompletionServer(
   context: TestContext,
   options: {
     invalidArtifactResponses?: number;
+    renderInvalidArtifactResponses?: number;
     scope?: string;
     dishonestSupporting?: boolean;
   } = {},
@@ -64,6 +65,23 @@ async function createCompletionServer(
       const isArtifactCritic = serializedRequest.includes(
         'independently audit every proposed model-authored artifact claim',
       );
+      const isArtifactRequest =
+        isArtifactDraft ||
+        serializedRequest.includes(
+          'previous response failed deterministic validation',
+        );
+      const artifactRequestCount = requests.filter((item) => {
+        const serialized = JSON.stringify(item.body);
+        return (
+          serialized.includes('Produce one evidence-linked draft') ||
+          serialized.includes(
+            'previous response failed deterministic validation',
+          )
+        );
+      }).length;
+      const renderInvalid =
+        isArtifactRequest &&
+        artifactRequestCount <= (options.renderInvalidArtifactResponses ?? 0);
       response.end(
         JSON.stringify({
           id: `chatcmpl_${requests.length}`,
@@ -114,7 +132,9 @@ async function createCompletionServer(
                           ? {}
                           : { scope: options.scope }),
                         breaking: false,
-                        subject: 'route completions through provider-neutral configuration',
+                        subject: renderInvalid
+                          ? 'route completions through provider-neutral configuration.'
+                          : 'route completions through provider-neutral configuration',
                         claimId: 'claim-change',
                       },
                       claims: [
@@ -218,6 +238,13 @@ if (args[0] === '--version') {
   console.log('gh version fixture');
   process.exit(0);
 }
+if (args[0] === 'pr' && process.env.GH_EXPECT_REPO) {
+  const repoIndex = args.indexOf('--repo');
+  if (repoIndex < 0 || args[repoIndex + 1] !== process.env.GH_EXPECT_REPO) {
+    console.error('gh repository identity was not pinned');
+    process.exit(23);
+  }
+}
 if (args[0] === 'pr' && args[1] === 'list') {
   if (process.env.GH_LIST_COUNTER_PATH) {
     const counterPath = process.env.GH_LIST_COUNTER_PATH;
@@ -271,6 +298,31 @@ process.exit(2);
     'utf8',
   );
   fs.chmodSync(executable, 0o755);
+  const gitExecutable = path.join(directory, 'git');
+  const realGit = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
+  fs.writeFileSync(
+    gitExecutable,
+    `#!/usr/bin/env node
+const { spawnSync } = require('node:child_process');
+const args = process.argv.slice(2);
+if (args.join(' ') === 'remote get-url --all origin') {
+  console.log(process.env.GIT_FAKE_ORIGIN_URL || 'https://github.com/diffwright/fixture.git');
+  process.exit(0);
+}
+if (args.join(' ') === 'remote get-url --push --all origin') {
+  console.log(process.env.GIT_FAKE_PUSH_URL || process.env.GIT_FAKE_ORIGIN_URL || 'https://github.com/diffwright/fixture.git');
+  process.exit(0);
+}
+const forwarded = [...args];
+if (forwarded[0] === 'push' && forwarded[1] === 'https://github.com/diffwright/fixture.git') {
+  forwarded[1] = 'origin';
+}
+const result = spawnSync(${JSON.stringify(realGit)}, forwarded, { stdio: 'inherit' });
+process.exit(result.status === null ? 1 : result.status);
+`,
+    'utf8',
+  );
+  fs.chmodSync(gitExecutable, 0o755);
   return directory;
 }
 
@@ -285,6 +337,11 @@ function createGitPushRaceWrapper(context: TestContext): string {
 const { spawnSync, execFileSync } = require('node:child_process');
 const args = process.argv.slice(2);
 const realGit = ${JSON.stringify(realGit)};
+if (args.join(' ') === 'remote get-url --all origin' ||
+    args.join(' ') === 'remote get-url --push --all origin') {
+  console.log('https://github.com/diffwright/fixture.git');
+  process.exit(0);
+}
 if (args[0] === 'push' && process.env.GIT_MOVE_FEATURE_ON_PUSH === '1') {
   const current = execFileSync(realGit, ['rev-parse', 'refs/heads/feature'], { encoding: 'utf8' }).trim();
   const tree = execFileSync(realGit, ['rev-parse', current + '^{tree}'], { encoding: 'utf8' }).trim();
@@ -292,7 +349,11 @@ if (args[0] === 'push' && process.env.GIT_MOVE_FEATURE_ON_PUSH === '1') {
   execFileSync(realGit, ['update-ref', 'refs/heads/feature', moved, current]);
   if (process.env.GIT_MOVED_SHA_PATH) require('node:fs').writeFileSync(process.env.GIT_MOVED_SHA_PATH, moved);
 }
-const result = spawnSync(realGit, args, { stdio: 'inherit' });
+const forwarded = [...args];
+if (forwarded[0] === 'push' && forwarded[1] === 'https://github.com/diffwright/fixture.git') {
+  forwarded[1] = 'origin';
+}
+const result = spawnSync(realGit, forwarded, { stdio: 'inherit' });
 process.exit(result.status === null ? 1 : result.status);
 `,
     'utf8',
@@ -595,7 +656,7 @@ test('repository policy stays local while standard generation remains valid', as
   );
 });
 
-test('PR workflow uses an evidence-linked draft and independent critic', async (context) => {
+test('PR workflow uses an evidence-linked draft and separate terminal critic', async (context) => {
   const directory = createRepository(context);
   git(directory, ['switch', '--quiet', '-c', 'feature']);
   fs.appendFileSync(
@@ -704,6 +765,32 @@ test('PR workflow repairs one invalid draft and never chains model summaries', a
   );
 });
 
+test('PR workflow repairs a draft that fails deterministic rendering', async (context) => {
+  const directory = createRepository(context);
+  git(directory, ['switch', '--quiet', '-c', 'feature']);
+  fs.appendFileSync(path.join(directory, 'README.md'), 'render repair fixture\n');
+  git(directory, ['add', 'README.md']);
+  git(directory, ['commit', '--quiet', '-m', 'fix: add render repair fixture']);
+  const output = path.join(directory, 'summary.md');
+  const server = await createCompletionServer(context, {
+    renderInvalidArtifactResponses: 1,
+  });
+
+  const result = await run(
+    directory,
+    ['pr', '--base', 'main', '--out', output],
+    customEnvironment(server.baseURL),
+  );
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.equal(server.requests.length, 3);
+  assert.match(result.stdout, /requesting one repair/);
+  assert.match(
+    fs.readFileSync(output, 'utf8'),
+    /route completions through provider-neutral configuration/i,
+  );
+});
+
 test('PR critic vetoes dishonest supporting prose before output or GitHub mutation', async (context) => {
   const directory = createRepository(context);
   addPrMutationFixture(context, directory);
@@ -716,6 +803,8 @@ test('PR critic vetoes dishonest supporting prose before output or GitHub mutati
   const env = customEnvironment(server.baseURL);
   env.PATH = `${fakeBin}${path.delimiter}${env.PATH ?? ''}`;
   env.GH_CAPTURE_PATH = capture;
+  env.GH_REPO = 'github.com/attacker/wrong-repository';
+  env.GH_EXPECT_REPO = 'github.com/diffwright/fixture';
 
   const result = await run(
     directory,
@@ -822,6 +911,10 @@ test('PR creation links an issue in the body without passing an unsupported gh f
     body: string;
   };
   assert.equal(captured.args.includes('--issue'), false);
+  assert.equal(
+    captured.args[captured.args.indexOf('--repo') + 1],
+    'github.com/diffwright/fixture',
+  );
   assert.equal(
     captured.args[captured.args.indexOf('--title') + 1],
     'fix: route completions through provider-neutral configuration',
@@ -1154,6 +1247,101 @@ test('PR creation aborts when a divergent remote feature rejects the push', asyn
 
   assert.equal(result.status, 1, result.stderr || result.stdout);
   assert.match(result.stderr, /Could not push the reviewed PR branch/);
+  assert.equal(fs.existsSync(capture), false);
+});
+
+test('PR creation rejects a push URL for a different GitHub repository', async (context) => {
+  const directory = createRepository(context);
+  addPrMutationFixture(context, directory, false);
+  const capture = path.join(directory, 'gh-capture.json');
+  const fakeBin = createFakeGh(context, capture);
+  const server = await createCompletionServer(context);
+  const env = customEnvironment(server.baseURL);
+  env.PATH = `${fakeBin}${path.delimiter}${env.PATH ?? ''}`;
+  env.GH_CAPTURE_PATH = capture;
+  env.GIT_FAKE_PUSH_URL = 'https://github.com/attacker/wrong-repository.git';
+
+  const result = await run(
+    directory,
+    [
+      'pr',
+      '--base',
+      'main',
+      '--create-pr',
+      '--yes',
+      '--skip-format',
+    ],
+    env,
+  );
+
+  assert.equal(result.status, 1, result.stderr || result.stdout);
+  assert.match(result.stderr, /push destination does not match/i);
+  assert.equal(server.requests.length, 0);
+  assert.equal(fs.existsSync(capture), false);
+});
+
+test('PR creation rejects an origin URL with an explicit port', async (context) => {
+  const directory = createRepository(context);
+  addPrMutationFixture(context, directory, false);
+  const capture = path.join(directory, 'gh-capture.json');
+  const fakeBin = createFakeGh(context, capture);
+  const server = await createCompletionServer(context);
+  const env = customEnvironment(server.baseURL);
+  env.PATH = `${fakeBin}${path.delimiter}${env.PATH ?? ''}`;
+  env.GH_CAPTURE_PATH = capture;
+  env.GIT_FAKE_ORIGIN_URL =
+    'https://github.enterprise.example:8443/diffwright/fixture.git';
+
+  const result = await run(
+    directory,
+    [
+      'pr',
+      '--base',
+      'main',
+      '--create-pr',
+      '--yes',
+      '--skip-format',
+    ],
+    env,
+  );
+
+  assert.equal(result.status, 1, result.stderr || result.stdout);
+  assert.match(result.stderr, /not a supported GitHub repository URL/i);
+  assert.equal(server.requests.length, 0);
+  assert.equal(fs.existsSync(capture), false);
+});
+
+test('PR creation rejects a sensitive SCP username before provider work', async (context) => {
+  const directory = createRepository(context);
+  addPrMutationFixture(context, directory, false);
+  const capture = path.join(directory, 'gh-capture.json');
+  const fakeBin = createFakeGh(context, capture);
+  const server = await createCompletionServer(context);
+  const env = customEnvironment(server.baseURL);
+  env.PATH = `${fakeBin}${path.delimiter}${env.PATH ?? ''}`;
+  env.GH_CAPTURE_PATH = capture;
+  const secretUsername = 'sensitive_username_token';
+  env.GIT_FAKE_PUSH_URL =
+    `${secretUsername}@github.com:diffwright/fixture.git`;
+
+  const result = await run(
+    directory,
+    [
+      'pr',
+      '--base',
+      'main',
+      '--create-pr',
+      '--yes',
+      '--skip-format',
+    ],
+    env,
+  );
+
+  assert.equal(result.status, 1, result.stderr || result.stdout);
+  assert.match(result.stderr, /not a supported GitHub repository URL/i);
+  assert.doesNotMatch(result.stdout, new RegExp(secretUsername, 'u'));
+  assert.doesNotMatch(result.stderr, new RegExp(secretUsername, 'u'));
+  assert.equal(server.requests.length, 0);
   assert.equal(fs.existsSync(capture), false);
 });
 
