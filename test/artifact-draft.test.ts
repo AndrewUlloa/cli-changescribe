@@ -798,6 +798,100 @@ test('allows supporting-only work and honors primary and supporting path overrid
   );
 });
 
+test('keeps fixture data supporting when substantive source changes are present', () => {
+  const evidence = changeEvidence.createEvidenceBundle({
+    snapshot: { headSha: 'f'.repeat(40) },
+    items: [
+      {
+        id: 'change-source',
+        kind: 'change',
+        basis: 'observed',
+        source: { kind: 'git-diff', locator: 'src/pr-workflow.ts' },
+        payload: {
+          status: 'modified',
+          path: 'src/pr-workflow.ts',
+          additions: 2,
+          deletions: 0,
+          binary: false,
+          patch: '+bindGitHubRepository();\n',
+        },
+      },
+      {
+        id: 'change-fixture',
+        kind: 'change',
+        basis: 'observed',
+        source: {
+          kind: 'git-diff',
+          locator: 'fixtures/evidence-v2/corpus.json',
+        },
+        payload: {
+          status: 'modified',
+          path: 'fixtures/evidence-v2/corpus.json',
+          additions: 4,
+          deletions: 1,
+          binary: false,
+          patch: '+{"title":"boundary"}\n',
+        },
+      },
+    ],
+    receipts: [],
+    coverage: { complete: true, gaps: [] },
+  });
+  const fixturePrimary = {
+    schemaVersion: 1,
+    title: {
+      type: 'test',
+      breaking: false,
+      subject: 'cover title boundaries',
+      claimId: 'claim-fixture',
+    },
+    claims: [
+      {
+        id: 'claim-fixture',
+        kind: 'change',
+        text: 'cover title boundaries.',
+        evidenceIds: ['change-fixture'],
+        basis: 'observed',
+        significance: 'primary',
+      },
+      {
+        id: 'claim-source',
+        kind: 'change',
+        text: 'bind GitHub mutations to the reviewed repository.',
+        evidenceIds: ['change-source'],
+        basis: 'observed',
+        significance: 'supporting',
+      },
+    ],
+    sections: [
+      { kind: 'summary', claimIds: ['claim-fixture'] },
+      { kind: 'changes', claimIds: ['claim-source'] },
+    ],
+    trailers: [],
+  };
+
+  assert.throws(
+    () => artifactDraft.parseArtifactDraft(JSON.stringify(fixturePrimary), evidence),
+    /primary change may cite only substantive change evidence/,
+  );
+
+  const fixtureOnly = changeEvidence.createEvidenceBundle({
+    snapshot: { headSha: 'f'.repeat(40) },
+    items: [(evidence as { items: readonly unknown[] }).items[1]],
+    receipts: [],
+    coverage: { complete: true, gaps: [] },
+  });
+  const fixtureOnlyDraft = structuredClone(fixturePrimary);
+  fixtureOnlyDraft.claims = [fixtureOnlyDraft.claims[0]];
+  fixtureOnlyDraft.sections = [{ kind: 'summary', claimIds: ['claim-fixture'] }];
+  assert.doesNotThrow(() =>
+    artifactDraft.parseArtifactDraft(
+      JSON.stringify(fixtureOnlyDraft),
+      fixtureOnly,
+    ),
+  );
+});
+
 test('rejects claims assigned to semantically incompatible sections', () => {
   const candidate = validDraft();
   const sections = candidate.sections as Array<{
