@@ -120,6 +120,38 @@ function fixture(id: string): RepositoryFixture {
   return found;
 }
 
+function patchFailingRunner(failure: unknown): CommandRunner {
+  return {
+    exec(file, args, options) {
+      if (
+        file === 'git' &&
+        args[0] === 'diff' &&
+        args.includes('--unified=3')
+      ) {
+        throw failure;
+      }
+      return defaultCommandRunner.exec(file, args, options);
+    },
+    spawn(file, args, options) {
+      return defaultCommandRunner.spawn(file, args, options);
+    },
+  };
+}
+
+function nodeMaxBufferError(): Error {
+  try {
+    defaultCommandRunner.exec(
+      process.execPath,
+      ['-e', 'process.stdout.write("x".repeat(1024))'],
+      { encoding: 'utf8', maxBuffer: 1, stdio: 'pipe' },
+    );
+  } catch (error) {
+    assert.ok(error instanceof Error);
+    return error;
+  }
+  throw new Error('Expected Node to reject output beyond maxBuffer.');
+}
+
 test('collects delete-only evidence with the removed patch', (context) => {
   const repository = materializeRepository(fixture('delete-only'));
   context.after(() =>
@@ -305,6 +337,60 @@ test('marks binary and oversized patches as explicit coverage gaps', (context) =
     bundle.items.find((item) => item.payload.path === 'large.txt')?.payload.patch,
     null,
   );
+});
+
+test('classifies only Node maxBuffer patch failures as size limits', (context) => {
+  const repository = materializeRepository(fixture('delete-only'));
+  context.after(() =>
+    fs.rmSync(repository.directory, { recursive: true, force: true }),
+  );
+
+  const bundle = gitEvidence.collectPullRequestEvidence(
+    {
+      cwd: repository.directory,
+      baseBranch: repository.baseBranch,
+      fetch: false,
+    },
+    patchFailingRunner(nodeMaxBufferError()),
+  );
+
+  assert.deepEqual(bundle.coverage.gaps, [
+    {
+      source: 'git-patch',
+      reason: 'size-limit',
+      locator: 'src/legacy.ts',
+    },
+  ]);
+  assert.equal(bundle.items[0].payload.patch, null);
+});
+
+test('marks other patch failures unavailable without trusting lookalike data', (context) => {
+  const repository = materializeRepository(fixture('delete-only'));
+  context.after(() =>
+    fs.rmSync(repository.directory, { recursive: true, force: true }),
+  );
+  const lookalike = {
+    code: 'ENOBUFS',
+    syscall: 'spawnSync git',
+  };
+
+  const bundle = gitEvidence.collectPullRequestEvidence(
+    {
+      cwd: repository.directory,
+      baseBranch: repository.baseBranch,
+      fetch: false,
+    },
+    patchFailingRunner(lookalike),
+  );
+
+  assert.deepEqual(bundle.coverage.gaps, [
+    {
+      source: 'git-patch',
+      reason: 'unavailable',
+      locator: 'src/legacy.ts',
+    },
+  ]);
+  assert.equal(bundle.items[0].payload.patch, null);
 });
 
 test('pins the evidence snapshot and rejects option-like base input', (context) => {
@@ -506,6 +592,44 @@ test('rechecks the actual remote base before GitHub mutation', (context) => {
         repository.directory,
       ),
     /Remote base changed after evidence collection/,
+  );
+});
+
+test('does not accept a local base when the remote base is unavailable', (context) => {
+  const repository = materializeRepository(fixture('delete-only'));
+  const remote = fs.mkdtempSync(
+    path.join(path.dirname(repository.directory), 'empty-remote-'),
+  );
+  context.after(() => {
+    fs.rmSync(repository.directory, { recursive: true, force: true });
+    fs.rmSync(remote, { recursive: true, force: true });
+  });
+  const bundle = gitEvidence.collectPullRequestEvidence({
+    cwd: repository.directory,
+    baseBranch: repository.baseBranch,
+    fetch: false,
+  });
+
+  assert.throws(
+    () =>
+      gitEvidence.assertRemoteEvidenceBaseCurrent(
+        bundle.snapshot,
+        repository.baseBranch,
+        repository.directory,
+      ),
+    /Remote base is unavailable/,
+  );
+
+  git(remote, ['init', '--quiet', '--bare']);
+  git(repository.directory, ['remote', 'add', 'origin', remote]);
+  assert.throws(
+    () =>
+      gitEvidence.assertRemoteEvidenceBaseCurrent(
+        bundle.snapshot,
+        repository.baseBranch,
+        repository.directory,
+      ),
+    /Remote base is unavailable/,
   );
 });
 

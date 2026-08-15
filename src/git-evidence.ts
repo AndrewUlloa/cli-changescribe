@@ -1,3 +1,4 @@
+import { types as nodeTypes } from 'node:util';
 import {
   createEvidenceBundle,
   type ChangeEvidenceItem,
@@ -31,6 +32,13 @@ interface DiffCounts {
   deletions: number | null;
   binary: boolean;
 }
+
+type PatchCollectionResult =
+  | Readonly<{ kind: 'collected'; patch: string }>
+  | Readonly<{
+      kind: 'failed';
+      reason: 'size-limit' | 'unavailable';
+    }>;
 
 export function collectPullRequestEvidence(
   options: PullRequestEvidenceOptions,
@@ -137,25 +145,25 @@ export function collectPullRequestEvidence(
         cwd,
         runner,
       );
-      if (result === null) {
+      if (result.kind === 'failed') {
         gaps.push({
           source: 'git-patch',
-          reason: 'size-limit',
+          reason: result.reason,
           locator: changedPath.path,
         });
       } else if (
-        result.length > maxPatchCharsPerFile ||
-        collectedPatchChars + result.length > maxTotalPatchChars
+        result.patch.length > maxPatchCharsPerFile ||
+        collectedPatchChars + result.patch.length > maxTotalPatchChars
       ) {
         gaps.push({
           source: 'git-patch',
           reason: 'size-limit',
           locator: changedPath.path,
-          omittedBytes: Buffer.byteLength(result),
+          omittedBytes: Buffer.byteLength(result.patch),
         });
       } else {
-        patch = result;
-        collectedPatchChars += result.length;
+        patch = result.patch;
+        collectedPatchChars += result.patch.length;
       }
     }
 
@@ -248,7 +256,12 @@ export function assertRemoteEvidenceBaseCurrent(
     );
   }
   const remoteRef = `refs/heads/${validatedBase}`;
-  const remoteSha = remoteRefSha(remoteRef, cwd, runner);
+  const remoteSha = remoteRefSha(
+    remoteRef,
+    cwd,
+    runner,
+    'Remote base is unavailable. Verify origin contains the selected base branch and retry.',
+  );
   if (remoteSha !== snapshot.baseSha) {
     throw new Error(
       'Remote base changed after evidence collection. Regenerate the artifact before mutation.',
@@ -267,6 +280,7 @@ export function assertRemoteEvidenceHeadCurrent(
     `refs/heads/${validatedHead}`,
     cwd,
     runner,
+    'Remote feature branch is unavailable. Push the reviewed HEAD and retry.',
   );
   if (remoteSha !== snapshot.headSha) {
     throw new Error(
@@ -279,13 +293,23 @@ function remoteRefSha(
   remoteRef: string,
   cwd: string,
   runner: CommandRunner,
+  unavailableMessage: string,
 ): string {
-  const output = runGit(
-    ['ls-remote', '--exit-code', 'origin', remoteRef],
-    cwd,
-    runner,
-    'Remote base revalidation',
-  );
+  let output: string;
+  try {
+    output = runner.exec(
+      'git',
+      ['ls-remote', '--exit-code', 'origin', remoteRef],
+      {
+        cwd,
+        encoding: 'utf8',
+        stdio: 'pipe',
+        maxBuffer: GIT_METADATA_BUFFER_BYTES,
+      },
+    );
+  } catch {
+    throw new Error(unavailableMessage);
+  }
   const match = /^(?<sha>[0-9a-f]{40,64})\t(?<ref>refs\/heads\/.+)\r?\n?$/u.exec(
     output,
   );
@@ -293,7 +317,7 @@ function remoteRefSha(
     match?.groups?.sha === undefined ||
     match.groups.ref !== remoteRef
   ) {
-    throw new Error('Remote reference revalidation returned an invalid result.');
+    throw new Error(unavailableMessage);
   }
   return match.groups.sha;
 }
@@ -411,13 +435,13 @@ function collectPatch(
   headSha: string,
   cwd: string,
   runner: CommandRunner,
-): string | null {
+): PatchCollectionResult {
   const paths =
     changedPath.oldPath === undefined
       ? [changedPath.path]
       : [changedPath.oldPath, changedPath.path];
   try {
-    return runner.exec(
+    const patch = runner.exec(
       'git',
       [
         'diff',
@@ -437,9 +461,26 @@ function collectPatch(
         maxBuffer: MAX_SUPPORTED_PATCH_CHARS_PER_FILE + 65_536,
       },
     );
-  } catch {
-    return null;
+    return { kind: 'collected', patch };
+  } catch (error) {
+    return {
+      kind: 'failed',
+      reason: isNodeMaxBufferError(error) ? 'size-limit' : 'unavailable',
+    };
   }
+}
+
+function isNodeMaxBufferError(error: unknown): boolean {
+  if (!nodeTypes.isNativeError(error)) {
+    return false;
+  }
+  const code = Reflect.get(error, 'code');
+  const syscall = Reflect.get(error, 'syscall');
+  return (
+    code === 'ENOBUFS' &&
+    typeof syscall === 'string' &&
+    syscall.startsWith('spawnSync ')
+  );
 }
 
 function parseNameStatus(output: string): ChangedPath[] {
