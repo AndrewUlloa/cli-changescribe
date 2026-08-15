@@ -99,6 +99,7 @@ function expectedDiffwrightFiles(): string[] {
     'gate-receipts',
     'git-evidence',
     'init',
+    'operation-timings',
     'package-manager',
     'project-setup',
     'prompts',
