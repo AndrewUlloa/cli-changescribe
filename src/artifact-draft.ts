@@ -54,7 +54,7 @@ export const PRIMARY_GROUNDING_REPAIR_INSTRUCTION =
   'Repair category: primary-grounding. Replace the title and primary claim with the smallest conservative factual change supported by every cited evidence ID. Prefer one direct evidence ID. Omit optional claims and trailers.';
 
 export const MINIMAL_ARTIFACT_REPAIR_INSTRUCTION =
-  'For this repair, return only a title, one observed primary change claim, one Summary section containing that claim, and an empty trailers array. Omit scope and every optional claim.';
+  'For this repair, return only a title, one observed primary change claim, one Summary section containing that claim, and an empty trailers array. Preserve any explicitly required valid title type, scope, and breaking value. Omit every optional claim.';
 
 export function artifactRepairCategory(instruction: string): string {
   return /^Repair category: ([a-z-]+)\./u.exec(instruction)?.[1] ??

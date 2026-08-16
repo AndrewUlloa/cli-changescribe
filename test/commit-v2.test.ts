@@ -119,7 +119,7 @@ function validDraft(): Record<string, unknown> {
   return {
     schemaVersion: 1,
     title: {
-      type: 'fix',
+      type: 'chore',
       breaking: false,
       subject: 'describe staged change',
       claimId: 'claim-change',
@@ -265,9 +265,46 @@ test('repairs one invalid draft from the original staged evidence', async (conte
   assert.equal(capture.completionCalls, 3);
   assert.match(capture.prompt, /previous response failed deterministic validation/);
   assert.match(capture.prompt, /Repair category: json-shape/);
-  assert.match(capture.prompt, /return only a title.*one observed primary/is);
+  assert.doesNotMatch(capture.prompt, /return only a title.*one observed primary/is);
   assert.match(capture.prompt, /evidence-value/);
   assert.doesNotMatch(capture.prompt, /not-json/);
+});
+
+test('repairs a semantically unsupported type from provided intent', async (context) => {
+  const directory = repository(context);
+  useRepository(context, directory);
+  fs.writeFileSync(
+    path.join(directory, 'intent.md'),
+    'Add a user-visible parser flag.\n',
+  );
+  git(directory, ['add', 'intent.md']);
+  git(directory, ['commit', '--quiet', '-m', 'docs: add intent fixture']);
+  fs.writeFileSync(path.join(directory, 'parser.ts'), 'export const flag = true;\n');
+  git(directory, ['add', 'parser.ts']);
+  const capture = { resolveCalls: 0, completionCalls: 0, prompt: '' };
+  const unsupported = validDraft();
+  (unsupported.title as Record<string, unknown>).type = 'fix';
+  const supported = validDraft();
+  (supported.title as Record<string, unknown>).type = 'feat';
+
+  await runCommit(
+    ['--dry-run', '--context-file', 'intent.md'],
+    dependencies(capture, [
+      JSON.stringify(unsupported),
+      JSON.stringify(supported),
+    ]),
+  );
+
+  assert.equal(capture.completionCalls, 3);
+  assert.match(capture.prompt, /Repair category: title-policy/);
+  assert.match(
+    capture.prompt,
+    /Supported Conventional Commit types for this evidence: \[\\?"feat\\?"\]/,
+  );
+  assert.doesNotMatch(
+    capture.prompt,
+    /Supported Conventional Commit types for this evidence: .*fix/,
+  );
 });
 
 test('rejects an invented breaking change after one repair', async (context) => {
@@ -332,7 +369,8 @@ test('critic removes supporting prose that cites unrelated substantive evidence'
     ),
   );
   assert.equal(capture.completionCalls, 2);
-  assert.match(capture.prompt, /Use feat for a new feature and fix for a bug fix/);
+  assert.match(capture.prompt, /feat adds a user-visible capability/);
+  assert.match(capture.prompt, /fix corrects incorrect behavior/);
 });
 
 test('critic still blocks an unsupported primary claim', async (context) => {
@@ -391,6 +429,8 @@ test('critic re-audits one grounded replacement for an unsupported primary claim
   assert.equal(capture.completionCalls, 4);
   assert.match(capture.prompt, /previous primary claim failed evidence review/i);
   assert.match(capture.prompt, /Repair category: primary-grounding/);
+  assert.match(capture.prompt, /Preserve these already validated title fields exactly/);
+  assert.match(capture.prompt, /\\"type\\":\\"chore\\"/);
 });
 
 test('critic transport failure is terminal and never triggers draft repair', async (context) => {

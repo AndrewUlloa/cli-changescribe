@@ -17,6 +17,41 @@ function isArtifactPrompt(serialized: string): boolean {
     serialized.includes('previous primary claim failed evidence review');
 }
 
+function promptText(value: Record<string, unknown>): string {
+  const messages = value.messages;
+  if (!Array.isArray(messages)) {
+    return '';
+  }
+  return messages
+    .map((message) =>
+      typeof message === 'object' && message !== null &&
+      typeof Reflect.get(message, 'content') === 'string'
+        ? String(Reflect.get(message, 'content'))
+        : '',
+    )
+    .join('\n');
+}
+
+function evidenceSupportedType(prompt: string): string {
+  const match = /Supported Conventional Commit types for this evidence: (\[[^\n]+\])/u
+    .exec(prompt);
+  if (match?.[1] === undefined) {
+    return 'chore';
+  }
+  const parsed = JSON.parse(match[1]) as unknown;
+  return Array.isArray(parsed) && typeof parsed[0] === 'string'
+    ? parsed[0]
+    : 'chore';
+}
+
+function evidenceSupportedScope(prompt: string): string | undefined {
+  const match = /Supported Conventional Commit scope for this evidence: ("[^"\n]+").*$/mu
+    .exec(prompt);
+  return match?.[1] === undefined
+    ? undefined
+    : JSON.parse(match[1]) as string;
+}
+
 function git(cwd: string, args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8' });
 }
@@ -73,6 +108,7 @@ async function createCompletionServer(
       });
       response.writeHead(200, { 'content-type': 'application/json' });
       const serializedRequest = JSON.stringify(parsed);
+      const artifactPrompt = promptText(parsed);
       const isArtifactCritic = serializedRequest.includes(
         'independently audit every proposed model-authored artifact claim',
       );
@@ -166,10 +202,10 @@ async function createCompletionServer(
                   ? JSON.stringify({
                       schemaVersion: 1,
                       title: {
-                        type: 'fix',
-                        ...(options.scope === undefined
+                        type: evidenceSupportedType(artifactPrompt),
+                        ...(evidenceSupportedScope(artifactPrompt) === undefined
                           ? {}
-                          : { scope: options.scope }),
+                          : { scope: evidenceSupportedScope(artifactPrompt) }),
                         breaking: false,
                         subject: renderInvalid
                           ? 'route completions through provider-neutral configuration.'
@@ -662,7 +698,7 @@ test('commit workflow uses explicit custom provider through the shared transport
   assert.match(result.stdout, /Generating commit message with AI \(custom\)/);
   assert.match(
     result.stdout,
-    /fix: route completions through provider-neutral configuration/,
+    /docs: route completions through provider-neutral configuration/,
   );
   assert.doesNotMatch(result.stdout, /workflow-secret|ambient-secret/);
   assert.equal(server.requests.length, 2);
@@ -725,7 +761,7 @@ test('repository policy stays local while standard generation remains valid', as
   assert.match(request, /git-policy-metadata/);
   assert.match(
     result.stdout,
-    /fix: route completions through provider-neutral configuration/,
+    /chore: route completions through provider-neutral configuration/,
   );
 });
 
@@ -1231,7 +1267,7 @@ test('PR creation links an issue in the body without passing an unsupported gh f
   );
   assert.equal(
     captured.args[captured.args.indexOf('--title') + 1],
-    'fix: route completions through provider-neutral configuration',
+    'docs: route completions through provider-neutral configuration',
   );
   assert.match(captured.body, /(?:^|\n)Closes #123(?:\n|$)/);
   assert.match(captured.body, /Passed: `npm run build`\n\nCloses #123$/u);
@@ -1319,7 +1355,7 @@ test('PR generation uses pinned base policy and redacts feature policy bytes', a
   };
   assert.equal(
     captured.args[captured.args.indexOf('--title') + 1],
-    'fix: route completions through provider-neutral configuration',
+    'chore: route completions through provider-neutral configuration',
   );
   const requests = JSON.stringify(server.requests.map((request) => request.body));
   assert.equal(requests.includes('\\"scopeMode\\":\\"optional\\"'), false);

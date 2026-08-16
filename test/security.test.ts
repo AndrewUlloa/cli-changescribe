@@ -224,7 +224,7 @@ test('commit dry-run treats staged filenames as data and never commits', async (
         content: JSON.stringify({
           schemaVersion: 1,
           title: {
-            type: 'fix',
+            type: 'chore',
             breaking: false,
             subject: 'treat staged filenames as data',
             claimId: 'claim-change',
