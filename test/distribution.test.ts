@@ -89,6 +89,7 @@ function expectedDiffwrightFiles(): string[] {
     'arguments',
     'artifact-draft',
     'artifact-critic',
+    'artifact-completeness',
     'artifact-renderer',
     'change-evidence',
     'change-map',
@@ -116,6 +117,7 @@ function expectedDiffwrightFiles(): string[] {
     'subprocess',
     'setup-files',
     'staged-evidence',
+    'title-semantics',
   ]) {
     files.push(`dist/${moduleName}.js`, `dist/${moduleName}.js.map`);
   }

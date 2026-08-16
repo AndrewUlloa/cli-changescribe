@@ -50,6 +50,7 @@ async function createCompletionServer(
     scope?: string;
     dishonestSupporting?: boolean;
     supportedOptional?: boolean;
+    completeCoverageRepair?: boolean;
     replacementClaimId?: string;
     primaryRejectedCritiques?: number;
   } = {},
@@ -77,6 +78,12 @@ async function createCompletionServer(
       const isArtifactRequest = isArtifactPrompt(serializedRequest);
       const critiquesSupportedOptional = serializedRequest.includes(
         'claim:claim-supported',
+      );
+      const critiquesCoverage = serializedRequest.includes(
+        'claim:claim-coverage',
+      );
+      const isCoverageRepair = serializedRequest.includes(
+        'Repair category: substantive-coverage',
       );
       const criticRequestCount = requests.filter((item) =>
         JSON.stringify(item.body).includes(
@@ -143,6 +150,13 @@ async function createCompletionServer(
                               supported: true,
                             }]
                           : []),
+                        ...(critiquesCoverage
+                          ? [{
+                              candidateId: 'claim:claim-coverage',
+                              evidenceIds: ['change-2'],
+                              supported: true,
+                            }]
+                          : []),
                       ],
                     })
                   : parseInvalid
@@ -191,6 +205,16 @@ async function createCompletionServer(
                               significance: 'supporting',
                             }]
                           : []),
+                        ...(options.completeCoverageRepair && isCoverageRepair
+                          ? [{
+                              id: 'claim-coverage',
+                              kind: 'change',
+                              text: 'cover the second substantive change.',
+                              evidenceIds: ['change-2'],
+                              basis: 'observed',
+                              significance: 'supporting',
+                            }]
+                          : []),
                       ],
                       sections: [
                         { kind: 'summary', claimIds: [responseClaimId] },
@@ -202,6 +226,12 @@ async function createCompletionServer(
                           ? [{
                               kind: 'changes',
                               claimIds: ['claim-supported'],
+                            }]
+                          : []),
+                        ...(options.completeCoverageRepair && isCoverageRepair
+                          ? [{
+                              kind: 'changes',
+                              claimIds: ['claim-coverage'],
                             }]
                           : []),
                       ],
@@ -973,6 +1003,92 @@ test('PR deterministic and primary repairs stay within five provider requests', 
   assert.match(result.stdout, /requesting one repair/i);
   assert.match(result.stdout, /requesting one grounded replacement/i);
   assert.equal(fs.existsSync(output), true);
+});
+
+function addSubstantiveCoverageFixture(directory: string): void {
+  git(directory, ['switch', '--quiet', '-c', 'feature']);
+  fs.mkdirSync(path.join(directory, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(directory, 'src', 'first.ts'), 'export const first = 1;\n');
+  fs.writeFileSync(path.join(directory, 'src', 'second.ts'), 'export const second = 2;\n');
+  git(directory, ['add', 'src/first.ts', 'src/second.ts']);
+  git(directory, ['commit', '--quiet', '-m', 'feat: add two source changes']);
+}
+
+test('PR repairs incomplete substantive coverage from original evidence within five requests', async (context) => {
+  const directory = createRepository(context);
+  addSubstantiveCoverageFixture(directory);
+  const output = path.join(directory, 'summary.md');
+  const server = await createCompletionServer(context, {
+    invalidArtifactResponses: 1,
+    completeCoverageRepair: true,
+  });
+
+  const result = await run(
+    directory,
+    ['pr', '--base', 'main', '--out', output],
+    customEnvironment(server.baseURL),
+  );
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.equal(server.requests.length, 5);
+  assert.match(result.stdout, /substantive coverage.*repair/i);
+  const repairRequest = JSON.stringify(server.requests[3].body);
+  assert.match(repairRequest, /Repair category: substantive-coverage/);
+  assert.match(repairRequest, /Original evidence bundle/);
+  assert.doesNotMatch(
+    repairRequest,
+    /return only a title.*one observed primary/is,
+  );
+  assert.match(
+    fs.readFileSync(output, 'utf8'),
+    /cover the second substantive change\./,
+  );
+});
+
+test('PR fails closed when the bounded coverage repair remains incomplete', async (context) => {
+  const directory = createRepository(context);
+  addSubstantiveCoverageFixture(directory);
+  const output = path.join(directory, 'summary.md');
+  const server = await createCompletionServer(context);
+
+  const result = await run(
+    directory,
+    ['pr', '--base', 'main', '--out', output],
+    customEnvironment(server.baseURL),
+  );
+
+  assert.equal(result.status, 1, result.stderr || result.stdout);
+  assert.equal(server.requests.length, 4);
+  assert.match(
+    result.stderr,
+    /does not cover every substantive change/i,
+  );
+  assert.equal(fs.existsSync(output), false);
+});
+
+test('PR coverage repair never exceeds the five-request ceiling after primary repair', async (context) => {
+  const directory = createRepository(context);
+  addSubstantiveCoverageFixture(directory);
+  const output = path.join(directory, 'summary.md');
+  const server = await createCompletionServer(context, {
+    invalidArtifactResponses: 1,
+    completeCoverageRepair: true,
+    primaryRejectedCritiques: 1,
+  });
+
+  const result = await run(
+    directory,
+    ['pr', '--base', 'main', '--out', output],
+    customEnvironment(server.baseURL),
+  );
+
+  assert.equal(result.status, 1, result.stderr || result.stdout);
+  assert.equal(server.requests.length, 5);
+  assert.match(
+    result.stderr,
+    /does not cover every substantive change/i,
+  );
+  assert.equal(fs.existsSync(output), false);
 });
 
 test('PR critic fails closed after one invalid grounded replacement', async (context) => {
