@@ -10,6 +10,11 @@ import {
   type VerificationReceipt,
 } from './change-evidence';
 import {
+  buildChangeMap,
+  type ChangeMapCountSummary,
+  type ChangeMapGroup,
+} from './change-map';
+import {
   reviewEditorialText,
   type EditorialPolicy,
 } from './editorial-policy';
@@ -27,6 +32,8 @@ export const STANDARD_COMMIT_TYPES = Object.freeze([
   'style',
   'test',
 ] as const);
+
+export const MAX_GITHUB_PULL_REQUEST_BODY_BYTES = 64 * 1024;
 
 export interface ConventionalTitlePolicy {
   allowedTypes?: readonly string[];
@@ -75,6 +82,16 @@ const TYPE_RE = /^[a-z][a-z0-9-]{0,31}$/u;
 const SCOPE_RE = /^[a-z0-9][a-z0-9._/-]{0,63}$/u;
 const CONTROL_OR_LINE_RE =
   /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]/u;
+const UNSAFE_BODY_CONTROL_RE =
+  /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]/u;
+const BARE_CARRIAGE_RETURN_RE = /\r(?!\n)/u;
+const CHANGE_MAP_LABELS: Readonly<Record<ChangeMapGroup['category'], string>> = {
+  implementation: 'Implementation',
+  tests: 'Tests',
+  documentation: 'Documentation',
+  configuration: 'Configuration',
+  other: 'Other',
+};
 
 export function renderConventionalTitle(
   draft: ConventionalTitleDraft,
@@ -183,16 +200,22 @@ export function renderPullRequestArtifact(
   const sectionsByKind = new Map(
     draft.sections.map((section) => [section.kind, section]),
   );
+  const changeAccounting = renderChangeAccounting(buildChangeMap(evidence));
   const bodySections: string[] = [];
 
   for (const kind of SECTION_ORDER) {
-    const lines =
-      kind === 'verification'
-        ? renderVerificationReceipts(evidence.receipts)
-        : renderClaimSection(
-            sectionsByKind.get(kind)?.claimIds ?? [],
-            renderableById,
-          );
+    let lines: string[];
+    if (kind === 'verification') {
+      lines = renderVerificationReceipts(evidence.receipts);
+    } else {
+      const claimLines = renderClaimSection(
+        sectionsByKind.get(kind)?.claimIds ?? [],
+        renderableById,
+      );
+      lines = kind === 'changes'
+        ? [...claimLines, ...changeAccounting]
+        : claimLines;
+    }
     if (lines.length > 0) {
       bodySections.push(`## ${SECTION_HEADINGS[kind]}\n\n${lines.join('\n')}`);
     }
@@ -202,6 +225,7 @@ export function renderPullRequestArtifact(
     throw new Error('Pull-request draft has no supported content to render.');
   }
   const body = `${bodySections.join('\n\n')}\n`;
+  assertSafePullRequestBody(body);
   const editorialWarnings = reviewEditorialText(
     `${renderedTitle.header}\n${body}`,
     editorialPolicy,
@@ -362,6 +386,58 @@ function renderClaimSection(
     const claim = renderableById.get(claimId);
     return claim === undefined ? [] : [`- ${claim.text}`];
   });
+}
+
+function renderChangeAccounting(
+  map: ReturnType<typeof buildChangeMap>,
+): string[] {
+  return map.groups
+    .filter((group) => group.fileCount > 0)
+    .map((group) => {
+      const fileLabel = group.fileCount === 1 ? 'file' : 'files';
+      const additions = renderChangeCount('+', group.additions);
+      const deletions = renderChangeCount('-', group.deletions);
+      const binary = group.binaryFiles === 0
+        ? ''
+        : `; ${String(group.binaryFiles)} binary ${
+          group.binaryFiles === 1 ? 'file' : 'files'
+        }`;
+      return `- **${CHANGE_MAP_LABELS[group.category]}:** ${String(
+        group.fileCount,
+      )} ${fileLabel} (${additions} / ${deletions})${binary}`;
+    });
+}
+
+function renderChangeCount(
+  prefix: '+' | '-',
+  summary: ChangeMapCountSummary,
+): string {
+  const count = `${prefix}${String(summary.value)}`;
+  if (summary.complete) {
+    return count;
+  }
+  const fileLabel = summary.unknownFiles === 1 ? 'file' : 'files';
+  return `${count} known (${String(summary.unknownFiles)} ${fileLabel} unknown)`;
+}
+
+function assertSafePullRequestBody(body: string): void {
+  if (Buffer.from(body, 'utf8').toString('utf8') !== body) {
+    throw new Error('Pull-request body must contain valid UTF-8 text.');
+  }
+  if (
+    UNSAFE_BODY_CONTROL_RE.test(body) ||
+    BARE_CARRIAGE_RETURN_RE.test(body)
+  ) {
+    throw new Error(
+      'Pull-request body contains an unsupported control character.',
+    );
+  }
+  if (
+    Buffer.byteLength(body, 'utf8') >
+      MAX_GITHUB_PULL_REQUEST_BODY_BYTES
+  ) {
+    throw new Error('Pull-request body exceeds its size limit.');
+  }
 }
 
 function renderVerificationReceipts(

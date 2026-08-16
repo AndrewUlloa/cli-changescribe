@@ -80,12 +80,12 @@ Non-decisions:
   - **Files:** `src/change-map.ts`, `test/change-map.test.ts`, `test/typescript-migration.test.ts`, `test/distribution.test.ts`
   - **Size:** M
 
-- [ ] **Task 3: Render reviewer-scale change accounting**
+- [x] **Task 3: Render reviewer-scale change accounting**
   - **Description:** Render critic-supported change claims plus deterministic aggregate category totals under Changes, with GitHub body-size enforcement and safe Markdown.
   - **Acceptance:**
-    - [ ] Empty groups disappear; non-empty totals render deterministically.
-    - [ ] Large PRs do not require one bullet per path.
-    - [ ] Unsafe paths cannot escape rendering and oversized bodies fail closed.
+    - [x] Empty groups disappear; non-empty totals render deterministically.
+    - [x] Large PRs do not require one bullet per path.
+    - [x] Unsafe paths cannot escape rendering and oversized bodies fail closed.
   - **Verify:** `npm run build && npm run build:test && node --test .test-dist/artifact-renderer.test.js`
   - **Depends on:** Task 2
   - **Files:** `src/artifact-renderer.ts`, `test/artifact-renderer.test.ts`
