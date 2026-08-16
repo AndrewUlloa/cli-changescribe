@@ -62,9 +62,9 @@ const INTENT_PATTERNS: Readonly<Record<
   RegExp
 >> = Object.freeze({
   feat:
-    /\b(?:add(?:s|ed|ing)?|introduc(?:e|es|ed|ing)|enabl(?:e|es|ed|ing)|support(?:s|ed|ing)?)\b[^\n.!?]{0,96}\b(?:user-visible|capabilit(?:y|ies)|feature|command|flag|option|api|endpoint|workflow|behavior)\b|\bnew\b[^\n.!?]{0,64}\b(?:capabilit(?:y|ies)|feature|command|flag|option|api|endpoint)\b/iu,
+    /\b(?:add(?:s|ed|ing)?|introduc(?:e|es|ed|ing)|enabl(?:e|es|ed|ing)|support(?:s|ed|ing)?)\b[^\n.!?]{0,96}\b(?:user-visible(?:\s+(?:behavior|workflow))?|capabilit(?:y|ies)|feature|command|flag|option|public api|endpoint)\b|\bnew\b[^\n.!?]{0,64}\b(?:capabilit(?:y|ies)|feature|command|flag|option|public api|endpoint)\b/iu,
   fix:
-    /\b(?:bug|defect|regression|incorrect|broken|crash(?:es|ed|ing)?|fail(?:s|ed|ure|ing)?|fix(?:es|ed|ing)?|correct(?:s|ed|ing)?|repair(?:s|ed|ing)?|resolv(?:e|es|ed|ing))\b/iu,
+    /\b(?:bug|defect|regression|incorrect|broken|crash(?:es|ed|ing)?|fix(?:es|ed|ing)?|correct(?:s|ed|ing)?|repair(?:s|ed|ing)?|resolv(?:e|es|ed|ing))\b/iu,
   perf:
     /\b(?:benchmark(?:s|ed|ing)?|latency|throughput|performance|faster|speed(?:s|up)?|memory usage|allocation(?:s)?|optimi[sz](?:e|es|ed|ing|ation))\b/iu,
   refactor:
@@ -133,11 +133,8 @@ export function assertTitleSemantics(
 
 function semanticChangeTypes(
   evidence: EvidenceBundle,
-  changes: readonly ChangeEvidenceItem[],
+  _changes: readonly ChangeEvidenceItem[],
 ): readonly SemanticCommitType[] {
-  if (isFormattingOnly(changes)) {
-    return Object.freeze(['style']);
-  }
   const explicit = explicitTypes(evidence.items);
   const intents = evidence.items.filter((item) => item.kind === 'intent');
   const history = evidence.items.filter((item) => item.kind === 'history');
@@ -160,9 +157,6 @@ function semanticChangeTypes(
   }
   if (detected.has('perf') && !hasPerformanceEvidence(evidence)) {
     detected.delete('perf');
-  }
-  if (detected.has('style') && !isFormattingOnly(changes)) {
-    detected.delete('style');
   }
   if (detected.has('refactor')) {
     if (
@@ -272,46 +266,6 @@ function changeDomain(change: ChangeEvidenceItem): ChangeDomain {
     return 'source';
   }
   return 'other';
-}
-
-function isFormattingOnly(changes: readonly ChangeEvidenceItem[]): boolean {
-  const sourceChanges = changes.filter(
-    (change) => changeDomain(change) === 'source',
-  );
-  return (
-    sourceChanges.length > 0 &&
-    sourceChanges.length === changes.length &&
-    sourceChanges.every((change) =>
-      change.payload.patch === null
-        ? false
-        : formattingOnlyPatch(change.payload.patch),
-    )
-  );
-}
-
-function formattingOnlyPatch(patch: string): boolean {
-  const removed: string[] = [];
-  const added: string[] = [];
-  for (const line of patch.split('\n')) {
-    if (line.startsWith('---') || line.startsWith('+++')) {
-      continue;
-    }
-    if (line.startsWith('-')) {
-      removed.push(normalizeFormatting(line.slice(1)));
-    } else if (line.startsWith('+')) {
-      added.push(normalizeFormatting(line.slice(1)));
-    }
-  }
-  return (
-    removed.length > 0 &&
-    added.length > 0 &&
-    removed.length === added.length &&
-    removed.sort().every((line, index) => line === added.sort()[index])
-  );
-}
-
-function normalizeFormatting(value: string): string {
-  return value.replace(/\s+/gu, '');
 }
 
 function highConfidenceScope(

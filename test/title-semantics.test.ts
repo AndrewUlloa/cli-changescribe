@@ -233,7 +233,7 @@ test('classifies behavior only from provided intent or explicit evidence', () =>
   }
 });
 
-test('recognizes formatting-only source changes without trusting a label', () => {
+test('recognizes formatting-only work from provided intent', () => {
   const formattingPatch = [
     '@@ -1,2 +1,2 @@',
     '-const value={answer:42};',
@@ -243,10 +243,47 @@ test('recognizes formatting-only source changes without trusting a label', () =>
     '',
   ].join('\n');
   const result = semantics.evaluateTitleSemantics(
-    bundle([{ id: 'format', path: 'src/value.ts', patch: formattingPatch }]),
+    bundle(
+      [{ id: 'format', path: 'src/value.ts', patch: formattingPatch }],
+      { intents: ['Apply formatting-only changes.'] },
+    ),
   );
 
   assert.deepEqual(result.allowedTypes, ['style']);
+});
+
+test('does not infer formatting-only work from language-ambiguous patches', () => {
+  const cases = [
+    [
+      '@@ -1,2 +1,2 @@',
+      '-const value={answer:42};',
+      '-export {value};',
+      '+const value = { answer: 42 };',
+      '+export { value };',
+      '',
+    ].join('\n'),
+    [
+      '@@ -1 +1 @@',
+      "-const label = 'two words';",
+      "+const label = 'twowords';",
+      '',
+    ].join('\n'),
+    [
+      '@@ -1,2 +1,2 @@',
+      '-initialize();',
+      '-start();',
+      '+start();',
+      '+initialize();',
+      '',
+    ].join('\n'),
+  ];
+
+  for (const [index, patch] of cases.entries()) {
+    const result = semantics.evaluateTitleSemantics(
+      bundle([{ id: `source-${String(index)}`, path: 'src/value.ts', patch }]),
+    );
+    assert.deepEqual(result.allowedTypes, ['chore']);
+  }
 });
 
 test('rejects fix for plan and changelog-only work even when context requests it', () => {
@@ -287,6 +324,15 @@ test('does not promote patch instructions or unsupported performance claims', ()
   assert.throws(
     () => semantics.assertTitleSemantics({ type: 'perf' }, evidence),
     /type is not supported/i,
+  );
+
+  const internalWorkflow = bundle(
+    [{ id: 'workflow', path: 'src/workflow.ts' }],
+    { intents: ['Add an internal workflow helper.'] },
+  );
+  assert.deepEqual(
+    semantics.evaluateTitleSemantics(internalWorkflow).allowedTypes,
+    ['chore'],
   );
 });
 
