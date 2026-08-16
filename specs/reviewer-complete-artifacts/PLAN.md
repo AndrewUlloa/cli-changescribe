@@ -58,12 +58,12 @@ Non-decisions:
 
 ### Phase 1: Preserve and Account
 
-- [ ] **Task 1: Preserve supported content during primary repair**
+- [x] **Task 1: Preserve supported content during primary repair**
   - **Description:** Return a typed primary-rejected critic result, retain only supported optional claims/trailers, generate and criticize one minimal replacement, then merge and reparse without changing retained bytes.
   - **Acceptance:**
-    - [ ] Supported optional content survives byte-for-byte.
-    - [ ] Unsupported optional content remains removed.
-    - [ ] Normal requests remain 2; primary repair is 4; maximum stays <=5.
+    - [x] Supported optional content survives byte-for-byte.
+    - [x] Unsupported optional content remains removed.
+    - [x] Normal requests remain 2; primary repair is 4; maximum stays <=5.
   - **Verify:** `npm run build && npm run build:test && node --test .test-dist/artifact-critic.test.js .test-dist/workflow-byok.test.js`
   - **Depends on:** None
   - **Files:** `src/artifact-critic.ts`, `src/pr-workflow.ts`, `test/artifact-critic.test.ts`, `test/workflow-byok.test.ts`

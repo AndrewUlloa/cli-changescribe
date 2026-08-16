@@ -14,9 +14,30 @@ interface CriticCandidate {
   readonly evidenceIds: readonly string[];
 }
 
-export interface FilteredArtifactCritique {
+export interface AcceptedArtifactCritique {
+  readonly status: 'accepted';
   readonly draft: ArtifactDraft;
   readonly removedCandidateIds: readonly string[];
+}
+
+export interface RetainedArtifactContent {
+  readonly claims: ArtifactDraft['claims'];
+  readonly sections: ArtifactDraft['sections'];
+  readonly trailers: ArtifactDraft['trailers'];
+}
+
+export interface PrimaryRejectedArtifactCritique {
+  readonly status: 'primary-rejected';
+  readonly retained: RetainedArtifactContent;
+  readonly removedCandidateIds: readonly string[];
+}
+
+export type FilteredArtifactCritique =
+  | AcceptedArtifactCritique
+  | PrimaryRejectedArtifactCritique;
+
+export interface ArtifactCritiqueFilterOptions {
+  readonly primaryRejection: 'return';
 }
 
 export class UnsupportedPrimaryArtifactClaimError extends Error {
@@ -281,19 +302,28 @@ function parseArtifactCritique(
 export function filterArtifactDraftByCritique(
   value: string,
   draft: ArtifactDraft,
+): AcceptedArtifactCritique;
+export function filterArtifactDraftByCritique(
+  value: string,
+  draft: ArtifactDraft,
+  options: ArtifactCritiqueFilterOptions,
+): FilteredArtifactCritique;
+export function filterArtifactDraftByCritique(
+  value: string,
+  draft: ArtifactDraft,
+  options?: ArtifactCritiqueFilterOptions,
 ): FilteredArtifactCritique {
   const verdicts = parseArtifactCritique(value, draft);
+  const primaryCandidateId = `claim:${draft.title.claimId}`;
+  const primaryRejected = verdicts.get(primaryCandidateId) === false;
   const removedCandidateIds = Object.freeze(
     [...verdicts.entries()]
-      .filter(([, supported]) => !supported)
+      .filter(
+        ([candidateId, supported]) =>
+          !supported && candidateId !== primaryCandidateId,
+      )
       .map(([candidateId]) => candidateId),
   );
-  if (removedCandidateIds.length === 0) {
-    return Object.freeze({ draft, removedCandidateIds });
-  }
-  if (removedCandidateIds.includes(`claim:${draft.title.claimId}`)) {
-    throw new UnsupportedPrimaryArtifactClaimError();
-  }
 
   const removedClaims = new Set(
     removedCandidateIds
@@ -305,6 +335,50 @@ export function filterArtifactDraftByCritique(
       .filter((candidateId) => candidateId.startsWith('trailer:'))
       .map((candidateId) => Number(candidateId.slice('trailer:'.length)) - 1),
   );
+  if (primaryRejected) {
+    if (options?.primaryRejection !== 'return') {
+      throw new UnsupportedPrimaryArtifactClaimError();
+    }
+    const retainedClaimIds = new Set(
+      draft.claims
+        .filter((claim) => {
+          if (claim.id === draft.title.claimId) {
+            return false;
+          }
+          return verdicts.get(`claim:${claim.id}`) === true;
+        })
+        .map((claim) => claim.id),
+    );
+    const retainedClaims = Object.freeze(
+      draft.claims.filter((claim) => retainedClaimIds.has(claim.id)),
+    );
+    const retainedSections = Object.freeze(
+      draft.sections
+        .map((section) => ({
+          ...section,
+          claimIds: Object.freeze(
+            section.claimIds.filter((claimId) => retainedClaimIds.has(claimId)),
+          ),
+        }))
+        .filter((section) => section.claimIds.length > 0),
+    );
+    const retainedTrailers = Object.freeze(
+      draft.trailers.filter((_trailer, index) => !removedTrailers.has(index)),
+    );
+    return Object.freeze({
+      status: 'primary-rejected',
+      retained: Object.freeze({
+        claims: retainedClaims,
+        sections: retainedSections,
+        trailers: retainedTrailers,
+      }),
+      removedCandidateIds,
+    });
+  }
+  if (removedCandidateIds.length === 0) {
+    return Object.freeze({ status: 'accepted', draft, removedCandidateIds });
+  }
+
   const filtered: ArtifactDraft = {
     schemaVersion: 1,
     title: draft.title,
@@ -324,6 +398,7 @@ export function filterArtifactDraftByCritique(
     ),
   };
   return Object.freeze({
+    status: 'accepted',
     draft: filtered,
     removedCandidateIds,
   });

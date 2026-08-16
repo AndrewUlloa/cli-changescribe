@@ -49,6 +49,8 @@ async function createCompletionServer(
     artifactResponses?: readonly ArtifactResponseKind[];
     scope?: string;
     dishonestSupporting?: boolean;
+    supportedOptional?: boolean;
+    replacementClaimId?: string;
     primaryRejectedCritiques?: number;
   } = {},
 ): Promise<{
@@ -73,6 +75,9 @@ async function createCompletionServer(
         'independently audit every proposed model-authored artifact claim',
       );
       const isArtifactRequest = isArtifactPrompt(serializedRequest);
+      const critiquesSupportedOptional = serializedRequest.includes(
+        'claim:claim-supported',
+      );
       const criticRequestCount = requests.filter((item) =>
         JSON.stringify(item.body).includes(
           'independently audit every proposed model-authored artifact claim',
@@ -81,6 +86,14 @@ async function createCompletionServer(
       const artifactRequestCount = requests.filter((item) =>
         isArtifactPrompt(JSON.stringify(item.body)),
       ).length;
+      const responseClaimId =
+        options.replacementClaimId !== undefined && artifactRequestCount > 1
+          ? options.replacementClaimId
+          : 'claim-change';
+      const criticPrimaryClaimId =
+        options.replacementClaimId !== undefined && criticRequestCount > 1
+          ? options.replacementClaimId
+          : 'claim-change';
       const configuredResponse =
         options.artifactResponses?.[artifactRequestCount - 1];
       const parseInvalid = isArtifactRequest &&
@@ -110,7 +123,7 @@ async function createCompletionServer(
                       schemaVersion: 1,
                       candidates: [
                         {
-                          candidateId: 'claim:claim-change',
+                          candidateId: `claim:${criticPrimaryClaimId}`,
                           evidenceIds: ['change-1'],
                           supported: criticRequestCount >
                             (options.primaryRejectedCritiques ?? 0),
@@ -120,6 +133,14 @@ async function createCompletionServer(
                               candidateId: 'claim:claim-plan',
                               evidenceIds: ['change-1'],
                               supported: false,
+                            }]
+                          : []),
+                        ...(critiquesSupportedOptional &&
+                        criticPrimaryClaimId !== 'claim-supported'
+                          ? [{
+                              candidateId: 'claim:claim-supported',
+                              evidenceIds: ['change-1'],
+                              supported: true,
                             }]
                           : []),
                       ],
@@ -138,11 +159,11 @@ async function createCompletionServer(
                         subject: renderInvalid
                           ? 'route completions through provider-neutral configuration.'
                           : 'route completions through provider-neutral configuration',
-                        claimId: 'claim-change',
+                        claimId: responseClaimId,
                       },
                       claims: [
                         {
-                          id: 'claim-change',
+                          id: responseClaimId,
                           kind: 'change',
                           text: 'route completions through provider-neutral configuration.',
                           evidenceIds: ['change-1'],
@@ -159,11 +180,29 @@ async function createCompletionServer(
                               significance: 'supporting',
                             }]
                           : []),
+                        ...(options.supportedOptional &&
+                        artifactRequestCount === 1
+                          ? [{
+                              id: 'claim-supported',
+                              kind: 'change',
+                              text: 'preserve this exact supported detail.',
+                              evidenceIds: ['change-1'],
+                              basis: 'observed',
+                              significance: 'supporting',
+                            }]
+                          : []),
                       ],
                       sections: [
-                        { kind: 'summary', claimIds: ['claim-change'] },
+                        { kind: 'summary', claimIds: [responseClaimId] },
                         ...(options.dishonestSupporting
                           ? [{ kind: 'changes', claimIds: ['claim-plan'] }]
+                          : []),
+                        ...(options.supportedOptional &&
+                        artifactRequestCount === 1
+                          ? [{
+                              kind: 'changes',
+                              claimIds: ['claim-supported'],
+                            }]
                           : []),
                       ],
                       trailers: [],
@@ -770,7 +809,7 @@ test('PR workflow repairs one invalid draft and never chains model summaries', a
     JSON.stringify(server.requests[1].body),
     /Repair category: json-shape/,
   );
-  assert.match(
+  assert.doesNotMatch(
     JSON.stringify(server.requests[1].body),
     /return only a title.*one observed primary/is,
   );
@@ -879,6 +918,8 @@ test('PR critic re-audits one grounded replacement for an unsupported primary cl
   const output = path.join(directory, 'summary.md');
   const server = await createCompletionServer(context, {
     primaryRejectedCritiques: 1,
+    supportedOptional: true,
+    replacementClaimId: 'claim-supported',
   });
 
   const result = await run(
@@ -894,6 +935,43 @@ test('PR critic re-audits one grounded replacement for an unsupported primary cl
     JSON.stringify(server.requests[2].body),
     /Repair category: primary-grounding/,
   );
+  assert.match(
+    JSON.stringify(server.requests[2].body),
+    /return only a title.*one observed primary/is,
+  );
+  assert.equal(fs.existsSync(output), true);
+  assert.match(
+    fs.readFileSync(output, 'utf8'),
+    /preserve this exact supported detail\./,
+  );
+  assert.doesNotMatch(
+    JSON.stringify(server.requests[3].body),
+    /preserve this exact supported detail\./,
+  );
+});
+
+test('PR deterministic and primary repairs stay within five provider requests', async (context) => {
+  const directory = createRepository(context);
+  git(directory, ['switch', '--quiet', '-c', 'feature']);
+  fs.appendFileSync(path.join(directory, 'README.md'), 'combined repair fixture\n');
+  git(directory, ['add', 'README.md']);
+  git(directory, ['commit', '--quiet', '-m', 'fix: add combined repair fixture']);
+  const output = path.join(directory, 'summary.md');
+  const server = await createCompletionServer(context, {
+    invalidArtifactResponses: 1,
+    primaryRejectedCritiques: 1,
+  });
+
+  const result = await run(
+    directory,
+    ['pr', '--base', 'main', '--out', output],
+    customEnvironment(server.baseURL),
+  );
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.equal(server.requests.length, 5);
+  assert.match(result.stdout, /requesting one repair/i);
+  assert.match(result.stdout, /requesting one grounded replacement/i);
   assert.equal(fs.existsSync(output), true);
 });
 

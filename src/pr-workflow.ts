@@ -14,9 +14,12 @@ import {
 import {
   buildArtifactCriticMessages,
   filterArtifactDraftByCritique,
-  UnsupportedPrimaryArtifactClaimError,
+  type RetainedArtifactContent,
 } from './artifact-critic';
-import { renderPullRequestArtifact } from './artifact-renderer';
+import {
+  renderConventionalTitle,
+  renderPullRequestArtifact,
+} from './artifact-renderer';
 import {
   normalizeIssueReference,
   parsePositiveSafeInteger,
@@ -211,7 +214,12 @@ function buildArtifactMessages(
           : 'The previous response failed deterministic validation. Produce one corrected draft from the original evidence.',
         ...(repairInstruction === undefined
           ? []
-          : [repairInstruction, MINIMAL_ARTIFACT_REPAIR_INSTRUCTION]),
+          : [
+              repairInstruction,
+              ...(repairInstruction === PRIMARY_GROUNDING_REPAIR_INSTRUCTION
+                ? [MINIMAL_ARTIFACT_REPAIR_INSTRUCTION]
+                : []),
+            ]),
         'Required exact shape:',
         `{"schemaVersion":1,"title":{"type":"fix","breaking":false,"subject":"imperative subject","claimId":"claim-1"},"claims":[{"id":"claim-1","kind":"change","text":"imperative subject.","evidenceIds":["${examplePrimaryEvidenceId}"],"basis":"observed","significance":"primary"}],"sections":[{"kind":"summary","claimIds":["claim-1"]}],"trailers":[]}`,
         `Eligible primary change evidence IDs: ${JSON.stringify(primaryEvidenceIds)}`,
@@ -295,6 +303,94 @@ async function generateArtifactDraft(
     );
   }
   return draft;
+}
+
+async function generatePrimaryReplacementDraft(
+  resolved: ResolvedProvider,
+  evidence: EvidenceBundle,
+  branch: string,
+  base: string,
+  mode: string,
+  knownSecrets: readonly string[],
+  policy: RepositoryPolicy,
+  timings: OperationTimings,
+): Promise<ArtifactDraft> {
+  const completion = await timings.measure('provider-repair', async () =>
+    await createCompletionSafe(
+      resolved,
+      buildArtifactMessages(
+        evidence,
+        branch,
+        base,
+        mode,
+        PRIMARY_GROUNDING_REPAIR_INSTRUCTION,
+      ),
+      4_096,
+      knownSecrets,
+    ),
+  );
+  try {
+    return timings.measureSync('render', () => {
+      const candidate = parseArtifactDraft(
+        redactSecretValues(
+          completion.content || completion.reasoning,
+          knownSecrets,
+        ).trim(),
+        evidence,
+      );
+      if (
+        candidate.title.scope !== undefined ||
+        candidate.claims.length !== 1 ||
+        candidate.claims[0]?.id !== candidate.title.claimId ||
+        candidate.sections.length !== 1 ||
+        candidate.sections[0]?.kind !== 'summary' ||
+        candidate.sections[0].claimIds.length !== 1 ||
+        candidate.sections[0].claimIds[0] !== candidate.title.claimId ||
+        candidate.trailers.length !== 0
+      ) {
+        throw new Error('Grounded primary replacement is not minimal.');
+      }
+      renderConventionalTitle(candidate.title, policy.title);
+      return candidate;
+    });
+  } catch {
+    throw new Error('Provider returned an invalid grounded primary replacement.');
+  }
+}
+
+function mergePrimaryReplacement(
+  retained: RetainedArtifactContent,
+  replacement: ArtifactDraft,
+  originalPrimaryId: string,
+  evidence: EvidenceBundle,
+): ArtifactDraft {
+  const primary = replacement.claims[0];
+  const summary = replacement.sections[0];
+  if (primary === undefined || summary?.kind !== 'summary') {
+    throw new Error('Grounded primary replacement is incomplete.');
+  }
+  const normalizedPrimary = {
+    ...primary,
+    id: originalPrimaryId,
+  };
+  const normalizedTitle = {
+    ...replacement.title,
+    claimId: originalPrimaryId,
+  };
+  const normalizedSummary = {
+    ...summary,
+    claimIds: [originalPrimaryId],
+  };
+  return parseArtifactDraft(
+    JSON.stringify({
+      schemaVersion: 1,
+      title: normalizedTitle,
+      claims: [normalizedPrimary, ...retained.claims],
+      sections: [normalizedSummary, ...retained.sections],
+      trailers: retained.trailers,
+    }),
+    evidence,
+  );
 }
 
 function withWorkflowEvidence(
@@ -1050,7 +1146,7 @@ async function main(argv: string[], timings: OperationTimings): Promise<void> {
     context,
   );
   step('Generating one structured draft from original evidence...');
-  let draft = await generateArtifactDraft(
+  const draft = await generateArtifactDraft(
     resolved,
     evidence,
     branch,
@@ -1074,19 +1170,17 @@ async function main(argv: string[], timings: OperationTimings): Promise<void> {
           knownSecrets,
         ).trim(),
         candidate,
+        { primaryRejection: 'return' },
       );
     });
-  let filtered;
-  try {
-    filtered = await critiqueDraft(draft);
-  } catch (error) {
-    if (!(error instanceof UnsupportedPrimaryArtifactClaimError)) {
-      throw error;
-    }
+  const initialCritique = await critiqueDraft(draft);
+  let filteredDraft: ArtifactDraft;
+  let removedCandidateIds = initialCritique.removedCandidateIds;
+  if (initialCritique.status === 'primary-rejected') {
     warn(
       'Primary claim failed evidence review; requesting one grounded replacement...',
     );
-    draft = await generateArtifactDraft(
+    const replacement = await generatePrimaryReplacementDraft(
       resolved,
       evidence,
       branch,
@@ -1095,20 +1189,32 @@ async function main(argv: string[], timings: OperationTimings): Promise<void> {
       knownSecrets,
       repositoryPolicy.policy,
       timings,
-      PRIMARY_GROUNDING_REPAIR_INSTRUCTION,
-      1,
     );
-    filtered = await critiqueDraft(draft);
+    const replacementCritique = await critiqueDraft(replacement);
+    if (replacementCritique.status === 'primary-rejected') {
+      throw new Error('Artifact critique rejected the replacement primary claim.');
+    }
+    removedCandidateIds = Object.freeze([
+      ...removedCandidateIds,
+      ...replacementCritique.removedCandidateIds,
+    ]);
+    filteredDraft = mergePrimaryReplacement(
+      initialCritique.retained,
+      replacementCritique.draft,
+      draft.title.claimId,
+      evidence,
+    );
+  } else {
+    filteredDraft = parseArtifactDraft(
+      JSON.stringify(initialCritique.draft),
+      evidence,
+    );
   }
-  if (filtered.removedCandidateIds.length > 0) {
+  if (removedCandidateIds.length > 0) {
     warn(
-      `Critic removed ${String(filtered.removedCandidateIds.length)} unsupported optional ${filtered.removedCandidateIds.length === 1 ? 'item' : 'items'}.`,
+      `Critic removed ${String(removedCandidateIds.length)} unsupported optional ${removedCandidateIds.length === 1 ? 'item' : 'items'}.`,
     );
   }
-  const filteredDraft = parseArtifactDraft(
-    JSON.stringify(filtered.draft),
-    evidence,
-  );
   const generatedArtifact = timings.measureSync('render', () =>
     renderPullRequestArtifact(
       filteredDraft,
