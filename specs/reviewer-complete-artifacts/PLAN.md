@@ -142,12 +142,12 @@ Non-decisions:
 
 ### Phase 3: Semantic Titles and Durable History
 
-- [ ] **Task 7: Validate semantic Conventional Commit types and scopes**
+- [x] **Task 7: Validate semantic Conventional Commit types and scopes**
   - **Description:** Remove literal-`fix` and scope-erasing repair bias; define local semantic type rules, optional high-confidence scope behavior, and critic candidates for title type/scope.
   - **Acceptance:**
-    - [ ] Docs/test/CI/build/refactor/perf/feat/fix fixtures accept only supported types.
-    - [ ] Plans/changelogs cannot default to `fix`.
-    - [ ] Valid type/scope survive primary repair; broad changes may remain unscoped.
+    - [x] Docs/test/CI/build/refactor/perf/feat/fix fixtures accept only supported types.
+    - [x] Plans/changelogs cannot default to `fix`.
+    - [x] Valid type/scope survive primary repair; broad changes may remain unscoped.
   - **Verify:** `npm run build && npm run build:test && node --test .test-dist/title-semantics.test.js .test-dist/commit-v2.test.js .test-dist/workflow-byok.test.js`
   - **Depends on:** Task 1
   - **Files:** semantic title module/test, `src/commit.ts`, `src/pr-workflow.ts`, critic integration tests

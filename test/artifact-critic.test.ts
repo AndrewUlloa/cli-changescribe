@@ -6,6 +6,7 @@ interface ArtifactDraft {
   schemaVersion: 1;
   title: {
     type: string;
+    scope?: string;
     breaking: boolean;
     subject: string;
     claimId: string;
@@ -30,11 +31,38 @@ const critic = require('../dist/artifact-critic.js') as {
   buildArtifactCriticMessages(
     evidence: Record<string, unknown>,
     draft: ArtifactDraft,
+    options?: {
+      titleSemantics?: {
+        substantiveEvidenceIds: readonly string[];
+        intentEvidenceIds: readonly string[];
+        auditType?: boolean;
+        auditScope?: boolean;
+      };
+    },
   ): Array<{ role: string; content: string }>;
+  buildArtifactCriticResponseFormat(
+    draft: ArtifactDraft,
+    options?: {
+      titleSemantics?: {
+        substantiveEvidenceIds: readonly string[];
+        intentEvidenceIds: readonly string[];
+        auditType?: boolean;
+        auditScope?: boolean;
+      };
+    },
+  ): { type: 'json-schema'; name: string; schema: Record<string, unknown> };
   filterArtifactDraftByCritique(
     value: string,
     draft: ArtifactDraft,
-    options?: { primaryRejection: 'return' },
+    options?: {
+      primaryRejection?: 'return';
+      titleSemantics?: {
+        substantiveEvidenceIds: readonly string[];
+        intentEvidenceIds: readonly string[];
+        auditType?: boolean;
+        auditScope?: boolean;
+      };
+    },
   ):
     | {
         status: 'accepted';
@@ -43,6 +71,11 @@ const critic = require('../dist/artifact-critic.js') as {
       }
     | {
         status: 'primary-rejected';
+        rejectedRequiredCandidates: readonly (
+          | 'primary-claim'
+          | 'title-type'
+          | 'title-scope'
+        )[];
         retained: {
           claims: ArtifactDraft['claims'];
           sections: ArtifactDraft['sections'];
@@ -171,8 +204,171 @@ test('accepts only a complete all-supported verdict for material claims', () => 
         }),
         artifact,
       ),
-    /rejected (?:unsupported claims|the primary claim)/i,
+    /rejected (?:unsupported claims|required artifact semantics)/i,
   );
+});
+
+test('accepts a complete minimal verdict set in any order without evidence echoes', () => {
+  const artifact = draft();
+  artifact.claims.push({
+    id: 'claim-support',
+    kind: 'change',
+    text: 'preserve the reviewed tree.',
+    evidenceIds: ['change-1'],
+    basis: 'observed',
+    significance: 'supporting',
+  });
+  assert.doesNotThrow(() =>
+    critic.assertArtifactCritique(
+      JSON.stringify({
+        schemaVersion: 1,
+        candidates: [
+          { candidateId: 'claim:claim-support', supported: true },
+          { candidateId: 'claim:claim-change', supported: true },
+        ],
+      }),
+      artifact,
+    ),
+  );
+  assert.doesNotThrow(() =>
+    critic.assertArtifactCritique(
+      JSON.stringify({
+        schemaVersion: 1,
+        verdicts: {
+          'claim:claim-change': true,
+          'claim:claim-support': true,
+        },
+      }),
+      artifact,
+    ),
+  );
+  assert.throws(
+    () =>
+      critic.assertArtifactCritique(
+        JSON.stringify({
+          schemaVersion: 1,
+          verdicts: { 'claim:claim-change': true },
+        }),
+        artifact,
+      ),
+    /invalid shape/i,
+  );
+  assert.throws(
+    () =>
+      critic.assertArtifactCritique(
+        JSON.stringify({
+          schemaVersion: 1,
+          candidates: [
+            { candidateId: 'claim:claim-change', supported: true },
+            { candidateId: 'claim:claim-change', supported: true },
+          ],
+        }),
+        artifact,
+      ),
+    /rejected unsupported claims/i,
+  );
+});
+
+test('audits the representative primary title, type, and scope without another request', () => {
+  const artifact = draft();
+  artifact.title.scope = 'commit';
+  const options = {
+    titleSemantics: {
+      substantiveEvidenceIds: ['change-1', 'change-2'],
+      intentEvidenceIds: ['intent-1'],
+    },
+  } as const;
+  const messages = critic.buildArtifactCriticMessages(
+    {
+      schemaVersion: 1,
+      snapshot: { headSha: 'a'.repeat(40) },
+      items: [],
+      receipts: [],
+      coverage: { complete: true, gaps: [] },
+    },
+    artifact,
+    options,
+  );
+  const serialized = JSON.stringify(messages);
+  assert.match(serialized, /primary claim is also the title subject/i);
+  assert.match(serialized, /title:type/);
+  assert.match(serialized, /title:scope/);
+  assert.match(serialized, /represent every cited substantive change/i);
+  const responseFormat = critic.buildArtifactCriticResponseFormat(
+    artifact,
+    options,
+  );
+  assert.equal(responseFormat.type, 'json-schema');
+  assert.equal(responseFormat.name, 'diffwright_artifact_critique');
+  const responseSchema = JSON.stringify(responseFormat.schema);
+  assert.match(responseSchema, /claim:claim-change/);
+  assert.doesNotMatch(responseSchema, /title:subject/);
+  assert.match(responseSchema, /title:type/);
+  assert.match(responseSchema, /title:scope/);
+
+  const filtered = critic.filterArtifactDraftByCritique(
+    JSON.stringify({
+      schemaVersion: 1,
+      candidates: [
+        {
+          candidateId: 'claim:claim-change',
+          evidenceIds: ['change-1', 'change-2'],
+          supported: false,
+        },
+        {
+          candidateId: 'title:scope',
+          evidenceIds: ['change-1', 'change-2'],
+          supported: true,
+        },
+        {
+          candidateId: 'title:type',
+          evidenceIds: ['change-1', 'intent-1'],
+          supported: true,
+        },
+      ],
+    }),
+    artifact,
+    { primaryRejection: 'return', ...options },
+  );
+  assert.equal(filtered.status, 'primary-rejected');
+  if (filtered.status === 'primary-rejected') {
+    assert.deepEqual(filtered.rejectedRequiredCandidates, ['primary-claim']);
+  }
+});
+
+test('defers single-choice type and deterministic scope to local validation', () => {
+  const artifact = draft();
+  artifact.title.scope = 'commit';
+  const options = {
+    titleSemantics: {
+      substantiveEvidenceIds: ['change-1'],
+      intentEvidenceIds: [],
+      auditType: false,
+      auditScope: false,
+    },
+  } as const;
+  const request = JSON.stringify(
+    critic.buildArtifactCriticMessages(
+      {
+        schemaVersion: 1,
+        snapshot: { headSha: 'a'.repeat(40) },
+        items: [],
+        receipts: [],
+        coverage: { complete: true, gaps: [] },
+      },
+      artifact,
+      options,
+    ),
+  );
+  assert.match(request, /\\"candidateId\\":\\"claim:claim-change\\"/);
+  assert.doesNotMatch(request, /\\"candidateId\\":\\"title:type\\"/);
+  assert.doesNotMatch(request, /\\"candidateId\\":\\"title:scope\\"/);
+  const schema = JSON.stringify(
+    critic.buildArtifactCriticResponseFormat(artifact, options).schema,
+  );
+  assert.match(schema, /claim:claim-change/);
+  assert.doesNotMatch(schema, /title:type/);
+  assert.doesNotMatch(schema, /title:scope/);
 });
 
 test('audits rendered supporting claims and trailers, but not inferred prose', () => {

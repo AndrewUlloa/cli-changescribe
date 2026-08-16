@@ -23,6 +23,7 @@ export type SemanticCommitType = (typeof SEMANTIC_COMMIT_TYPES)[number];
 export interface SemanticTitleCandidate {
   readonly type: string;
   readonly scope?: string;
+  readonly subject?: string;
 }
 
 export interface TitleSemanticsOptions {
@@ -80,6 +81,17 @@ const EXPLICIT_TYPE_CONSTRAINTS = new Set([
   'commit-type',
 ]);
 const SUPPORTING_DOMAINS = new Set<ChangeDomain>(['docs', 'test']);
+const GENERIC_TITLE_SUBJECTS = new Set([
+  '<evidence-backed subject>',
+  'apply changes',
+  'describe staged change',
+  'imperative subject',
+  'make changes',
+  'modify code',
+  'staged change',
+  'update code',
+  'update files',
+]);
 
 export function evaluateTitleSemantics(
   evidence: EvidenceBundle,
@@ -127,6 +139,14 @@ export function assertTitleSemantics(
     (evaluation.scope === undefined || title.scope !== evaluation.scope)
   ) {
     throw new Error('Conventional Commit scope is not supported by the evidence.');
+  }
+  if (
+    title.subject !== undefined &&
+    GENERIC_TITLE_SUBJECTS.has(
+      title.subject.trim().replace(/\.$/u, '').toLocaleLowerCase('en-US'),
+    )
+  ) {
+    throw new Error('Conventional Commit subject is not evidence-specific.');
   }
   return evaluation;
 }

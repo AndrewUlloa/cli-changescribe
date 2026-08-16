@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 import {
+  ARTIFACT_DRAFT_RESPONSE_FORMAT,
   artifactRepairCategory,
   artifactRepairInstruction,
   eligiblePrimaryChangeEvidenceIds,
@@ -13,7 +14,11 @@ import {
   type ArtifactTitleDraft,
 } from './artifact-draft';
 import {
+  substantiveChangeEvidenceIds,
+} from './artifact-completeness';
+import {
   buildArtifactCriticMessages,
+  buildArtifactCriticResponseFormat,
   filterArtifactDraftByCritique,
   UnsupportedPrimaryArtifactClaimError,
 } from './artifact-critic';
@@ -63,6 +68,8 @@ import {
 } from './title-semantics';
 import {
   completeChat,
+  isStructuredOutputGenerationFailure,
+  type CompletionResponseFormat,
   type CompleteChatInput,
   type ParsedCompletion,
 } from './transport';
@@ -174,6 +181,7 @@ function buildArtifactMessages(
 ): ChatCompletionMessageParam[] {
   const serialized = serializeEvidenceBundle(evidence);
   const primaryEvidenceIds = eligiblePrimaryChangeEvidenceIds(evidence);
+  const substantiveEvidenceIds = substantiveChangeEvidenceIds(evidence);
   const examplePrimaryEvidenceId = primaryEvidenceIds[0] ?? 'change-1';
   const exampleType = semantics.preferredType ?? semantics.allowedTypes[0];
   if (exampleType === undefined) {
@@ -181,11 +189,19 @@ function buildArtifactMessages(
   }
   const exampleTitle = {
     type: exampleType,
-    ...(semantics.scope === undefined ? {} : { scope: semantics.scope }),
+    scope: semantics.scope ?? null,
     breaking: false,
-    subject: 'imperative subject',
+    subject: '<evidence-backed subject>',
     claimId: 'claim-1',
   };
+  const budgetType = preservedTitle?.type ??
+    [...semantics.allowedTypes].sort(
+      (left, right) => right.length - left.length,
+    )[0] ?? exampleType;
+  const budgetScope = preservedTitle?.scope ?? semantics.scope;
+  const budgetBreaking = preservedTitle?.breaking ?? false;
+  const subjectCharacterBudget = 72 -
+    `${budgetType}${budgetScope === undefined ? '' : `(${budgetScope})`}${budgetBreaking ? '!' : ''}: `.length;
   if (serialized.length > MAX_MODEL_EVIDENCE_CHARS) {
     throw new Error(
       'Complete staged evidence exceeds the supported model request size. Split the commit and retry.',
@@ -215,17 +231,21 @@ function buildArtifactMessages(
             ]),
         `Supported Conventional Commit types for this evidence: ${JSON.stringify(semantics.allowedTypes)}`,
         semantics.scope === undefined
-          ? 'Supported Conventional Commit scope for this evidence: none. Omit title.scope.'
+          ? 'Supported Conventional Commit scope for this evidence: none. Set title.scope to null.'
           : `Supported Conventional Commit scope for this evidence: ${JSON.stringify(semantics.scope)}. Use it only when it improves clarity.`,
+        `Maximum title.subject length for the supported title prefix: ${String(subjectCharacterBudget)} characters.`,
         ...(preservedTitle === undefined
           ? []
           : [
-              `Preserve these already validated title fields exactly: ${JSON.stringify(preservedTitle)}`,
+              `Preserve these already validated title fields exactly: ${JSON.stringify({ ...preservedTitle, scope: preservedTitle.scope ?? null })}`,
             ]),
         'Required exact shape:',
-        `${JSON.stringify({ schemaVersion: 1, title: exampleTitle, claims: [{ id: 'claim-1', kind: 'change', text: 'imperative subject.', evidenceIds: [examplePrimaryEvidenceId], basis: 'observed', significance: 'primary' }], sections: [{ kind: 'summary', claimIds: ['claim-1'] }], trailers: [] })}`,
+        `${JSON.stringify({ schemaVersion: 1, title: exampleTitle, claims: [{ id: 'claim-1', kind: 'change', text: '<evidence-backed subject>.', evidenceIds: [examplePrimaryEvidenceId], basis: 'observed', significance: 'primary' }], sections: [{ kind: 'summary', claimIds: ['claim-1'] }], trailers: [] })}`,
+        'The angle-bracket subject is schema notation only. Never copy it or any generic placeholder into the response.',
         `Eligible primary change evidence IDs: ${JSON.stringify(primaryEvidenceIds)}`,
-        'Omit title.scope instead of using an empty string.',
+        `Required representative title evidence IDs: ${JSON.stringify(substantiveEvidenceIds)}`,
+        'The title and primary Summary claim must conservatively represent the complete required representative title evidence set, not an incidental implementation detail. Cite that complete set on the primary claim.',
+        'Use null for title.scope instead of omitting it or using an empty string.',
         'Allowed claim kinds: change, rationale, verification, risk, review-focus, follow-up.',
         'Allowed section kinds: summary, changes, rationale, verification, review-focus, risks, follow-ups.',
         'Assign change claims only to summary/changes; all other claim kinds to their matching section.',
@@ -257,19 +277,37 @@ async function requestArtifact(
   let draft: ArtifactDraft | undefined;
   let rendered: RenderedCommit | undefined;
   let repairInstruction: string | undefined;
+  let responseFormat: CompletionResponseFormat = ARTIFACT_DRAFT_RESPONSE_FORMAT;
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const completion = await timings.measure(
-      attempt === 0 ? 'provider-draft' : 'provider-repair',
-      async () =>
-        await dependencies.completeChat(resolved, {
-          messages: redactMessageSecrets(
-            buildArtifactMessages(evidence, repairInstruction, semantics),
-            knownSecrets,
-          ),
-          outputLimit: 4_096,
-          intent: 'workflow',
-        }),
-    );
+    let completion: ParsedCompletion;
+    try {
+      completion = await timings.measure(
+        attempt === 0 ? 'provider-draft' : 'provider-repair',
+        async () =>
+          await dependencies.completeChat(resolved, {
+            messages: redactMessageSecrets(
+              buildArtifactMessages(evidence, repairInstruction, semantics),
+              knownSecrets,
+            ),
+            outputLimit: 4_096,
+            intent: 'workflow',
+            responseFormat,
+          }),
+      );
+    } catch (error) {
+      if (
+        attempt === 0 &&
+        responseFormat !== 'json-object' &&
+        isStructuredOutputGenerationFailure(error)
+      ) {
+        responseFormat = 'json-object';
+        console.log(
+          '⚠️  Provider could not satisfy the strict JSON schema; retrying once with JSON-only validation...',
+        );
+        continue;
+      }
+      throw error;
+    }
     const candidate = redactSecretValues(
       completion.content || completion.reasoning,
       knownSecrets,
@@ -308,15 +346,29 @@ async function requestArtifact(
     );
   }
   const validatedDraft = draft;
+  const criticTitleOptions = {
+    titleSemantics: {
+      substantiveEvidenceIds: substantiveChangeEvidenceIds(evidence),
+      intentEvidenceIds: evidence.items
+        .filter((item) => item.kind === 'intent')
+        .map((item) => item.id),
+      auditType: semantics.allowedTypes.length > 1,
+      auditScope: false,
+    },
+  } as const;
   const critiqueDraft = async (candidate: ArtifactDraft) =>
     await timings.measure('provider-critic', async () => {
       const critique = await dependencies.completeChat(resolved, {
         messages: redactMessageSecrets(
-          buildArtifactCriticMessages(evidence, candidate),
+          buildArtifactCriticMessages(evidence, candidate, criticTitleOptions),
           knownSecrets,
         ),
         outputLimit: 8_192,
         intent: 'workflow',
+        responseFormat: buildArtifactCriticResponseFormat(
+          candidate,
+          criticTitleOptions,
+        ),
       });
       return filterArtifactDraftByCritique(
         redactSecretValues(
@@ -324,6 +376,7 @@ async function requestArtifact(
           knownSecrets,
         ).trim(),
         candidate,
+        criticTitleOptions,
       );
     });
 
@@ -336,7 +389,7 @@ async function requestArtifact(
       throw error;
     }
     console.log(
-      '⚠️  Primary claim failed evidence review; requesting one grounded replacement...',
+      `⚠️  Required artifact semantics failed evidence review (${error.rejectedRequiredCandidates.join(', ')}); requesting one grounded replacement...`,
     );
     const completion = await timings.measure('provider-repair', async () =>
       await dependencies.completeChat(resolved, {
@@ -357,6 +410,7 @@ async function requestArtifact(
         ),
         outputLimit: 4_096,
         intent: 'workflow',
+        responseFormat: ARTIFACT_DRAFT_RESPONSE_FORMAT,
       }),
     );
     const repairedCandidate = redactSecretValues(

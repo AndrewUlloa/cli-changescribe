@@ -26,7 +26,7 @@ interface TitleSemanticsModule {
     options?: { allowedScopes?: readonly string[] },
   ): Evaluation;
   assertTitleSemantics(
-    title: { type: string; scope?: string },
+    title: { type: string; scope?: string; subject?: string },
     evidence: unknown,
     options?: { allowedScopes?: readonly string[] },
   ): Evaluation;
@@ -465,6 +465,27 @@ test('fails closed with generic non-echoing policy and evidence errors', () => {
   }
   assert.match(evidenceMessage, /invalid change evidence/i);
   assert.doesNotMatch(evidenceMessage, /private|secret/i);
+});
+
+test('rejects schema placeholders and generic subjects deterministically', () => {
+  const evidence = bundle([
+    {
+      id: 'change-1',
+      path: 'src/commit.ts',
+      patch: '+export const value = true;',
+    },
+  ]);
+  for (const subject of [
+    '<evidence-backed subject>',
+    'imperative subject',
+    'describe staged change.',
+    'update files',
+  ]) {
+    assert.throws(
+      () => semantics.assertTitleSemantics({ type: 'chore', subject }, evidence),
+      /subject is not evidence-specific/i,
+    );
+  }
 });
 
 test('fails closed on incomplete coverage and returns immutable results', () => {

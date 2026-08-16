@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 import {
+  ARTIFACT_DRAFT_RESPONSE_FORMAT,
   artifactRepairCategory,
   artifactRepairInstruction,
   eligiblePrimaryChangeEvidenceIds,
@@ -20,6 +21,7 @@ import {
 } from './artifact-completeness';
 import {
   buildArtifactCriticMessages,
+  buildArtifactCriticResponseFormat,
   filterArtifactDraftByCritique,
   type RetainedArtifactContent,
 } from './artifact-critic';
@@ -85,7 +87,12 @@ import {
   evaluateTitleSemantics,
   type TitleSemanticsEvaluation,
 } from './title-semantics';
-import { completeChat, type ParsedCompletion } from './transport';
+import {
+  completeChat,
+  isStructuredOutputGenerationFailure,
+  type CompletionResponseFormat,
+  type ParsedCompletion,
+} from './transport';
 
 const execFileSync = defaultCommandRunner.exec;
 const spawnSync = defaultCommandRunner.spawn;
@@ -176,11 +183,13 @@ async function createCompletionSafe(
   messages: ChatCompletionMessageParam[],
   maxTokens: number,
   knownSecrets: readonly string[],
+  responseFormat: CompletionResponseFormat = ARTIFACT_DRAFT_RESPONSE_FORMAT,
 ): Promise<ParsedCompletion> {
   return await completeChat(resolved, {
     messages: redactMessageSecrets(messages, knownSecrets),
     outputLimit: maxTokens,
     intent: 'workflow',
+    responseFormat,
   });
 }
 
@@ -217,11 +226,19 @@ function buildArtifactMessages(
   }
   const exampleTitle = {
     type: exampleType,
-    ...(semantics.scope === undefined ? {} : { scope: semantics.scope }),
+    scope: semantics.scope ?? null,
     breaking: false,
-    subject: 'imperative subject',
+    subject: '<evidence-backed subject>',
     claimId: 'claim-1',
   };
+  const budgetType = preservedTitle?.type ??
+    [...semantics.allowedTypes].sort(
+      (left, right) => right.length - left.length,
+    )[0] ?? exampleType;
+  const budgetScope = preservedTitle?.scope ?? semantics.scope;
+  const budgetBreaking = preservedTitle?.breaking ?? false;
+  const subjectCharacterBudget = 72 -
+    `${budgetType}${budgetScope === undefined ? '' : `(${budgetScope})`}${budgetBreaking ? '!' : ''}: `.length;
   if (serialized.length > MAX_MODEL_EVIDENCE_CHARS) {
     throw new Error(
       'Complete pull-request evidence exceeds the supported model request size. Split the change and retry.',
@@ -254,19 +271,22 @@ function buildArtifactMessages(
             ]),
         `Supported Conventional Commit types for this evidence: ${JSON.stringify(semantics.allowedTypes)}`,
         semantics.scope === undefined
-          ? 'Supported Conventional Commit scope for this evidence: none. Omit title.scope.'
+          ? 'Supported Conventional Commit scope for this evidence: none. Set title.scope to null.'
           : `Supported Conventional Commit scope for this evidence: ${JSON.stringify(semantics.scope)}. Use it only when it improves clarity.`,
+        `Maximum title.subject length for the supported title prefix: ${String(subjectCharacterBudget)} characters.`,
         ...(preservedTitle === undefined
           ? []
           : [
-              `Preserve these already validated title fields exactly: ${JSON.stringify(preservedTitle)}`,
+              `Preserve these already validated title fields exactly: ${JSON.stringify({ ...preservedTitle, scope: preservedTitle.scope ?? null })}`,
             ]),
         'Required exact shape:',
-        `${JSON.stringify({ schemaVersion: 1, title: exampleTitle, claims: [{ id: 'claim-1', kind: 'change', text: 'imperative subject.', evidenceIds: [examplePrimaryEvidenceId], basis: 'observed', significance: 'primary' }], sections: [{ kind: 'summary', claimIds: ['claim-1'] }], trailers: [] })}`,
+        `${JSON.stringify({ schemaVersion: 1, title: exampleTitle, claims: [{ id: 'claim-1', kind: 'change', text: '<evidence-backed subject>.', evidenceIds: [examplePrimaryEvidenceId], basis: 'observed', significance: 'primary' }], sections: [{ kind: 'summary', claimIds: ['claim-1'] }], trailers: [] })}`,
+        'The angle-bracket subject is schema notation only. Never copy it or any generic placeholder into the response.',
         `Eligible primary change evidence IDs: ${JSON.stringify(primaryEvidenceIds)}`,
         `Required substantive change evidence IDs: ${JSON.stringify(substantiveEvidenceIds)}`,
+        'The title and primary Summary claim must conservatively represent the complete required substantive change evidence set, not an incidental implementation detail. Cite that complete set on the primary claim.',
         'When required substantive change evidence IDs are present, their complete union must be cited by observed change claims across Summary and Changes.',
-        'Omit title.scope instead of using an empty string.',
+        'Use null for title.scope instead of omitting it or using an empty string.',
         'Allowed claim kinds: change, rationale, verification, risk, review-focus, follow-up.',
         'Allowed section kinds: summary, changes, rationale, verification, review-focus, risks, follow-ups.',
         'Assign change claims only to summary/changes; all other claim kinds to their matching section.',
@@ -301,25 +321,44 @@ async function generateArtifactDraft(
   let draft: ArtifactDraft | undefined;
   let requestCount = 0;
   let repairInstruction = initialRepairInstruction;
+  let responseFormat: CompletionResponseFormat = ARTIFACT_DRAFT_RESPONSE_FORMAT;
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     requestCount += 1;
-    const completion = await timings.measure(
-      repairInstruction === undefined ? 'provider-draft' : 'provider-repair',
-      async () =>
-        await createCompletionSafe(
-          resolved,
-          buildArtifactMessages(
-            evidence,
-            branch,
-            base,
-            mode,
-            repairInstruction,
-            semantics,
+    let completion: ParsedCompletion;
+    try {
+      completion = await timings.measure(
+        repairInstruction === undefined ? 'provider-draft' : 'provider-repair',
+        async () =>
+          await createCompletionSafe(
+            resolved,
+            buildArtifactMessages(
+              evidence,
+              branch,
+              base,
+              mode,
+              repairInstruction,
+              semantics,
+            ),
+            4096,
+            knownSecrets,
+            responseFormat,
           ),
-          4096,
-          knownSecrets,
-        ),
-    );
+      );
+    } catch (error) {
+      if (
+        attempt === 0 &&
+        maxAttempts > 1 &&
+        responseFormat !== 'json-object' &&
+        isStructuredOutputGenerationFailure(error)
+      ) {
+        responseFormat = 'json-object';
+        warn(
+          'Provider could not satisfy the strict JSON schema; retrying once with JSON-only validation...',
+        );
+        continue;
+      }
+      throw error;
+    }
     try {
       draft = timings.measureSync('render', () => {
         const candidate = parseArtifactDraft(
@@ -1225,14 +1264,31 @@ async function main(argv: string[], timings: OperationTimings): Promise<void> {
   );
   const draft = initialGeneration.draft;
   let providerRequestCount = initialGeneration.requestCount;
+  const criticSemantics = evaluateTitleSemantics(evidence, {
+    ...(repositoryPolicy.policy.title.scopeMode === 'forbidden' ||
+      repositoryPolicy.policy.title.allowedScopes === undefined
+      ? {}
+      : { allowedScopes: repositoryPolicy.policy.title.allowedScopes }),
+  });
+  const criticTitleOptions = {
+    titleSemantics: {
+      substantiveEvidenceIds: substantiveChangeEvidenceIds(evidence),
+      intentEvidenceIds: evidence.items
+        .filter((item) => item.kind === 'intent')
+        .map((item) => item.id),
+      auditType: criticSemantics.allowedTypes.length > 1,
+      auditScope: false,
+    },
+  } as const;
   const critiqueDraft = async (candidate: ArtifactDraft) =>
     await timings.measure('provider-critic', async () => {
       providerRequestCount += 1;
       const critique = await createCompletionSafe(
         resolved,
-        buildArtifactCriticMessages(evidence, candidate),
+        buildArtifactCriticMessages(evidence, candidate, criticTitleOptions),
         8_192,
         knownSecrets,
+        buildArtifactCriticResponseFormat(candidate, criticTitleOptions),
       );
       return filterArtifactDraftByCritique(
         redactSecretValues(
@@ -1240,7 +1296,7 @@ async function main(argv: string[], timings: OperationTimings): Promise<void> {
           knownSecrets,
         ).trim(),
         candidate,
-        { primaryRejection: 'return' },
+        { primaryRejection: 'return', ...criticTitleOptions },
       );
     });
   const initialCritique = await critiqueDraft(draft);
@@ -1248,7 +1304,7 @@ async function main(argv: string[], timings: OperationTimings): Promise<void> {
   let removedCandidateIds = initialCritique.removedCandidateIds;
   if (initialCritique.status === 'primary-rejected') {
     warn(
-      'Primary claim failed evidence review; requesting one grounded replacement...',
+      `Required artifact semantics failed evidence review (${initialCritique.rejectedRequiredCandidates.join(', ')}); requesting one grounded replacement...`,
     );
     providerRequestCount += 1;
     const replacement = await generatePrimaryReplacementDraft(

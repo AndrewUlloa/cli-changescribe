@@ -50,8 +50,124 @@ export interface ArtifactDraft {
   readonly trailers: readonly ArtifactTrailerDraft[];
 }
 
+export interface ArtifactDraftResponseFormat {
+  readonly type: 'json-schema';
+  readonly name: 'diffwright_artifact_draft';
+  readonly schema: Readonly<Record<string, unknown>>;
+}
+
+export const ARTIFACT_DRAFT_RESPONSE_FORMAT: ArtifactDraftResponseFormat =
+  deepFreeze({
+    type: 'json-schema',
+    name: 'diffwright_artifact_draft',
+    schema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['schemaVersion', 'title', 'claims', 'sections', 'trailers'],
+      properties: {
+        schemaVersion: { type: 'integer', const: 1 },
+        title: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['type', 'scope', 'breaking', 'subject', 'claimId'],
+          properties: {
+            type: { type: 'string' },
+            scope: { type: ['string', 'null'] },
+            breaking: { type: 'boolean' },
+            subject: { type: 'string' },
+            claimId: { type: 'string' },
+          },
+        },
+        claims: {
+          type: 'array',
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: [
+              'id',
+              'kind',
+              'text',
+              'evidenceIds',
+              'basis',
+              'significance',
+            ],
+            properties: {
+              id: { type: 'string' },
+              kind: {
+                type: 'string',
+                enum: [
+                  'change',
+                  'rationale',
+                  'verification',
+                  'risk',
+                  'review-focus',
+                  'follow-up',
+                ],
+              },
+              text: { type: 'string' },
+              evidenceIds: {
+                type: 'array',
+                items: { type: 'string' },
+              },
+              basis: {
+                type: 'string',
+                enum: ['observed', 'provided', 'inferred'],
+              },
+              significance: {
+                type: 'string',
+                enum: ['primary', 'supporting', 'incidental'],
+              },
+            },
+          },
+        },
+        sections: {
+          type: 'array',
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['kind', 'claimIds'],
+            properties: {
+              kind: {
+                type: 'string',
+                enum: [
+                  'summary',
+                  'changes',
+                  'rationale',
+                  'verification',
+                  'review-focus',
+                  'risks',
+                  'follow-ups',
+                ],
+              },
+              claimIds: {
+                type: 'array',
+                items: { type: 'string' },
+              },
+            },
+          },
+        },
+        trailers: {
+          type: 'array',
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['token', 'value', 'evidenceIds'],
+            properties: {
+              token: { type: 'string' },
+              value: { type: 'string' },
+              evidenceIds: {
+                type: 'array',
+                items: { type: 'string' },
+              },
+            },
+          },
+        },
+      },
+    },
+  });
+
 export const PRIMARY_GROUNDING_REPAIR_INSTRUCTION =
-  'Repair category: primary-grounding. Replace the title and primary claim with the smallest conservative factual change supported by every cited evidence ID. Prefer one direct evidence ID. Omit optional claims and trailers.';
+  'Repair category: primary-grounding. Replace the title and primary claim with the smallest conservative factual summary that represents every required substantive change evidence ID. Cite those evidence IDs on the primary claim. Omit optional claims and trailers.';
 
 export const MINIMAL_ARTIFACT_REPAIR_INSTRUCTION =
   'For this repair, return only a title, one observed primary change claim, one Summary section containing that claim, and an empty trailers array. Preserve any explicitly required valid title type, scope, and breaking value. Omit every optional claim.';
@@ -286,7 +402,7 @@ function parseTitle(value: unknown): ArtifactTitleDraft {
   if (!TYPE_RE.test(type)) {
     throw new Error('Artifact title type is invalid.');
   }
-  const scope = title.scope === undefined
+  const scope = title.scope === undefined || title.scope === null
     ? undefined
     : boundedString(title.scope, 'Artifact title scope', 64);
   if (scope !== undefined && !SCOPE_RE.test(scope)) {

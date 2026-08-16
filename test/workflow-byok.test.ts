@@ -52,6 +52,28 @@ function evidenceSupportedScope(prompt: string): string | undefined {
     : JSON.parse(match[1]) as string;
 }
 
+interface PromptCriticCandidate {
+  readonly candidateId: string;
+  readonly evidenceIds: readonly string[];
+}
+
+function promptCriticCandidates(prompt: string): readonly PromptCriticCandidate[] {
+  const match = /Model-authored candidates:\n(\[[\s\S]+\])$/u.exec(prompt);
+  if (match?.[1] === undefined) {
+    return [];
+  }
+  const parsed = JSON.parse(match[1]) as unknown;
+  return Array.isArray(parsed)
+    ? parsed.filter(
+        (candidate): candidate is PromptCriticCandidate =>
+          typeof candidate === 'object' &&
+          candidate !== null &&
+          typeof Reflect.get(candidate, 'candidateId') === 'string' &&
+          Array.isArray(Reflect.get(candidate, 'evidenceIds')),
+      )
+    : [];
+}
+
 function git(cwd: string, args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8' });
 }
@@ -89,6 +111,7 @@ async function createCompletionServer(
     rejectCoverageClaim?: boolean;
     replacementClaimId?: string;
     primaryRejectedCritiques?: number;
+    titleSubjectRejectedCritiques?: number;
   } = {},
 ): Promise<{
   baseURL: string;
@@ -113,12 +136,6 @@ async function createCompletionServer(
         'independently audit every proposed model-authored artifact claim',
       );
       const isArtifactRequest = isArtifactPrompt(serializedRequest);
-      const critiquesSupportedOptional = serializedRequest.includes(
-        'claim:claim-supported',
-      );
-      const critiquesCoverage = serializedRequest.includes(
-        'claim:claim-coverage',
-      );
       const isCoverageRepair = serializedRequest.includes(
         'Repair category: substantive-coverage',
       );
@@ -165,36 +182,26 @@ async function createCompletionServer(
                 content: isArtifactCritic
                     ? JSON.stringify({
                       schemaVersion: 1,
-                      candidates: [
-                        {
-                          candidateId: `claim:${criticPrimaryClaimId}`,
-                          evidenceIds: ['change-1'],
-                          supported: criticRequestCount >
-                            (options.primaryRejectedCritiques ?? 0),
-                        },
-                        ...(options.dishonestSupporting
-                          ? [{
-                              candidateId: 'claim:claim-plan',
-                              evidenceIds: ['change-1'],
-                              supported: false,
-                            }]
-                          : []),
-                        ...(critiquesSupportedOptional &&
-                        criticPrimaryClaimId !== 'claim-supported'
-                          ? [{
-                              candidateId: 'claim:claim-supported',
-                              evidenceIds: ['change-1'],
-                              supported: true,
-                            }]
-                          : []),
-                        ...(critiquesCoverage
-                          ? [{
-                              candidateId: 'claim:claim-coverage',
-                              evidenceIds: ['change-2'],
-                              supported: !options.rejectCoverageClaim,
-                            }]
-                          : []),
-                      ],
+                      candidates: promptCriticCandidates(artifactPrompt).map(
+                        (candidate) => ({
+                          candidateId: candidate.candidateId,
+                          evidenceIds: candidate.evidenceIds,
+                          supported:
+                            candidate.candidateId ===
+                              `claim:${criticPrimaryClaimId}`
+                              ? criticRequestCount >
+                                Math.max(
+                                  options.primaryRejectedCritiques ?? 0,
+                                  options.titleSubjectRejectedCritiques ?? 0,
+                                )
+                              : candidate.candidateId === 'claim:claim-plan'
+                                ? false
+                                : candidate.candidateId ===
+                                    'claim:claim-coverage'
+                                  ? !options.rejectCoverageClaim
+                                  : true,
+                        }),
+                      ),
                     })
                   : parseInvalid
                   ? 'not valid artifact json'
@@ -816,6 +823,11 @@ test('PR workflow uses an evidence-linked draft and separate terminal critic', a
     JSON.stringify(server.requests[0].body),
     /provider routing source-agnostic/,
   );
+  assert.match(
+    JSON.stringify(server.requests[1]?.body),
+    /primary claim is also the title subject/i,
+  );
+  assert.match(JSON.stringify(server.requests[1]?.body), /title:type/);
   assert.match(fs.readFileSync(output, 'utf8'), /## Summary/);
   assert.doesNotMatch(fs.readFileSync(output, 'utf8'), /5Cs|Pass 2/);
   assert.doesNotMatch(
@@ -1014,6 +1026,44 @@ test('PR critic re-audits one grounded replacement for an unsupported primary cl
   assert.doesNotMatch(
     JSON.stringify(server.requests[3].body),
     /preserve this exact supported detail\./,
+  );
+});
+
+test('PR critic repairs an unrepresentative title within the existing request ceiling', async (context) => {
+  const directory = createRepository(context);
+  git(directory, ['switch', '--quiet', '-c', 'feature']);
+  fs.appendFileSync(path.join(directory, 'README.md'), 'title repair fixture\n');
+  git(directory, ['add', 'README.md']);
+  git(directory, ['commit', '--quiet', '-m', 'docs: add title repair fixture']);
+  const output = path.join(directory, 'summary.md');
+  const server = await createCompletionServer(context, {
+    titleSubjectRejectedCritiques: 1,
+  });
+
+  const result = await run(
+    directory,
+    ['pr', '--base', 'main', '--out', output],
+    customEnvironment(server.baseURL),
+  );
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.equal(server.requests.length, 4);
+  assert.match(result.stdout, /requesting one grounded replacement/i);
+  assert.match(
+    JSON.stringify(server.requests[1]?.body),
+    /primary claim is also the title subject/i,
+  );
+  assert.match(
+    JSON.stringify(server.requests[2]?.body),
+    /Preserve these already validated title fields exactly/,
+  );
+  assert.match(
+    JSON.stringify(server.requests[2]?.body),
+    /cite that complete set on the primary claim/i,
+  );
+  assert.doesNotMatch(
+    JSON.stringify(server.requests[2]?.body),
+    /prefer one direct evidence id/i,
   );
 });
 

@@ -2,6 +2,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 interface ArtifactDraftModule {
+  ARTIFACT_DRAFT_RESPONSE_FORMAT: {
+    type: 'json-schema';
+    name: string;
+    schema: Record<string, unknown>;
+  };
   artifactRepairCategory(instruction: string): string;
   artifactRepairInstruction(error: unknown): string;
   eligiblePrimaryChangeEvidenceIds(
@@ -36,6 +41,23 @@ interface ChangeEvidenceModule {
 
 const artifactDraft: ArtifactDraftModule = require('../dist/artifact-draft.js');
 const changeEvidence: ChangeEvidenceModule = require('../dist/change-evidence.js');
+
+test('publishes one strict provider schema and accepts its nullable scope shape', () => {
+  const format = artifactDraft.ARTIFACT_DRAFT_RESPONSE_FORMAT;
+  assert.equal(format.type, 'json-schema');
+  assert.equal(format.name, 'diffwright_artifact_draft');
+  assert.match(JSON.stringify(format.schema), /schemaVersion/);
+  assert.match(JSON.stringify(format.schema), /significance/);
+  assert.equal(Object.isFrozen(format), true);
+
+  const draft = validDraft();
+  (draft.title as Record<string, unknown>).scope = null;
+  const parsed = artifactDraft.parseArtifactDraft(
+    JSON.stringify(draft),
+    evidenceBundle(),
+  );
+  assert.equal(parsed.title.scope, undefined);
+});
 
 test('classifies repair failures without echoing rejected artifact content', () => {
   assert.match(

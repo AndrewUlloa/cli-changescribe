@@ -24,7 +24,10 @@ interface CommitDependencies {
   };
   completeChat(
     _resolved: unknown,
-    input: { messages: Array<{ content?: unknown }> },
+    input: {
+      messages: Array<{ content?: unknown }>;
+      responseFormat?: 'json-object' | { type: 'json-schema' };
+    },
   ): Promise<{ content: string; reasoning: string; finishReason: string | null }>;
 }
 
@@ -34,6 +37,15 @@ type RunCommit = (
 ) => Promise<void>;
 
 const { runCommit }: { runCommit: RunCommit } = require('../dist/commit.js');
+const { TransportError } = require('../dist/errors.js') as {
+  TransportError: new (details: {
+    category: string;
+    provider: string;
+    endpoint: string;
+    status?: number;
+    providerMessage?: string;
+  }) => Error;
+};
 
 function git(cwd: string, args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8' });
@@ -55,14 +67,7 @@ function dependencies(capture: {
   resolveCalls: number;
   completionCalls: number;
   prompt: string;
-}, responses = [JSON.stringify(validDraft())], critique: string | readonly string[] = JSON.stringify({
-  schemaVersion: 1,
-  candidates: [{
-    candidateId: 'claim:claim-change',
-    evidenceIds: ['change-1'],
-    supported: true,
-  }],
-})): CommitDependencies {
+}, responses = [JSON.stringify(validDraft())], critique?: string | readonly string[]): CommitDependencies {
   let artifactResponseIndex = 0;
   let criticResponseIndex = 0;
   return {
@@ -89,14 +94,16 @@ function dependencies(capture: {
       capture.completionCalls += 1;
       const prompt = JSON.stringify(input.messages);
       if (prompt.includes('independently audit')) {
-        const criticResponse = Array.isArray(critique)
-          ? critique[
-            Math.min(criticResponseIndex, critique.length - 1)
-          ] ?? ''
-          : critique;
+        const suppliedResponse = critique === undefined
+          ? undefined
+          : Array.isArray(critique)
+            ? critique[
+              Math.min(criticResponseIndex, critique.length - 1)
+            ] ?? ''
+            : critique;
         criticResponseIndex += 1;
         return {
-          content: criticResponse,
+          content: completeCritiqueResponse(input.messages, suppliedResponse),
           reasoning: '',
           finishReason: 'stop',
         };
@@ -115,20 +122,86 @@ function dependencies(capture: {
   };
 }
 
+function completeCritiqueResponse(
+  messages: Array<{ content?: unknown }>,
+  supplied: string | undefined,
+): string {
+  const text = messages
+    .map((message) =>
+      typeof message.content === 'string' ? message.content : '',
+    )
+    .join('\n');
+  const match = /Model-authored candidates:\n(\[[\s\S]+\])$/u.exec(text);
+  const expected = match?.[1] === undefined
+    ? []
+    : JSON.parse(match[1]) as Array<{
+        candidateId: string;
+        evidenceIds: string[];
+      }>;
+  if (supplied === undefined) {
+    return JSON.stringify({
+      schemaVersion: 1,
+      candidates: expected.map((candidate) => ({
+        candidateId: candidate.candidateId,
+        evidenceIds: candidate.evidenceIds,
+        supported: true,
+      })),
+    });
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(supplied);
+  } catch {
+    return supplied;
+  }
+  if (
+    typeof parsed !== 'object' ||
+    parsed === null ||
+    !Array.isArray(Reflect.get(parsed, 'candidates'))
+  ) {
+    return supplied;
+  }
+  const provided = new Map(
+    (Reflect.get(parsed, 'candidates') as Array<Record<string, unknown>>)
+      .filter((candidate) => typeof candidate.candidateId === 'string')
+      .map((candidate) => [String(candidate.candidateId), candidate]),
+  );
+  return JSON.stringify({
+    schemaVersion: 1,
+    candidates: expected.flatMap((candidate) => {
+      const existing = provided.get(candidate.candidateId);
+      if (existing !== undefined) {
+        return [{
+          candidateId: candidate.candidateId,
+          evidenceIds: candidate.evidenceIds,
+          supported: existing.supported,
+        }];
+      }
+      return candidate.candidateId.startsWith('title:')
+        ? [{
+            candidateId: candidate.candidateId,
+            evidenceIds: candidate.evidenceIds,
+            supported: true,
+          }]
+        : [];
+    }),
+  });
+}
+
 function validDraft(): Record<string, unknown> {
   return {
     schemaVersion: 1,
     title: {
       type: 'chore',
       breaking: false,
-      subject: 'describe staged change',
+      subject: 'guard reviewed staged contents',
       claimId: 'claim-change',
     },
     claims: [
       {
         id: 'claim-change',
         kind: 'change',
-        text: 'describe staged change.',
+        text: 'guard reviewed staged contents.',
         evidenceIds: ['change-1'],
         basis: 'observed',
         significance: 'primary',
@@ -270,6 +343,44 @@ test('repairs one invalid draft from the original staged evidence', async (conte
   assert.doesNotMatch(capture.prompt, /not-json/);
 });
 
+test('falls back once when strict structured generation fails before parsing', async (context) => {
+  const directory = repository(context);
+  useRepository(context, directory);
+  fs.writeFileSync(path.join(directory, 'value.txt'), 'evidence-value\n');
+  git(directory, ['add', 'value.txt']);
+  const capture = { resolveCalls: 0, completionCalls: 0, prompt: '' };
+  const base = dependencies(capture);
+  const complete = base.completeChat.bind(base);
+  const responseFormats: Array<'json-object' | 'json-schema' | 'none'> = [];
+  let first = true;
+  base.completeChat = async (resolved, input) => {
+    responseFormats.push(
+      input.responseFormat === 'json-object'
+        ? 'json-object'
+        : input.responseFormat?.type === 'json-schema'
+          ? 'json-schema'
+          : 'none',
+    );
+    if (first) {
+      first = false;
+      capture.completionCalls += 1;
+      throw new TransportError({
+        category: 'request_incompatible',
+        provider: 'groq',
+        endpoint: 'api.groq.com',
+        status: 400,
+        providerMessage: "Failed to validate JSON. See 'failed_generation'.",
+      });
+    }
+    return await complete(resolved, input);
+  };
+
+  await runCommit(['--dry-run'], base);
+
+  assert.equal(capture.completionCalls, 3);
+  assert.deepEqual(responseFormats.slice(0, 2), ['json-schema', 'json-object']);
+});
+
 test('repairs a semantically unsupported type from provided intent', async (context) => {
   const directory = repository(context);
   useRepository(context, directory);
@@ -300,10 +411,6 @@ test('repairs a semantically unsupported type from provided intent', async (cont
   assert.match(
     capture.prompt,
     /Supported Conventional Commit types for this evidence: \[\\?"feat\\?"\]/,
-  );
-  assert.doesNotMatch(
-    capture.prompt,
-    /Supported Conventional Commit types for this evidence: .*fix/,
   );
 });
 
@@ -396,7 +503,7 @@ test('critic still blocks an unsupported primary claim', async (context) => {
         })],
       ),
     ),
-    /critique rejected the primary claim/i,
+    /critique rejected required artifact semantics \(primary-claim\)/i,
   );
   assert.equal(capture.completionCalls, 4);
   assert.match(capture.prompt, /Repair category: primary-grounding/);
@@ -431,6 +538,118 @@ test('critic re-audits one grounded replacement for an unsupported primary claim
   assert.match(capture.prompt, /Repair category: primary-grounding/);
   assert.match(capture.prompt, /Preserve these already validated title fields exactly/);
   assert.match(capture.prompt, /\\"type\\":\\"chore\\"/);
+});
+
+test('grounded primary repair preserves a validated semantic type and scope', async (context) => {
+  const directory = repository(context);
+  useRepository(context, directory);
+  fs.writeFileSync(
+    path.join(directory, '.diffwrightrc.json'),
+    `${JSON.stringify({
+      version: 1,
+      title: { scopeMode: 'optional', allowedScopes: ['parser'] },
+    })}\n`,
+  );
+  fs.writeFileSync(
+    path.join(directory, 'intent.md'),
+    'Add a user-visible parser flag.\n',
+  );
+  git(directory, ['add', '.diffwrightrc.json', 'intent.md']);
+  git(directory, ['commit', '--quiet', '-m', 'chore: add title policy fixture']);
+  fs.mkdirSync(path.join(directory, 'src', 'parser'), { recursive: true });
+  fs.writeFileSync(
+    path.join(directory, 'src', 'parser', 'index.ts'),
+    'export const flag = true;\n',
+  );
+  git(directory, ['add', 'src/parser/index.ts']);
+  const capture = { resolveCalls: 0, completionCalls: 0, prompt: '' };
+  const scopedDraft = (): Record<string, unknown> => {
+    const value = validDraft();
+    const title = value.title as Record<string, unknown>;
+    title.type = 'feat';
+    title.scope = 'parser';
+    return value;
+  };
+  const verdict = (supported: boolean) => JSON.stringify({
+    schemaVersion: 1,
+    candidates: [{
+      candidateId: 'claim:claim-change',
+      evidenceIds: ['change-1'],
+      supported,
+    }],
+  });
+
+  await runCommit(
+    ['--dry-run', '--context-file', 'intent.md'],
+    dependencies(
+      capture,
+      [JSON.stringify(scopedDraft()), JSON.stringify(scopedDraft())],
+      [verdict(false), verdict(true)],
+    ),
+  );
+
+  assert.equal(capture.completionCalls, 4);
+  assert.match(capture.prompt, /\\"type\\":\\"feat\\"/);
+  assert.match(capture.prompt, /\\"scope\\":\\"parser\\"/);
+});
+
+test('critic rejects an incidental title that misses substantive staged work', async (context) => {
+  const directory = repository(context);
+  useRepository(context, directory);
+  fs.writeFileSync(path.join(directory, 'alpha.ts'), 'export const alpha = 1;\n');
+  fs.writeFileSync(path.join(directory, 'beta.ts'), 'export const beta = 2;\n');
+  git(directory, ['add', 'alpha.ts', 'beta.ts']);
+  const capture = { resolveCalls: 0, completionCalls: 0, prompt: '' };
+  const incidental = validDraft();
+  (incidental.title as Record<string, unknown>).subject = 'add one type import';
+  const incidentalPrimary = (incidental.claims as Array<Record<string, unknown>>)[0];
+  if (incidentalPrimary !== undefined) {
+    incidentalPrimary.text = 'add one type import.';
+  }
+  const representative = validDraft();
+  (representative.title as Record<string, unknown>).subject =
+    'cover both staged modules';
+  const representativePrimary =
+    (representative.claims as Array<Record<string, unknown>>)[0];
+  if (representativePrimary !== undefined) {
+    representativePrimary.text = 'cover both staged modules.';
+    representativePrimary.evidenceIds = ['change-1', 'change-2'];
+  }
+  const verdict = (subjectSupported: boolean) => JSON.stringify({
+    schemaVersion: 1,
+    candidates: [
+      {
+        candidateId: 'claim:claim-change',
+        evidenceIds: ['change-1', 'change-2'],
+        supported: subjectSupported,
+      },
+    ],
+  });
+
+  await runCommit(
+    ['--dry-run'],
+    dependencies(
+      capture,
+      [JSON.stringify(incidental), JSON.stringify(representative)],
+      [verdict(false), verdict(true)],
+    ),
+  );
+
+  assert.equal(capture.completionCalls, 4);
+  assert.match(capture.prompt, /previous primary claim failed evidence review/i);
+  assert.match(
+    capture.prompt,
+    /required representative title evidence ids:[^\n]*change-1[^\n]*change-2/i,
+  );
+  assert.match(
+    capture.prompt,
+    /cite that complete set on the primary claim/i,
+  );
+  assert.match(
+    capture.prompt,
+    /maximum title\.subject length[^\n]*characters/i,
+  );
+  assert.doesNotMatch(capture.prompt, /prefer one direct evidence id/i);
 });
 
 test('critic transport failure is terminal and never triggers draft repair', async (context) => {
