@@ -91,6 +91,7 @@ function expectedDiffwrightFiles(): string[] {
     'artifact-critic',
     'artifact-renderer',
     'change-evidence',
+    'change-map',
     'cli',
     'commit',
     'context-evidence',

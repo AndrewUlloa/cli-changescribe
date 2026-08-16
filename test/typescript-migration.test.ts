@@ -90,6 +90,7 @@ test('all application sources are TypeScript and compiled output exists', () => 
     'artifact-critic',
     'artifact-renderer',
     'change-evidence',
+    'change-map',
     'cli',
     'commit',
     'context-evidence',

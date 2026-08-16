@@ -69,12 +69,12 @@ Non-decisions:
   - **Files:** `src/artifact-critic.ts`, `src/pr-workflow.ts`, `test/artifact-critic.test.ts`, `test/workflow-byok.test.ts`
   - **Size:** M
 
-- [ ] **Task 2: Build the deterministic change map**
+- [x] **Task 2: Build the deterministic change map**
   - **Description:** Add a pure classifier for implementation, tests, documentation, configuration, and other changes with exact counts, statuses, rename handling, stable ordering, and safe paths.
   - **Acceptance:**
-    - [ ] Every changed file is classified exactly once.
-    - [ ] Known additions/deletions sum exactly; unknown/binary data remains explicit.
-    - [ ] Input ordering cannot change output.
+    - [x] Every changed file is classified exactly once.
+    - [x] Known additions/deletions sum exactly; unknown/binary data remains explicit.
+    - [x] Input ordering cannot change output.
   - **Verify:** `npm run build && npm run build:test && node --test .test-dist/change-map.test.js`
   - **Depends on:** None
   - **Files:** `src/change-map.ts`, `test/change-map.test.ts`, `test/typescript-migration.test.ts`, `test/distribution.test.ts`
