@@ -122,12 +122,12 @@ Non-decisions:
   - **Files:** `src/change-evidence.ts`, `src/artifact-draft.ts`, `src/artifact-renderer.ts`, related focused tests
   - **Size:** M
 
-- [ ] **Task 6: Add bounded structured validation results**
+- [x] **Task 6: Add bounded structured validation results**
   - **Description:** Extend receipts with optional typed numeric results/limitations and registered bounded parsers; raw gate output is re-emitted locally but never enters evidence or provider requests.
   - **Acceptance:**
-    - [ ] Recognized TAP totals render exactly.
-    - [ ] Unrecognized output renders command/status/duration without invented counts.
-    - [ ] Failed receipts block success; skipped receipts carry a typed reason.
+    - [x] Recognized TAP totals render exactly.
+    - [x] Unrecognized output renders command/status/duration without invented counts.
+    - [x] Failed receipts block success; skipped receipts carry a typed reason.
   - **Verify:** `npm run build && npm run build:test && node --test .test-dist/gate-receipts.test.js .test-dist/artifact-renderer.test.js .test-dist/security.test.js`
   - **Depends on:** Task 3
   - **Files:** `src/change-evidence.ts`, `src/gate-receipts.ts`, `test/gate-receipts.test.ts`, `test/artifact-renderer.test.ts`, `test/security.test.ts`
@@ -135,10 +135,10 @@ Non-decisions:
 
 ### Checkpoint: Reviewer-Complete PR
 
-- [ ] Mixed PR fixture renders Summary, Changes, deterministic totals, and Validation
-- [ ] Unsupported context and incomplete substantive coverage fail before output/GitHub
-- [ ] Request ceilings remain green
-- [ ] Full `npm test` passes
+- [x] Mixed PR fixture renders Summary, Changes, deterministic totals, and Validation
+- [x] Unsupported context and incomplete substantive coverage fail before output/GitHub
+- [x] Request ceilings remain green
+- [x] Full `npm test` passes
 
 ### Phase 3: Semantic Titles and Durable History
 

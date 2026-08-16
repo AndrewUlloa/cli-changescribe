@@ -193,7 +193,7 @@ PR-ready output:
 
 ## Validation
 
-- Passed: `npm test`
+- Passed: `npm test` in 2.14 s — 327/327 tests passed
 
 ## Review focus
 
@@ -292,8 +292,9 @@ append `-- --yes` deliberately.
 - PRs use the final `merge-base...HEAD` net diff. Reverted intermediate work is
   absent; deletions, renames, type changes, binary metadata, and unusual
   filenames remain visible to the collector.
-- A changed test file is only a code change. Verification text comes only from
-  a captured command receipt with its exact status.
+- A changed test file is only a code change. Validation text comes only from
+  a captured command receipt with its exact status. Recognized TAP totals are
+  exact; unknown output formats are labeled unavailable.
 - The model returns claims and evidence IDs, not final Markdown. Diffwright
   validates the links, chooses supported claims, and renders locally.
 - Coverage limits fail closed. Diffwright does not silently slice a file or

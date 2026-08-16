@@ -448,14 +448,32 @@ function renderVerificationReceipts(
   receipts: readonly VerificationReceipt[],
 ): string[] {
   return receipts.map((receipt) => {
+    const duration = renderReceiptDuration(receipt.durationMs);
     if (receipt.status === 'passed') {
-      return `- Passed: \`${receipt.command.display}\``;
+      const result = receipt.result;
+      if (result !== undefined) {
+        return `- Passed: \`${receipt.command.display}\` in ${duration} — ${String(result.passed)}/${String(result.tests)} tests passed`;
+      }
+      const limitation = receipt.limitation === 'output-unrecognized'
+        ? ' — test counts unavailable'
+        : '';
+      return `- Passed: \`${receipt.command.display}\` in ${duration}${limitation}`;
     }
     if (receipt.status === 'failed') {
-      return `- Failed (exit ${String(receipt.exitCode)}): \`${receipt.command.display}\``;
+      return `- Failed (exit ${String(receipt.exitCode)} after ${duration}): \`${receipt.command.display}\``;
     }
-    return `- Skipped: \`${receipt.command.display}\``;
+    const reason = receipt.skipReason === 'user-requested'
+      ? 'user requested'
+      : 'not configured';
+    return `- Skipped (${reason}): \`${receipt.command.display}\``;
   });
+}
+
+function renderReceiptDuration(durationMs: number): string {
+  if (durationMs < 1_000) {
+    return `${String(Math.round(durationMs))} ms`;
+  }
+  return `${(durationMs / 1_000).toFixed(2)} s`;
 }
 
 function validateLengths(target: number, maximum: number): void {

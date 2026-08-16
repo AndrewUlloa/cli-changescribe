@@ -873,7 +873,9 @@ function runProjectGate(
 ): VerificationReceipt {
   const command = projectGateCommand(manager, scriptName);
   step(`Running ${command.display} before PR creation...`);
-  const receipt = runGateReceipt(receiptId, command);
+  const receipt = runGateReceipt(receiptId, command, {
+    ...(scriptName === 'test' ? { resultParser: 'tap' as const } : {}),
+  });
   requirePassedGate(receipt, failureGuidance);
   return receipt;
 }
@@ -1185,12 +1187,24 @@ async function main(argv: string[], timings: OperationTimings): Promise<void> {
     const formatCommand = projectGateCommand(manager, 'format');
     if (args.skipFormat) {
       warn('Skipping format step (flagged)');
-      receipts.push(createSkippedGateReceipt('gate-format', formatCommand));
+      receipts.push(
+        createSkippedGateReceipt(
+          'gate-format',
+          formatCommand,
+          'user-requested',
+        ),
+      );
     } else if (!hasPackageScript(projectPackage, 'format')) {
       const scriptKind =
         manager === 'npm' ? 'npm script' : 'package.json script';
       warn(`Skipping format step (no ${scriptKind} named "format")`);
-      receipts.push(createSkippedGateReceipt('gate-format', formatCommand));
+      receipts.push(
+        createSkippedGateReceipt(
+          'gate-format',
+          formatCommand,
+          'not-configured',
+        ),
+      );
     } else {
       receipts.push(
         runProjectGate(

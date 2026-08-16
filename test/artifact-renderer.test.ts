@@ -42,6 +42,7 @@ const changeEvidence: ChangeEvidenceModule = require('../dist/change-evidence.js
 function bundle(
   receiptStatus: 'passed' | 'failed' | 'skipped' = 'passed',
   complete = true,
+  resultMode?: 'recognized' | 'unrecognized',
 ): unknown {
   const exitCode =
     receiptStatus === 'passed' ? 0 : receiptStatus === 'failed' ? 17 : null;
@@ -94,6 +95,24 @@ function bundle(
         exitCode,
         durationMs: 30,
         source: 'diffwright',
+        ...(receiptStatus === 'skipped'
+          ? { skipReason: 'not-configured' }
+          : {}),
+        ...(resultMode === 'recognized'
+          ? {
+              result: {
+                type: 'test-summary',
+                tests: 327,
+                passed: 327,
+                failed: 0,
+                skipped: 0,
+                cancelled: 0,
+                todo: 0,
+              },
+            }
+          : resultMode === 'unrecognized'
+            ? { limitation: 'output-unrecognized' }
+            : {}),
       },
     ],
     coverage: complete
@@ -949,9 +968,37 @@ test('renders only authoritative receipts in a PR Validation section', () => {
 
   assert.match(
     artifact.body,
-    /## Validation\n\n- Passed: `npm test`(?:\n|$)/,
+    /## Validation\n\n- Passed: `npm test` in 30 ms(?:\n|$)/,
   );
   assert.doesNotMatch(artifact.body, /Tests passed somehow/);
+});
+
+test('renders exact recognized test totals and discloses unavailable counts', () => {
+  const recognizedEvidence = bundle('passed', true, 'recognized');
+  const recognizedDraft = artifactDraft.parseArtifactDraft(
+    draftJson({ includeVerification: false }),
+    recognizedEvidence,
+  );
+  const recognized = renderer.renderPullRequestArtifact(
+    recognizedDraft,
+    recognizedEvidence,
+  );
+  assert.match(
+    recognized.body,
+    /Passed: `npm test` in 30 ms — 327\/327 tests passed/u,
+  );
+
+  const unrecognizedEvidence = bundle('passed', true, 'unrecognized');
+  const unrecognizedDraft = artifactDraft.parseArtifactDraft(
+    draftJson({ includeVerification: false }),
+    unrecognizedEvidence,
+  );
+  const unrecognized = renderer.renderPullRequestArtifact(
+    unrecognizedDraft,
+    unrecognizedEvidence,
+  );
+  assert.match(unrecognized.body, /test counts unavailable/u);
+  assert.doesNotMatch(unrecognized.body, /\d+\/\d+ tests passed/u);
 });
 
 test('never renders a failed or skipped receipt as passed', () => {
@@ -965,7 +1012,9 @@ test('never renders a failed or skipped receipt as passed', () => {
     assert.doesNotMatch(artifact.body, /Passed:/);
     assert.match(
       artifact.body,
-      status === 'failed' ? /Failed \(exit 17\):/ : /Skipped:/,
+      status === 'failed'
+        ? /Failed \(exit 17 after 30 ms\):/
+        : /Skipped \(not configured\):/,
     );
   }
 });

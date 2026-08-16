@@ -16,6 +16,7 @@ export interface CommandOptions {
 export interface SpawnOptions {
   readonly cwd?: string;
   readonly encoding?: 'utf8';
+  readonly maxBuffer?: number;
   readonly stdio?: StdioOptions;
 }
 

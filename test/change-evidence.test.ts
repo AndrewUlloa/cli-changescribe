@@ -48,6 +48,17 @@ interface VerificationReceipt {
   exitCode: number | null;
   durationMs: number;
   source: 'diffwright' | 'external';
+  result?: {
+    type: 'test-summary';
+    tests: number;
+    passed: number;
+    failed: number;
+    skipped: number;
+    cancelled: number;
+    todo: number;
+  };
+  limitation?: 'output-unrecognized';
+  skipReason?: 'not-configured' | 'user-requested';
 }
 
 interface EvidenceBundleInput {
@@ -232,6 +243,70 @@ test('rejects duplicate identifiers, inconsistent coverage, and invalid receipts
   assert.throws(
     () => createEvidenceBundle(missingReceipt),
     /references unknown receipt/,
+  );
+});
+
+test('validates structured receipt results, limitations, and skip reasons', () => {
+  const recognized = baseInput();
+  recognized.receipts[0].result = {
+    type: 'test-summary',
+    tests: 3,
+    passed: 2,
+    failed: 0,
+    skipped: 1,
+    cancelled: 0,
+    todo: 0,
+  };
+  assert.doesNotThrow(() => createEvidenceBundle(recognized));
+
+  const unrecognized = baseInput();
+  unrecognized.receipts[0].limitation = 'output-unrecognized';
+  assert.doesNotThrow(() => createEvidenceBundle(unrecognized));
+
+  const inconsistent = baseInput();
+  inconsistent.receipts[0].result = {
+    type: 'test-summary',
+    tests: 2,
+    passed: 1,
+    failed: 0,
+    skipped: 0,
+    cancelled: 0,
+    todo: 0,
+  };
+  assert.throws(
+    () => createEvidenceBundle(inconsistent),
+    /test summary is invalid/i,
+  );
+
+  const skipped = baseInput();
+  skipped.receipts[0] = {
+    ...skipped.receipts[0],
+    status: 'skipped',
+    exitCode: null,
+    durationMs: 0,
+    skipReason: 'user-requested',
+  };
+  assert.doesNotThrow(() => createEvidenceBundle(skipped));
+
+  const missingReason = baseInput();
+  missingReason.receipts[0] = {
+    ...missingReason.receipts[0],
+    status: 'skipped',
+    exitCode: null,
+    durationMs: 0,
+  };
+  assert.throws(
+    () => createEvidenceBundle(missingReason),
+    /requires a typed reason/i,
+  );
+
+  const rawOutput = baseInput();
+  Object.assign(rawOutput.receipts[0], {
+    rawOutput: 'raw-gate-output-sentinel',
+  });
+  assert.throws(
+    () => createEvidenceBundle(rawOutput),
+    /unsupported fields/i,
   );
 });
 

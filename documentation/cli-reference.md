@@ -264,13 +264,15 @@ supporting documentation, tests, manifests, and lockfiles from displacing source
 work, rejects unknown evidence IDs, and omits unsupported inference. It renders
 the Conventional title and adaptive body locally. Empty sections are absent.
 
-Verification is never inferred from a changed test file or model prose. PR gate
-commands produce receipts with exact command, status, exit code, and duration;
-only a successful receipt renders as Passed.
+Validation is never inferred from a changed test file or model prose. PR gate
+commands produce receipts with exact command, status, exit code, and duration.
+When Diffwright recognizes a bounded TAP summary, it includes the exact test
+totals. Otherwise it says that test counts are unavailable instead of inventing
+them. Raw gate output remains local and never enters provider evidence.
 
 After deterministic parsing and rendering, a separate critic checks every
 renderable model-authored claim and trailer against only its cited original
-evidence. Verification text is excluded from that model audit because it is
+evidence. Validation receipt text is excluded from that model audit because it is
 rendered from receipts. The critic cannot rewrite. A negative verdict removes
 an optional claim or trailer. A negative primary verdict permits one grounded
 replacement and second audit; malformed, missing, duplicate, mismatched, or a

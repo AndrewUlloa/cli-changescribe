@@ -1320,14 +1320,15 @@ test('PR creation links an issue in the body without passing an unsupported gh f
     'docs: route completions through provider-neutral configuration',
   );
   assert.match(captured.body, /(?:^|\n)Closes #123(?:\n|$)/);
-  assert.match(captured.body, /Passed: `npm run build`\n\nCloses #123$/u);
+  assert.match(captured.body, /Passed: `npm run build` in \d+ ms\n\nCloses #123$/u);
   assert.match(
     fs.readFileSync(path.join(directory, 'summary.final.md'), 'utf8'),
     /Closes #123$/u,
   );
-  assert.match(captured.body, /Skipped: `npm run format`/);
-  assert.match(captured.body, /Passed: `npm test`/);
-  assert.match(captured.body, /Passed: `npm run build`/);
+  assert.match(captured.body, /Skipped \(user requested\): `npm run format`/);
+  assert.match(captured.body, /Passed: `npm test` in \d+ ms/);
+  assert.match(captured.body, /test counts unavailable/);
+  assert.match(captured.body, /Passed: `npm run build` in \d+ ms/);
   const title = captured.args[captured.args.indexOf('--title') + 1];
   assert.match(title, /^[a-z][a-z0-9-]*(?:\([a-z0-9._/-]+\))?!?: .+/);
   assert.equal(title.length <= 72, true);
