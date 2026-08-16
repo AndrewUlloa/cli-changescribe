@@ -190,6 +190,18 @@ export function validatePrArguments(argv: string[]): void {
   }
 }
 
+export function validateMergeArguments(argv: string[]): void {
+  const supported = new Set(['--yes', '--dry-run']);
+  for (const argument of argv) {
+    if (!supported.has(argument)) {
+      rejectUnknown('merge', argument);
+    }
+  }
+  if (argv.includes('--yes') && argv.includes('--dry-run')) {
+    throw new CliArgumentError('--yes cannot be combined with --dry-run.');
+  }
+}
+
 export function validateCommandArguments(command: string, argv: string[]): void {
   if (command === 'commit') {
     validateCommitArguments(argv);
@@ -201,6 +213,10 @@ export function validateCommandArguments(command: string, argv: string[]): void 
   }
   if (command === 'init') {
     validateInitArguments(argv);
+    return;
+  }
+  if (command === 'merge') {
+    validateMergeArguments(argv);
     return;
   }
   validatePrArguments(argv);

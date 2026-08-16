@@ -5,6 +5,7 @@ import { runDoctor } from './doctor';
 import { CliArgumentError, validateCommandArguments } from './arguments';
 import { formatSafeError } from './errors';
 import { runInit } from './init';
+import { runMerge } from './merge';
 import { runPrSummary } from './pr-summary';
 import { knownSecretValues, loadRuntimeConfig } from './runtime-config';
 
@@ -12,6 +13,7 @@ interface CliRunners {
   runCommit(args: string[]): Promise<void>;
   runDoctor(args: string[]): Promise<void>;
   runInit(args: string[]): void | Promise<void>;
+  runMerge(args: string[]): Promise<void>;
   runPrSummary(args: string[]): Promise<void>;
 }
 
@@ -19,6 +21,7 @@ const defaultRunners: CliRunners = {
   runCommit,
   runDoctor,
   runInit,
+  runMerge,
   runPrSummary,
 };
 
@@ -46,6 +49,7 @@ Commands:
   pr            Generate a PR summary (optionally create/update PR)
   doctor        Validate provider configuration (add --live for one request)
   init          Interactively configure Diffwright in the current repo
+  merge         Validate and squash-merge the current pull request
   pr:summary    Alias for pr
   feature:pr    Alias for: pr --base staging --create-pr --mode feature
   staging:pr    Alias for: pr --base main --create-pr --mode release
@@ -59,6 +63,7 @@ Examples:
   diffwright doctor --live
   diffwright commit --all --dry-run
   diffwright pr --base main --mode release
+  diffwright merge --dry-run
   diffwright feature:pr
   diffwright staging:pr
 
@@ -155,6 +160,23 @@ Complete reference: ${CLI_REFERENCE}
 `);
 }
 
+function printMergeHelp(): void {
+  console.log(`Usage: diffwright merge [--dry-run] [--yes]
+
+Validate the current pull request and merge its exact reviewed head as one
+squash commit using its Conventional Commit title. No provider calls are made.
+
+Options:
+  --dry-run        Validate and preview without merging
+  --yes            Approve the merge noninteractively after validation
+
+Diffwright pins the origin repository, local and remote head, base revision,
+title policy, review decision, and check results before invoking GitHub CLI.
+
+Complete reference: ${CLI_REFERENCE}
+`);
+}
+
 function printCommandHelp(command: string): void {
   if (command === 'commit') {
     printCommitHelp();
@@ -162,6 +184,8 @@ function printCommandHelp(command: string): void {
     printDoctorHelp();
   } else if (command === 'init') {
     printInitHelp();
+  } else if (command === 'merge') {
+    printMergeHelp();
   } else {
     printPrHelp();
   }
@@ -190,12 +214,13 @@ export async function runCli(
     (validatedCommand === 'commit' ||
       validatedCommand === 'doctor' ||
       validatedCommand === 'init' ||
+      validatedCommand === 'merge' ||
       validatedCommand === 'pr')
   ) {
     printCommandHelp(validatedCommand);
     return 0;
   }
-  if (validatedCommand === 'commit' || validatedCommand === 'doctor' || validatedCommand === 'init' || validatedCommand === 'pr') {
+  if (validatedCommand === 'commit' || validatedCommand === 'doctor' || validatedCommand === 'init' || validatedCommand === 'merge' || validatedCommand === 'pr') {
     try {
       validateCommandArguments(validatedCommand, rest);
     } catch (error) {
@@ -221,6 +246,11 @@ export async function runCli(
 
   if (command === 'init') {
     await runners.runInit(rest);
+    return 0;
+  }
+
+  if (command === 'merge') {
+    await runners.runMerge(rest);
     return 0;
   }
 

@@ -187,6 +187,29 @@ export function renderConventionalTitle(
   });
 }
 
+export function parseConventionalTitle(
+  header: string,
+  policy: ConventionalTitlePolicy = {},
+): Readonly<ConventionalTitleDraft> {
+  const match =
+    /^([a-z][a-z0-9-]{0,31})(?:\(([a-z0-9][a-z0-9._/-]{0,63})\))?(!)?: (.+)$/u.exec(
+      header,
+    );
+  if (match === null) {
+    throw new Error('Pull-request title is not a valid Conventional Commit title.');
+  }
+  const draft: ConventionalTitleDraft = {
+    type: match[1],
+    ...(match[2] === undefined ? {} : { scope: match[2] }),
+    breaking: match[3] === '!',
+    subject: match[4],
+  };
+  if (renderConventionalTitle(draft, policy).header !== header) {
+    throw new Error('Pull-request title is not canonical.');
+  }
+  return Object.freeze(draft);
+}
+
 export function renderPullRequestArtifact(
   draft: ArtifactDraft,
   evidence: EvidenceBundle,

@@ -237,6 +237,40 @@ revalidated, including Conventional Commit grammar, repository policy, UTF-8,
 control characters, size, and known-secret checks. Approved bytes are not
 trimmed or rewritten afterward.
 
+## `merge`
+
+```text
+diffwright merge [--dry-run] [--yes]
+```
+
+`merge` resolves exactly one open same-repository pull request for the attached
+current branch. It makes no provider request. Before showing a plan it requires:
+
+- a clean working tree and matching local/origin feature-head SHA;
+- an unchanged origin fetch/push repository identity;
+- an open, ready, clean, mergeable PR whose base SHA still matches origin;
+- a base branch that does not require a merge queue;
+- a canonical Conventional Commit title allowed by the policy pinned to that
+  base SHA;
+- no pending review request or latest `CHANGES_REQUESTED` review; and
+- at least one reported GitHub check, with every check passed or skipped.
+
+`--dry-run` performs those reads and prints a bounded plan without mutation.
+Without `--yes`, an interactive TTY asks for confirmation; a noninteractive
+invocation fails closed. After approval, Diffwright repeats the complete
+validation. Any changed repository, branch, SHA, PR field, title, check, or
+review stops the command.
+
+The only merge mutation uses GitHub's direct pull-request merge API with a
+squash request pinned to the numeric PR, explicit repository, reviewed head SHA,
+and validated PR title. It accepts only a mutation response that reports
+`merged: true`; merge-queue use and already-merged no-ops are rejected.
+Diffwright does not use admin, auto-merge, merge-commit, rebase, or
+branch-deletion fallbacks. It then reads the PR again and reports success only
+when GitHub returns `MERGED` with the same merge-commit OID. If the mutation or
+postcondition is ambiguous, inspect the PR before retrying; Diffwright never
+retries automatically.
+
 ## Aliases
 
 | Alias | Expansion |

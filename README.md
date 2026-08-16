@@ -234,6 +234,9 @@ Closes #123
 | `diffwright pr --create-pr` | Run project gates, then create or update the GitHub PR with `gh`. |
 | `diffwright pr --create-pr --yes` | Explicitly approve validated GitHub mutation in noninteractive automation. |
 | `diffwright pr --timings` | Print local phase durations after success or failure. |
+| `diffwright merge --dry-run` | Validate and preview the current PR's pinned squash merge; no mutation. |
+| `diffwright merge` | Validate twice, confirm interactively, and squash-merge the exact reviewed PR head. |
+| `diffwright merge --yes` | Explicitly approve the same pinned squash merge in noninteractive automation. |
 | `diffwright init` | Guide an interactive TTY through project setup; preserve legacy script-only behavior in a no-argument non-TTY. |
 | `diffwright --version` | Print the exact installed Diffwright version. |
 
@@ -254,6 +257,8 @@ documents every flag, default, alias, side effect, and exit behavior.
 | `pr --dry-run` | 0 | no summary files | attempts an explicit base-ref fetch; falls back to local refs |
 | `pr` | 2 normally; up to 5 across bounded draft and primary-claim repairs | overwrites the requested file, a sibling `.final.md`, and a temporary backup | attempts to fetch the base |
 | `pr --create-pr` | Same structured generation | may run format, always runs the detected package manager's test/build scripts (`npm test` and `npm run build` for npm), then reviews and writes the exact final artifact | pushes the reviewed SHA when creating; an update requires the remote PR head to already equal it |
+| `merge --dry-run` | 0 | none | reads the exact live PR, checks, reviews, title policy, and remote revisions; no merge |
+| `merge` | 0 | none | after confirmation and a second full validation, requests one pinned squash merge and confirms its postcondition |
 | `init --dry-run` | 0 | none | previews the redacted setup plan; no install or live request |
 | no-argument non-TTY `init` | 0 | edits `package.json` only when generic scripts are added or migrated | none |
 | guided or `--yes` `init` | 0 by default; 1 only with explicit live consent | may update `package.json`, a lockfile, `.gitignore`, `.env.local`, `CLAUDE.md`, and `AGENTS.md` after interactive confirmation or deterministic `--yes` planning | may install the exact local package; runs offline doctor; live doctor is separately explicit |
@@ -284,6 +289,17 @@ by `DIFFWRIGHT_EDITOR`, then `EDITOR`, then `vi`; the value must be one executab
 without arguments. A noninteractive `--create-pr` requires explicit `--yes`.
 Generated consumer scripts keep this review enabled by default; automation can
 append `-- --yes` deliberately.
+
+`merge` operates on exactly one open same-repository PR for the current branch.
+It requires a clean working tree, matching local and remote head SHA, a canonical
+Conventional Commit PR title under the pinned base policy, a clean merge state,
+no unresolved review changes, and at least one reported check with every check
+passed or skipped. Repositories that require a merge queue are rejected rather
+than bypassed, including for privileged callers. After confirmation, it repeats
+the validation and calls GitHub's direct pull-request merge API with the numeric
+PR, repository, reviewed
+head SHA, validated title, and squash method. It never uses admin, auto-merge, rebase, merge-commit, or
+branch-deletion fallbacks.
 
 ### Evidence contract
 

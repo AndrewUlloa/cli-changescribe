@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-type CliCall = ['commit' | 'doctor' | 'init' | 'pr', string[]];
+type CliCall = ['commit' | 'doctor' | 'init' | 'merge' | 'pr', string[]];
 
 interface CliRunners {
   runCommit(args: string[]): Promise<void>;
   runDoctor(args: string[]): Promise<void>;
   runInit(args: string[]): Promise<void>;
+  runMerge(args: string[]): Promise<void>;
   runPrSummary(args: string[]): Promise<void>;
 }
 
@@ -28,6 +29,9 @@ function recordingRunners(): { calls: CliCall[]; runners: CliRunners } {
       runInit: async (args: string[]) => {
         calls.push(['init', args]);
       },
+      runMerge: async (args: string[]) => {
+        calls.push(['merge', args]);
+      },
       runPrSummary: async (args: string[]) => {
         calls.push(['pr', args]);
       },
@@ -42,12 +46,14 @@ test('CLI routes primary commands and the PR alias', async () => {
   assert.equal(await runCli(['init'], runners), 0);
   assert.equal(await runCli(['pr', '--base', 'develop'], runners), 0);
   assert.equal(await runCli(['pr:summary', '--dry-run'], runners), 0);
+  assert.equal(await runCli(['merge', '--dry-run'], runners), 0);
 
   assert.deepEqual(calls, [
     ['commit', ['--dry-run']],
     ['init', []],
     ['pr', ['--base', 'develop']],
     ['pr', ['--dry-run']],
+    ['merge', ['--dry-run']],
   ]);
 });
 
@@ -103,6 +109,16 @@ test('help does not invoke a command runner', async () => {
 
 test('each command exposes focused help with its real options and side effects', async () => {
   const cases = [
+    {
+      invocation: ['merge', '--help'],
+      expected: [
+        /Usage: diffwright merge/,
+        /--dry-run/,
+        /--yes/,
+        /squash/i,
+        /Conventional Commit title/i,
+      ],
+    },
     {
       invocation: ['commit', '--help'],
       expected: [
@@ -177,7 +193,7 @@ test('global help links to the complete CLI reference', async () => {
   );
 });
 
-test('unknown commit, doctor, and init options fail before invoking a runner', async () => {
+test('unknown command options fail before invoking a runner', async () => {
   const { calls, runners } = recordingRunners();
 
   assert.equal(await runCli(['commit', '--dry-rnu'], runners), 1);
@@ -186,6 +202,8 @@ test('unknown commit, doctor, and init options fail before invoking a runner', a
   assert.equal(await runCli(['pr', '--context-file'], runners), 1);
   assert.equal(await runCli(['doctor', '--network'], runners), 1);
   assert.equal(await runCli(['init', '--force'], runners), 1);
+  assert.equal(await runCli(['merge', '--delete-branch'], runners), 1);
+  assert.equal(await runCli(['merge', '--yes', '--dry-run'], runners), 1);
 
   assert.deepEqual(calls, []);
 });

@@ -153,12 +153,12 @@ Non-decisions:
   - **Files:** semantic title module/test, `src/commit.ts`, `src/pr-workflow.ts`, critic integration tests
   - **Size:** M
 
-- [ ] **Task 8: Add squash-title validation and safe merge command**
+- [x] **Task 8: Add squash-title validation and safe merge command**
   - **Description:** Add a project command that resolves the current PR, pins repository/head/title/check state, validates the PR title through the same policy, and requests an explicit squash merge using the immutable reviewed SHA.
   - **Acceptance:**
-    - [ ] Ambient repository, branch, or title cannot control mutation.
-    - [ ] Non-green checks, stale head, invalid title, or unresolved required review blocks merge.
-    - [ ] Fine-grained feature commits become one main commit through the supported path.
+    - [x] Ambient repository, branch, or title cannot control mutation.
+    - [x] Non-green checks, stale head, invalid title, or unresolved required review blocks merge.
+    - [x] Fine-grained feature commits become one main commit through the supported path.
   - **Verify:** focused merge command tests plus packed CLI routing/distribution tests
   - **Depends on:** Task 7
   - **Files:** merge application service/test, `src/arguments.ts`, `src/cli.ts`, routing tests
@@ -176,10 +176,10 @@ Non-decisions:
 
 ### Checkpoint: Durable History
 
-- [ ] Conventional title corpus passes
-- [ ] Safe merge mutation tests pass
+- [x] Conventional title corpus passes
+- [x] Safe merge mutation tests pass
 - [ ] CI title validation passes locally
-- [ ] Full `npm test` and package dry run pass
+- [x] Full `npm test` and package dry run pass
 
 ### Phase 4: Policy and Guided Init
 
