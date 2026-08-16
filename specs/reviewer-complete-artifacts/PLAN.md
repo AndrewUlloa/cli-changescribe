@@ -100,12 +100,12 @@ Non-decisions:
 
 ### Phase 2: Enforce Reviewer Completeness
 
-- [ ] **Task 4: Enforce substantive PR claim coverage**
+- [x] **Task 4: Enforce substantive PR claim coverage**
   - **Description:** Require critic-supported observed change claims to cover every substantive change evidence ID; add a safe `change-coverage` repair category and block output/mutation if criticism reopens a gap.
   - **Acceptance:**
-    - [ ] Runtime substantive evidence coverage is 100%.
-    - [ ] Supporting docs/tests/config remain accounted by the map without forced prose.
-    - [ ] Docs-only/test-only PRs remain valid.
+    - [x] Runtime substantive evidence coverage is 100%.
+    - [x] Supporting docs/tests/config remain accounted by the map without forced prose.
+    - [x] Docs-only/test-only PRs remain valid.
   - **Verify:** `npm run build && npm run build:test && node --test .test-dist/artifact-completeness.test.js .test-dist/workflow-byok.test.js`
   - **Depends on:** Tasks 1–3
   - **Files:** `src/artifact-completeness.ts`, `src/artifact-draft.ts`, `test/artifact-completeness.test.ts`, `test/workflow-byok.test.ts`, inventory tests

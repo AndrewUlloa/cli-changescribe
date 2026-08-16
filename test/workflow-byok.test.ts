@@ -51,6 +51,7 @@ async function createCompletionServer(
     dishonestSupporting?: boolean;
     supportedOptional?: boolean;
     completeCoverageRepair?: boolean;
+    rejectCoverageClaim?: boolean;
     replacementClaimId?: string;
     primaryRejectedCritiques?: number;
   } = {},
@@ -154,7 +155,7 @@ async function createCompletionServer(
                           ? [{
                               candidateId: 'claim:claim-coverage',
                               evidenceIds: ['change-2'],
-                              supported: true,
+                              supported: !options.rejectCoverageClaim,
                             }]
                           : []),
                       ],
@@ -1050,6 +1051,30 @@ test('PR fails closed when the bounded coverage repair remains incomplete', asyn
   addSubstantiveCoverageFixture(directory);
   const output = path.join(directory, 'summary.md');
   const server = await createCompletionServer(context);
+
+  const result = await run(
+    directory,
+    ['pr', '--base', 'main', '--out', output],
+    customEnvironment(server.baseURL),
+  );
+
+  assert.equal(result.status, 1, result.stderr || result.stdout);
+  assert.equal(server.requests.length, 4);
+  assert.match(
+    result.stderr,
+    /does not cover every substantive change/i,
+  );
+  assert.equal(fs.existsSync(output), false);
+});
+
+test('PR fails closed when criticism reopens substantive coverage', async (context) => {
+  const directory = createRepository(context);
+  addSubstantiveCoverageFixture(directory);
+  const output = path.join(directory, 'summary.md');
+  const server = await createCompletionServer(context, {
+    completeCoverageRepair: true,
+    rejectCoverageClaim: true,
+  });
 
   const result = await run(
     directory,

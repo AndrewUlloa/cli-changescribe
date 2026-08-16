@@ -36,14 +36,10 @@ export function evaluateArtifactCompleteness(
   evidence: EvidenceBundle,
   selectionPolicy: ArtifactSelectionPolicy = {},
 ): ArtifactCompletenessReport {
-  const requiredEvidenceIds = evidence.items
-    .filter((item): item is ChangeEvidenceItem => item.kind === 'change')
-    .filter(
-      (item) =>
-        classifyChangeEvidenceRole(item, selectionPolicy) === 'substantive',
-    )
-    .map((item) => item.id)
-    .sort(compareText);
+  const requiredEvidenceIds = substantiveChangeEvidenceIds(
+    evidence,
+    selectionPolicy,
+  );
   const required = new Set(requiredEvidenceIds);
   const covered = new Set<string>();
 
@@ -68,6 +64,22 @@ export function evaluateArtifactCompleteness(
     coveredEvidenceIds,
     missingEvidenceIds,
   });
+}
+
+export function substantiveChangeEvidenceIds(
+  evidence: EvidenceBundle,
+  selectionPolicy: ArtifactSelectionPolicy = {},
+): readonly string[] {
+  return Object.freeze(
+    evidence.items
+      .filter((item): item is ChangeEvidenceItem => item.kind === 'change')
+      .filter(
+        (item) =>
+          classifyChangeEvidenceRole(item, selectionPolicy) === 'substantive',
+      )
+      .map((item) => item.id)
+      .sort(compareText),
+  );
 }
 
 export function assertArtifactCompleteness(

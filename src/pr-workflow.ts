@@ -12,6 +12,12 @@ import {
   type ArtifactDraft,
 } from './artifact-draft';
 import {
+  evaluateArtifactCompleteness,
+  IncompleteArtifactCoverageError,
+  substantiveChangeEvidenceIds,
+  SUBSTANTIVE_COVERAGE_REPAIR_INSTRUCTION,
+} from './artifact-completeness';
+import {
   buildArtifactCriticMessages,
   filterArtifactDraftByCritique,
   type RetainedArtifactContent,
@@ -79,6 +85,12 @@ const execFileSync = defaultCommandRunner.exec;
 const spawnSync = defaultCommandRunner.spawn;
 const LARGE_BUFFER_SIZE = 10 * 1024 * 1024;
 const MAX_MODEL_EVIDENCE_CHARS = 256 * 1024;
+const MAX_PROVIDER_REQUESTS = 5;
+
+interface GeneratedArtifactDraft {
+  readonly draft: ArtifactDraft;
+  readonly requestCount: number;
+}
 
 interface PrArguments {
   base: string;
@@ -189,6 +201,7 @@ function buildArtifactMessages(
 ): ChatCompletionMessageParam[] {
   const serialized = serializeEvidenceBundle(evidence);
   const primaryEvidenceIds = eligiblePrimaryChangeEvidenceIds(evidence);
+  const substantiveEvidenceIds = substantiveChangeEvidenceIds(evidence);
   const examplePrimaryEvidenceId = primaryEvidenceIds[0] ?? 'change-1';
   if (serialized.length > MAX_MODEL_EVIDENCE_CHARS) {
     throw new Error(
@@ -223,6 +236,8 @@ function buildArtifactMessages(
         'Required exact shape:',
         `{"schemaVersion":1,"title":{"type":"fix","breaking":false,"subject":"imperative subject","claimId":"claim-1"},"claims":[{"id":"claim-1","kind":"change","text":"imperative subject.","evidenceIds":["${examplePrimaryEvidenceId}"],"basis":"observed","significance":"primary"}],"sections":[{"kind":"summary","claimIds":["claim-1"]}],"trailers":[]}`,
         `Eligible primary change evidence IDs: ${JSON.stringify(primaryEvidenceIds)}`,
+        `Required substantive change evidence IDs: ${JSON.stringify(substantiveEvidenceIds)}`,
+        'When required substantive change evidence IDs are present, their complete union must be cited by observed change claims across Summary and Changes.',
         'Omit title.scope instead of using an empty string.',
         'Allowed claim kinds: change, rationale, verification, risk, review-focus, follow-up.',
         'Allowed section kinds: summary, changes, rationale, verification, review-focus, risks, follow-ups.',
@@ -248,10 +263,12 @@ async function generateArtifactDraft(
   timings: OperationTimings,
   initialRepairInstruction?: string,
   maxAttempts = 2,
-): Promise<ArtifactDraft> {
+): Promise<GeneratedArtifactDraft> {
   let draft: ArtifactDraft | undefined;
+  let requestCount = 0;
   let repairInstruction = initialRepairInstruction;
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    requestCount += 1;
     const completion = await timings.measure(
       repairInstruction === undefined ? 'provider-draft' : 'provider-repair',
       async () =>
@@ -288,7 +305,7 @@ async function generateArtifactDraft(
       break;
     } catch (error) {
       repairInstruction = artifactRepairInstruction(error);
-      if (attempt === 0) {
+      if (attempt + 1 < maxAttempts) {
         warn(
           `Provider draft failed ${artifactRepairCategory(repairInstruction)} validation; requesting one repair...`,
         );
@@ -299,10 +316,12 @@ async function generateArtifactDraft(
     throw new Error(
       initialRepairInstruction === undefined
         ? 'Provider returned an invalid evidence-linked artifact after one repair.'
-        : 'Provider returned an invalid grounded primary replacement.',
+        : initialRepairInstruction === PRIMARY_GROUNDING_REPAIR_INSTRUCTION
+          ? 'Provider returned an invalid grounded primary replacement.'
+          : 'Provider returned an invalid evidence-linked full-draft repair.',
     );
   }
-  return draft;
+  return Object.freeze({ draft, requestCount });
 }
 
 async function generatePrimaryReplacementDraft(
@@ -1146,7 +1165,7 @@ async function main(argv: string[], timings: OperationTimings): Promise<void> {
     context,
   );
   step('Generating one structured draft from original evidence...');
-  const draft = await generateArtifactDraft(
+  const initialGeneration = await generateArtifactDraft(
     resolved,
     evidence,
     branch,
@@ -1156,8 +1175,11 @@ async function main(argv: string[], timings: OperationTimings): Promise<void> {
     repositoryPolicy.policy,
     timings,
   );
+  const draft = initialGeneration.draft;
+  let providerRequestCount = initialGeneration.requestCount;
   const critiqueDraft = async (candidate: ArtifactDraft) =>
     await timings.measure('provider-critic', async () => {
+      providerRequestCount += 1;
       const critique = await createCompletionSafe(
         resolved,
         buildArtifactCriticMessages(evidence, candidate),
@@ -1180,6 +1202,7 @@ async function main(argv: string[], timings: OperationTimings): Promise<void> {
     warn(
       'Primary claim failed evidence review; requesting one grounded replacement...',
     );
+    providerRequestCount += 1;
     const replacement = await generatePrimaryReplacementDraft(
       resolved,
       evidence,
@@ -1209,6 +1232,40 @@ async function main(argv: string[], timings: OperationTimings): Promise<void> {
       JSON.stringify(initialCritique.draft),
       evidence,
     );
+  }
+  const completeness = evaluateArtifactCompleteness(filteredDraft, evidence);
+  if (!completeness.complete) {
+    if (providerRequestCount + 2 > MAX_PROVIDER_REQUESTS) {
+      throw new IncompleteArtifactCoverageError();
+    }
+    warn(
+      'Substantive coverage is incomplete; requesting one full-draft repair...',
+    );
+    const coverageGeneration = await generateArtifactDraft(
+      resolved,
+      evidence,
+      branch,
+      args.base,
+      mode,
+      knownSecrets,
+      repositoryPolicy.policy,
+      timings,
+      SUBSTANTIVE_COVERAGE_REPAIR_INSTRUCTION,
+      1,
+    );
+    providerRequestCount += coverageGeneration.requestCount;
+    const coverageCritique = await critiqueDraft(coverageGeneration.draft);
+    if (coverageCritique.status === 'primary-rejected') {
+      throw new IncompleteArtifactCoverageError();
+    }
+    filteredDraft = parseArtifactDraft(
+      JSON.stringify(coverageCritique.draft),
+      evidence,
+    );
+    removedCandidateIds = coverageCritique.removedCandidateIds;
+    if (!evaluateArtifactCompleteness(filteredDraft, evidence).complete) {
+      throw new IncompleteArtifactCoverageError();
+    }
   }
   if (removedCandidateIds.length > 0) {
     warn(
