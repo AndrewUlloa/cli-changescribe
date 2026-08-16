@@ -300,6 +300,139 @@ test('uses a subject-only commit when no durable body context is supported', () 
   );
 });
 
+test('renders reviewer context in stable order and labels receipts as Validation', () => {
+  const evidence = bundle();
+  const draft = artifactDraft.parseArtifactDraft(
+    JSON.stringify({
+      schemaVersion: 1,
+      title: {
+        type: 'fix',
+        scope: 'parser',
+        breaking: false,
+        subject: 'handle empty tokens in the parser',
+        claimId: 'claim-change',
+      },
+      claims: [
+        {
+          id: 'claim-change',
+          kind: 'change',
+          text: 'handle empty tokens in the parser.',
+          evidenceIds: ['change-1'],
+          basis: 'observed',
+          significance: 'primary',
+        },
+        {
+          id: 'claim-problem',
+          kind: 'problem',
+          text: 'Empty input currently disrupts parser callers.',
+          evidenceIds: ['intent-1'],
+          basis: 'provided',
+          significance: 'supporting',
+        },
+        {
+          id: 'claim-detail',
+          kind: 'change',
+          text: 'Keep the parser result stable for empty input.',
+          evidenceIds: ['change-1'],
+          basis: 'observed',
+          significance: 'supporting',
+        },
+        {
+          id: 'claim-rationale',
+          kind: 'rationale',
+          text: 'Keep empty input compatible with existing parser callers.',
+          evidenceIds: ['intent-1'],
+          basis: 'provided',
+          significance: 'supporting',
+        },
+        {
+          id: 'claim-verification',
+          kind: 'verification',
+          text: 'The project test gate passed.',
+          evidenceIds: ['verification-1'],
+          basis: 'observed',
+          significance: 'supporting',
+        },
+        {
+          id: 'claim-compatibility',
+          kind: 'compatibility',
+          text: 'Existing parser callers keep their current result shape.',
+          evidenceIds: ['intent-1'],
+          basis: 'provided',
+          significance: 'supporting',
+        },
+        {
+          id: 'claim-review',
+          kind: 'review-focus',
+          text: 'Review empty-token handling at the parser boundary.',
+          evidenceIds: ['change-1'],
+          basis: 'observed',
+          significance: 'supporting',
+        },
+        {
+          id: 'claim-risk',
+          kind: 'risk',
+          text: 'Unusual token streams may need extra inspection.',
+          evidenceIds: ['intent-1'],
+          basis: 'provided',
+          significance: 'supporting',
+        },
+        {
+          id: 'claim-non-goal',
+          kind: 'non-goal',
+          text: 'This change does not redesign tokenization.',
+          evidenceIds: ['intent-1'],
+          basis: 'provided',
+          significance: 'supporting',
+        },
+        {
+          id: 'claim-follow-up',
+          kind: 'follow-up',
+          text: 'Evaluate token-stream telemetry separately.',
+          evidenceIds: ['intent-1'],
+          basis: 'provided',
+          significance: 'supporting',
+        },
+      ],
+      sections: [
+        { kind: 'summary', claimIds: ['claim-change', 'claim-problem'] },
+        { kind: 'changes', claimIds: ['claim-detail'] },
+        { kind: 'rationale', claimIds: ['claim-rationale'] },
+        { kind: 'verification', claimIds: ['claim-verification'] },
+        { kind: 'compatibility', claimIds: ['claim-compatibility'] },
+        { kind: 'review-focus', claimIds: ['claim-review'] },
+        { kind: 'risks', claimIds: ['claim-risk'] },
+        { kind: 'non-goals', claimIds: ['claim-non-goal'] },
+        { kind: 'follow-ups', claimIds: ['claim-follow-up'] },
+      ],
+      trailers: [],
+    }),
+    evidence,
+  );
+
+  const artifact = renderer.renderPullRequestArtifact(draft, evidence);
+  const headings = [...artifact.body.matchAll(/^## (.+)$/gmu)].map(
+    (match) => match[1],
+  );
+
+  assert.deepEqual(headings, [
+    'Summary',
+    'Changes',
+    'Why',
+    'Validation',
+    'Compatibility',
+    'Review focus',
+    'Risks',
+    'Non-goals',
+    'Follow-ups',
+  ]);
+  assert.match(
+    artifact.body,
+    /## Summary\n\n- handle empty tokens.*\n- Empty input currently/u,
+  );
+  assert.doesNotMatch(artifact.body, /## Verification/u);
+});
+
 test('treats 50 as a target and 72 as the hard default maximum', () => {
   const subjectFor = (headerLength: number): string =>
     'a'.repeat(headerLength - 'fix: '.length);
@@ -388,7 +521,7 @@ test('renders adaptive PR sections and exact receipts, not model test prose', ()
 
   assert.equal(artifact.title, 'fix(parser): handle empty tokens in the parser');
   assert.match(artifact.body, /## Summary\n\n- handle empty tokens in the parser\./);
-  assert.match(artifact.body, /## Verification\n\n- Passed: `npm test`/);
+  assert.match(artifact.body, /## Validation\n\n- Passed: `npm test`/);
   assert.doesNotMatch(artifact.body, /Tests passed somehow/);
   assert.doesNotMatch(artifact.body, /## Risks/);
   assert.doesNotMatch(artifact.body, /not provided/i);
@@ -806,17 +939,17 @@ test('renders authoritative receipts without requiring model verification prose'
   );
   const artifact = renderer.renderPullRequestArtifact(draft, evidence);
 
-  assert.match(artifact.body, /## Verification\n\n- Passed: `npm test`/);
+  assert.match(artifact.body, /## Validation\n\n- Passed: `npm test`/);
 });
 
-test('renders only authoritative receipts in a PR verification section', () => {
+test('renders only authoritative receipts in a PR Validation section', () => {
   const evidence = bundle();
   const draft = artifactDraft.parseArtifactDraft(draftJson(), evidence);
   const artifact = renderer.renderPullRequestArtifact(draft, evidence);
 
   assert.match(
     artifact.body,
-    /## Verification\n\n- Passed: `npm test`(?:\n|$)/,
+    /## Validation\n\n- Passed: `npm test`(?:\n|$)/,
   );
   assert.doesNotMatch(artifact.body, /Tests passed somehow/);
 });

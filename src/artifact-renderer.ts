@@ -65,17 +65,21 @@ const SECTION_ORDER: readonly ArtifactSectionKind[] = [
   'changes',
   'rationale',
   'verification',
+  'compatibility',
   'review-focus',
   'risks',
+  'non-goals',
   'follow-ups',
 ];
 const SECTION_HEADINGS: Readonly<Record<ArtifactSectionKind, string>> = {
   summary: 'Summary',
   changes: 'Changes',
   rationale: 'Why',
-  verification: 'Verification',
+  verification: 'Validation',
+  compatibility: 'Compatibility',
   'review-focus': 'Review focus',
   risks: 'Risks',
+  'non-goals': 'Non-goals',
   'follow-ups': 'Follow-ups',
 };
 const TYPE_RE = /^[a-z][a-z0-9-]{0,31}$/u;

@@ -9,10 +9,13 @@ export type EvidenceKind =
 
 export type ClaimKind =
   | 'change'
+  | 'problem'
   | 'rationale'
   | 'verification'
+  | 'compatibility'
   | 'risk'
   | 'review-focus'
+  | 'non-goal'
   | 'follow-up';
 
 export type ChangeStatus =
@@ -401,11 +404,49 @@ function validateClaimKind(
     throw new Error(`Change claim ${claim.id} requires change evidence.`);
   }
   if (
+    claim.kind === 'problem' &&
+    (claim.basis !== 'provided' ||
+      !cited.some((evidence) => evidence.kind === 'intent'))
+  ) {
+    throw new Error(
+      `Problem claim ${claim.id} requires provided intent evidence.`,
+    );
+  }
+  if (
     claim.kind === 'rationale' &&
     !cited.some((evidence) => evidence.kind === 'intent')
   ) {
     throw new Error(
       `Rationale claim ${claim.id} requires provided intent evidence.`,
+    );
+  }
+  if (
+    claim.kind === 'compatibility' &&
+    (claim.basis !== 'provided' ||
+      !cited.some(
+        (evidence) =>
+          evidence.kind === 'intent' ||
+          (evidence.kind === 'constraint' &&
+            (evidence.payload.name === 'compatibility' ||
+              evidence.payload.name === 'preserved-behavior')),
+      ))
+  ) {
+    throw new Error(
+      `Compatibility claim ${claim.id} requires provided intent or compatibility constraint evidence.`,
+    );
+  }
+  if (
+    claim.kind === 'non-goal' &&
+    (claim.basis !== 'provided' ||
+      !cited.some(
+        (evidence) =>
+          evidence.kind === 'intent' ||
+          (evidence.kind === 'constraint' &&
+            evidence.payload.name === 'non-goal'),
+      ))
+  ) {
+    throw new Error(
+      `Non-goal claim ${claim.id} requires provided intent or non-goal constraint evidence.`,
     );
   }
   if (claim.kind === 'verification') {

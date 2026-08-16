@@ -9,8 +9,10 @@ export type ArtifactSectionKind =
   | 'changes'
   | 'rationale'
   | 'verification'
+  | 'compatibility'
   | 'review-focus'
   | 'risks'
+  | 'non-goals'
   | 'follow-ups';
 
 export interface ConventionalTitleDraft {
@@ -97,10 +99,13 @@ export const ARTIFACT_DRAFT_RESPONSE_FORMAT: ArtifactDraftResponseFormat =
                 type: 'string',
                 enum: [
                   'change',
+                  'problem',
                   'rationale',
                   'verification',
+                  'compatibility',
                   'risk',
                   'review-focus',
+                  'non-goal',
                   'follow-up',
                 ],
               },
@@ -134,8 +139,10 @@ export const ARTIFACT_DRAFT_RESPONSE_FORMAT: ArtifactDraftResponseFormat =
                   'changes',
                   'rationale',
                   'verification',
+                  'compatibility',
                   'review-focus',
                   'risks',
+                  'non-goals',
                   'follow-ups',
                 ],
               },
@@ -217,16 +224,21 @@ const SECTION_KINDS = new Set<ArtifactSectionKind>([
   'changes',
   'rationale',
   'verification',
+  'compatibility',
   'review-focus',
   'risks',
+  'non-goals',
   'follow-ups',
 ]);
 const CLAIM_KINDS = new Set<DraftClaim['kind']>([
   'change',
+  'problem',
   'rationale',
   'verification',
+  'compatibility',
   'risk',
   'review-focus',
+  'non-goal',
   'follow-up',
 ]);
 const CLAIM_BASES = new Set<DraftClaim['basis']>([
@@ -240,12 +252,14 @@ const CLAIM_SIGNIFICANCE = new Set<DraftClaim['significance']>([
   'incidental',
 ]);
 const SECTION_CLAIM_KINDS: Readonly<Record<ArtifactSectionKind, ReadonlySet<DraftClaim['kind']>>> = {
-  summary: new Set(['change']),
+  summary: new Set(['change', 'problem']),
   changes: new Set(['change']),
   rationale: new Set(['rationale']),
   verification: new Set(['verification']),
+  compatibility: new Set(['compatibility']),
   'review-focus': new Set(['review-focus']),
   risks: new Set(['risk']),
+  'non-goals': new Set(['non-goal']),
   'follow-ups': new Set(['follow-up']),
 };
 const DEFAULT_SUPPORTING_PATHS = Object.freeze([
@@ -351,7 +365,7 @@ export function parseArtifactDraft(
       'A breaking title requires an explicit breaking-change constraint.',
     );
   }
-  const rawSections = boundedArray(root.sections, 'Artifact sections', 7);
+  const rawSections = boundedArray(root.sections, 'Artifact sections', 9);
   const claimKinds = new Map(claims.map((claim) => [claim.id, claim.kind]));
   const sections = rawSections.map((value) =>
     parseSection(value, claimIds, claimKinds),
@@ -450,13 +464,21 @@ function assertPrimarySelection(
   }
   const primary = primaryClaims[0];
   const summarySections = sections.filter((section) => section.kind === 'summary');
+  const summaryClaimIds = summarySections[0]?.claimIds ?? [];
+  const summaryProblemClaims = summaryClaimIds
+    .slice(1)
+    .map((claimId) => claims.find((claim) => claim.id === claimId));
   if (
     summarySections.length !== 1 ||
-    summarySections[0]?.claimIds.length !== 1 ||
-    summarySections[0].claimIds[0] !== primary.id
+    summaryClaimIds.length < 1 ||
+    summaryClaimIds.length > 2 ||
+    summaryClaimIds[0] !== primary.id ||
+    summaryProblemClaims.some(
+      (claim) => claim?.kind !== 'problem' || claim.basis !== 'provided',
+    )
   ) {
     throw new Error(
-      'Artifact summary must contain only the observed primary change claim.',
+      'Artifact summary must contain the observed primary change and at most one provided problem claim.',
     );
   }
   if (title.claimId !== primary.id) {

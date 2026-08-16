@@ -191,7 +191,7 @@ PR-ready output:
 
 - Add a supported `Closes #123` directive to the final body.
 
-## Verification
+## Validation
 
 - Passed: `npm test`
 

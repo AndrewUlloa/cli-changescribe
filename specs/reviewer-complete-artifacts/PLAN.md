@@ -93,10 +93,10 @@ Non-decisions:
 
 ### Checkpoint: Preservation and Accounting
 
-- [ ] Focused tests pass
-- [ ] Full `npm test` passes
-- [ ] One commit per task exists
-- [ ] No provider-request increase on the normal path
+- [x] Focused tests pass
+- [x] Full `npm test` passes
+- [x] One commit per task exists
+- [x] No provider-request increase on the normal path
 
 ### Phase 2: Enforce Reviewer Completeness
 
@@ -111,12 +111,12 @@ Non-decisions:
   - **Files:** `src/artifact-completeness.ts`, `src/artifact-draft.ts`, `test/artifact-completeness.test.ts`, `test/workflow-byok.test.ts`, inventory tests
   - **Size:** M
 
-- [ ] **Task 5: Add supported reviewer-context sections**
+- [x] **Task 5: Add supported reviewer-context sections**
   - **Description:** Add problem, compatibility/preserved-behavior, and non-goal contracts requiring explicit intent/constraint evidence; render the approved section order and rename visible Verification to Validation.
   - **Acceptance:**
-    - [ ] Unsupported context cannot render.
-    - [ ] Empty optional sections remain absent.
-    - [ ] Summary contains the solution and at most one provided problem statement.
+    - [x] Unsupported context cannot render.
+    - [x] Empty optional sections remain absent.
+    - [x] Summary contains the solution and at most one provided problem statement.
   - **Verify:** `npm run build && npm run build:test && node --test .test-dist/artifact-draft.test.js .test-dist/artifact-renderer.test.js .test-dist/change-evidence.test.js`
   - **Depends on:** Task 4
   - **Files:** `src/change-evidence.ts`, `src/artifact-draft.ts`, `src/artifact-renderer.ts`, related focused tests

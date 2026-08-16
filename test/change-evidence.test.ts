@@ -74,10 +74,13 @@ interface DraftClaim {
   id: string;
   kind:
     | 'change'
+    | 'problem'
     | 'rationale'
     | 'verification'
+    | 'compatibility'
     | 'risk'
     | 'review-focus'
+    | 'non-goal'
     | 'follow-up';
   text: string;
   evidenceIds: readonly string[];
@@ -334,6 +337,64 @@ test('validates change, rationale, and verification claims by evidence kind', ()
       ]),
     /references unknown evidence id/,
   );
+});
+
+test('requires provided context for problem, compatibility, and non-goal claims', () => {
+  const input = baseInput();
+  input.items.push(
+    {
+      id: 'constraint-compatibility',
+      kind: 'constraint',
+      basis: 'provided',
+      source: { kind: 'context-file', locator: 'intent.txt' },
+      payload: { name: 'preserved-behavior', value: 'Existing callers remain valid.' },
+    },
+    {
+      id: 'constraint-non-goal',
+      kind: 'constraint',
+      basis: 'provided',
+      source: { kind: 'context-file', locator: 'intent.txt' },
+      payload: { name: 'non-goal', value: 'Do not redesign tokenization.' },
+    },
+  );
+  const bundle = createEvidenceBundle(input);
+  const claims: DraftClaim[] = [
+    {
+      id: 'claim-problem',
+      kind: 'problem',
+      text: 'Empty tokens currently throw.',
+      evidenceIds: ['intent-1'],
+      basis: 'provided',
+      significance: 'supporting',
+    },
+    {
+      id: 'claim-compatibility',
+      kind: 'compatibility',
+      text: 'Existing callers remain valid.',
+      evidenceIds: ['constraint-compatibility'],
+      basis: 'provided',
+      significance: 'supporting',
+    },
+    {
+      id: 'claim-non-goal',
+      kind: 'non-goal',
+      text: 'Do not redesign tokenization.',
+      evidenceIds: ['constraint-non-goal'],
+      basis: 'provided',
+      significance: 'supporting',
+    },
+  ];
+
+  assert.doesNotThrow(() => assertSupportedClaims(bundle, claims));
+  for (const claim of claims) {
+    assert.throws(
+      () =>
+        assertSupportedClaims(bundle, [
+          { ...claim, basis: 'observed', evidenceIds: ['change-1'] },
+        ]),
+      /requires provided intent|requires provided intent or/i,
+    );
+  }
 });
 
 test('fails universal and identifier claims that exceed their cited evidence', () => {

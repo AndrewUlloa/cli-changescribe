@@ -48,6 +48,8 @@ test('publishes one strict provider schema and accepts its nullable scope shape'
   assert.equal(format.name, 'diffwright_artifact_draft');
   assert.match(JSON.stringify(format.schema), /schemaVersion/);
   assert.match(JSON.stringify(format.schema), /significance/);
+  assert.match(JSON.stringify(format.schema), /compatibility/);
+  assert.match(JSON.stringify(format.schema), /non-goal/);
   assert.equal(Object.isFrozen(format), true);
 
   const draft = validDraft();
@@ -200,6 +202,85 @@ test('parses a bounded evidence-linked JSON draft and freezes it', () => {
   assert.deepEqual(draft.trailers[0].evidenceIds, ['constraint-issue']);
   assert.equal(Object.isFrozen(draft), true);
   assert.equal(Object.isFrozen(draft.claims), true);
+});
+
+test('allows one provided problem in Summary and evidence-backed reviewer context', () => {
+  const candidate = validDraft();
+  const claims = candidate.claims as Array<Record<string, unknown>>;
+  claims.push(
+    {
+      id: 'claim-problem',
+      kind: 'problem',
+      text: 'Empty tokens currently throw.',
+      evidenceIds: ['intent-1'],
+      basis: 'provided',
+      significance: 'supporting',
+    },
+    {
+      id: 'claim-compatibility',
+      kind: 'compatibility',
+      text: 'Existing callers remain compatible.',
+      evidenceIds: ['intent-1'],
+      basis: 'provided',
+      significance: 'supporting',
+    },
+    {
+      id: 'claim-non-goal',
+      kind: 'non-goal',
+      text: 'Tokenization is not redesigned.',
+      evidenceIds: ['intent-1'],
+      basis: 'provided',
+      significance: 'supporting',
+    },
+  );
+  const sections = candidate.sections as Array<Record<string, unknown>>;
+  (sections[0].claimIds as string[]).push('claim-problem');
+  sections.push(
+    { kind: 'compatibility', claimIds: ['claim-compatibility'] },
+    { kind: 'non-goals', claimIds: ['claim-non-goal'] },
+  );
+
+  const parsed = artifactDraft.parseArtifactDraft(
+    JSON.stringify(candidate),
+    evidenceBundle(),
+  );
+
+  assert.deepEqual(parsed.sections[0].claimIds, [
+    'claim-change',
+    'claim-problem',
+  ]);
+  assert.equal(parsed.sections.at(-2)?.kind, 'compatibility');
+  assert.equal(parsed.sections.at(-1)?.kind, 'non-goals');
+});
+
+test('rejects more than one problem claim in Summary', () => {
+  const candidate = validDraft();
+  const claims = candidate.claims as Array<Record<string, unknown>>;
+  for (const suffix of ['one', 'two']) {
+    claims.push({
+      id: `claim-problem-${suffix}`,
+      kind: 'problem',
+      text: `Problem ${suffix}.`,
+      evidenceIds: ['intent-1'],
+      basis: 'provided',
+      significance: 'supporting',
+    });
+  }
+  const sections = candidate.sections as Array<Record<string, unknown>>;
+  sections[0].claimIds = [
+    'claim-change',
+    'claim-problem-one',
+    'claim-problem-two',
+  ];
+
+  assert.throws(
+    () =>
+      artifactDraft.parseArtifactDraft(
+        JSON.stringify(candidate),
+        evidenceBundle(),
+      ),
+    /at most one provided problem/i,
+  );
 });
 
 test('requires every trailer to cite provided evidence', () => {
