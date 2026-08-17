@@ -81,6 +81,13 @@ exact model, credential source, feature-branch base, existing lint/typecheck/tes
 build gates, and optional Claude Code or Codex guardrails. It detects npm, pnpm,
 Yarn, or Bun and whether the repository uses a `staging` branch.
 
+The wizard also configures repository policy: confirmed optional scopes,
+linked-issue expectations, guarded squash versus platform-managed merging,
+post-squash branch deletion, and whether a reviewer-oriented PR template should
+be created when none exists. Scope suggestions come only from bounded workspace
+or component names and existing scoped history, and remain suggestions until
+you confirm them. Headless `--yes` never invents an allowlist.
+
 Before changing anything, the wizard shows one redacted preview and asks for
 confirmation. It never prints a credential. Declining or pressing Ctrl-C before
 confirmation exits without writes or provider calls.

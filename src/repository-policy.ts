@@ -359,12 +359,27 @@ export function loadRepositoryPolicy(
   ) {
     throw new Error('Repository policy must contain valid UTF-8 JSON.');
   }
-  const parsed = new StrictJsonParser(contents).parse();
-  const policy = resolvePolicy(parsed);
+  const policy = parseRepositoryPolicyContents(contents);
   return freezeLoadedPolicy(
     policy,
     source('repository', revisionSha, digest(contents)),
   );
+}
+
+export function parseRepositoryPolicyContents(
+  contents: string,
+): Readonly<RepositoryPolicy> {
+  const size = Buffer.byteLength(contents, 'utf8');
+  if (
+    size <= 0 ||
+    size > MAX_CONFIG_BYTES ||
+    contents.startsWith('\ufeff') ||
+    contents.includes('\ufffd') ||
+    Buffer.from(contents, 'utf8').toString('utf8') !== contents
+  ) {
+    throw new Error('Repository policy must contain valid bounded UTF-8 JSON.');
+  }
+  return resolvePolicy(new StrictJsonParser(contents).parse());
 }
 
 export function protectRepositoryPolicyEvidence<T extends EvidenceBundle>(

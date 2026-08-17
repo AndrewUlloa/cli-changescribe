@@ -195,12 +195,12 @@ Non-decisions:
   - **Files:** `src/repository-policy.ts`, schema, policy tests, distribution/npm-page tests
   - **Size:** M
 
-- [ ] **Task 11: Add reviewer-complete init questions and planning**
+- [x] **Task 11: Add reviewer-complete init questions and planning**
   - **Description:** Detect safe scope suggestions, ask scope/context/merge/template preferences, preview config/template/script/agent changes, and preserve headless safe defaults.
   - **Acceptance:**
-    - [ ] `--yes` never invents scopes or weakens safety.
-    - [ ] Existing custom config/templates/scripts are preserved.
-    - [ ] Second identical run changes no bytes or mtimes.
+    - [x] `--yes` never invents scopes or weakens safety.
+    - [x] Existing custom config/templates/scripts are preserved.
+    - [x] Second identical run changes no bytes or mtimes.
   - **Verify:** focused init/project/setup-file test matrix
   - **Depends on:** Task 10
   - **Files:** `src/init.ts`, setup planner/transformer, init/project tests

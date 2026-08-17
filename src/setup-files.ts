@@ -1,6 +1,13 @@
 import { createHash, randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import {
+  parseRepositoryPolicyContents,
+  type IssueContextExpectation,
+  type MergeStrategy,
+  type PullRequestTemplatePreference,
+  type ScopeMode,
+} from './repository-policy';
 
 export const MANAGED_BLOCK_START = '<!-- diffwright:workflow:start -->';
 export const MANAGED_BLOCK_END = '<!-- diffwright:workflow:end -->';
@@ -8,10 +15,12 @@ export const MANAGED_BLOCK_END = '<!-- diffwright:workflow:end -->';
 export type SetupFileKind =
   | 'package-json'
   | 'environment'
+  | 'repository-policy'
   | 'agent-document';
 export type SemanticMutationKind =
   | 'package-script'
   | 'environment'
+  | 'repository-policy'
   | 'managed-block';
 export type SemanticMutationAction = 'added' | 'updated' | 'removed';
 
@@ -31,6 +40,15 @@ export interface TransformResult {
 export interface EnvSafetyChecks {
   isTracked(absolutePath: string): boolean;
   isIgnored(absolutePath: string): boolean;
+}
+
+export interface RepositoryPolicyPreferences {
+  readonly scopeMode: ScopeMode;
+  readonly allowedScopes?: readonly string[];
+  readonly issueContext: IssueContextExpectation;
+  readonly template: PullRequestTemplatePreference;
+  readonly mergeStrategy: MergeStrategy;
+  readonly deleteBranch: boolean;
 }
 
 export interface PlanSetupFileOptions {
@@ -283,6 +301,88 @@ export function transformEnvLocal(
     transformed += `${additions.join(newline)}${newline}`;
   }
   return result(contents, transformed, mutations);
+}
+
+const REPOSITORY_POLICY_SCHEMA =
+  'https://raw.githubusercontent.com/AndrewUlloa/diffwright/main/documentation/diffwrightrc.schema.json';
+
+function sameStrings(
+  left: readonly string[] | undefined,
+  right: readonly string[] | undefined,
+): boolean {
+  if (left === undefined || right === undefined) {
+    return left === right;
+  }
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+export function transformRepositoryPolicy(
+  contents: string,
+  preferences: Readonly<RepositoryPolicyPreferences>,
+): TransformResult {
+  let raw: Record<string, unknown>;
+  let existingVersion: 1 | 2 | null = null;
+  if (contents.length === 0) {
+    raw = {
+      $schema: REPOSITORY_POLICY_SCHEMA,
+      version: 2,
+    };
+  } else {
+    const existing = parseRepositoryPolicyContents(contents);
+    existingVersion = existing.version;
+    if (
+      existing.version === 2 &&
+      existing.title.scopeMode === preferences.scopeMode &&
+      sameStrings(existing.title.allowedScopes, preferences.allowedScopes) &&
+      existing.pullRequest.issueContext === preferences.issueContext &&
+      existing.pullRequest.template === preferences.template &&
+      existing.merge.strategy === preferences.mergeStrategy &&
+      existing.merge.deleteBranch === preferences.deleteBranch
+    ) {
+      return result(contents, contents, []);
+    }
+    raw = JSON.parse(contents) as Record<string, unknown>;
+    raw.version = 2;
+  }
+
+  const title =
+    typeof raw.title === 'object' && raw.title !== null && !Array.isArray(raw.title)
+      ? { ...(raw.title as Record<string, unknown>) }
+      : {};
+  title.scopeMode = preferences.scopeMode;
+  if (preferences.allowedScopes === undefined) {
+    delete title.allowedScopes;
+  } else {
+    title.allowedScopes = [...preferences.allowedScopes];
+  }
+  raw.title = title;
+  raw.pullRequest = {
+    issueContext: preferences.issueContext,
+    template: preferences.template,
+  };
+  raw.merge = {
+    strategy: preferences.mergeStrategy,
+    deleteBranch: preferences.deleteBranch,
+  };
+
+  const newline = newlineFor(contents);
+  const indentationMatch = contents.match(/(?:^|\r\n|\n|\r)([ \t]+)"/u);
+  const indentation = indentationMatch?.[1] ?? '  ';
+  let serialized = JSON.stringify(raw, null, indentation);
+  if (newline !== '\n') {
+    serialized = serialized.replaceAll('\n', newline);
+  }
+  serialized += newline;
+  parseRepositoryPolicyContents(serialized);
+  return result(contents, serialized, [
+    {
+      kind: 'repository-policy',
+      action: existingVersion === null ? 'added' : 'updated',
+      name: existingVersion === 1
+        ? 'Diffwright repository policy v1 -> v2'
+        : 'Diffwright repository policy v2',
+    },
+  ]);
 }
 
 function occurrenceCount(contents: string, needle: string): number {

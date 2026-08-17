@@ -76,6 +76,12 @@ diffwright init [options]
 | `--base <branch>` | Set the feature pull-request base. |
 | `--agents <targets>` | Install managed rules for `claude`, `codex`, both as `claude,codex`/`codex,claude`, or `none`. |
 | `--credential-source <source>` | Use `existing` configuration or select `file` storage. In deterministic mode the file credential must already exist. This is a source selector, never a credential value. |
+| `--scope-mode <mode>` | Use `optional` scopes or `forbidden` unscoped titles. |
+| `--scope <token>` | Confirm one allowed lowercase scope. Repeat to build an allowlist. |
+| `--issue-context <expectation>` | Set `optional`, `recommended`, or `required` linked-issue context. |
+| `--merge-strategy <strategy>` | Use Diffwright's guarded `squash` path or the hosting `platform`. |
+| `--delete-branch` | Delete the feature branch only after a confirmed Diffwright squash merge. |
+| `--pr-template <preference>` | `create` a managed template only when absent, or `preserve` template state. |
 | `--live` | After offline doctor succeeds, make one provider request. Incompatible with `--dry-run`. |
 
 ### Package runners
@@ -101,8 +107,11 @@ scripts. Add `--dry-run` to any launcher command for a redacted project preview.
 attached to an interactive TTY, `init` starts the wizard. It detects
 the package manager, Git branch topology, existing gates, configuration, and
 agent files; then it asks for provider, exact model, credential source, PR base,
-commit gates, and optional agent guardrails. It renders a redacted plan before
-asking for confirmation.
+commit gates, optional agent guardrails, confirmed scopes, issue-context
+expectations, guarded merge behavior, and PR-template preference. Scope
+suggestions come only from bounded workspace/component names and existing safe
+scoped history; the user confirms them before they enter policy. It renders a
+redacted plan before asking for confirmation.
 
 The credential step also offers **Configure later**. That choice writes only
 the nonsecret setup, skips doctor, and ends with an incomplete-setup message
@@ -118,8 +127,9 @@ credentials or agent files, or runs doctor.
 detected defaults, but a provider that lacks required existing credentials
 fails with corrective guidance. It does not add agent guardrails unless
 `--agents` names them, and `--live` is never implied. Supplying `--provider`,
-`--model`, `--base`, `--agents`, or `--credential-source` also selects headless
-setup. No option accepts a credential value.
+`--model`, `--base`, `--agents`, `--credential-source`, or a policy option also
+selects headless setup. Headless defaults never invent a scope allowlist. No
+option accepts a credential value.
 
 **Preview.** `--dry-run` may collect interactive answers and perform in-memory
 validation, but performs no project dependency install, target-project file
@@ -143,7 +153,10 @@ The guided plan can:
    variables to `.env.local`. A file credential is accepted only through the
    no-echo secret prompt in an interactive TTY. `.env.local` must be untracked
    and protected by `.gitignore` before a credential is written.
-4. Add one marker-delimited managed block to selected root `CLAUDE.md` and/or
+4. Create or migrate `.diffwrightrc.json` version 2 after the exact local
+   Diffwright version is available. Existing title/editorial values are
+   preserved; only confirmed workflow preferences are added or updated.
+5. Add one marker-delimited managed block to selected root `CLAUDE.md` and/or
    `AGENTS.md` files. The block names the actual generated scripts and forbids
    raw Git/GitHub mutation for shipping work. Text outside the block is
    preserved.

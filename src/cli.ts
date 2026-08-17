@@ -153,11 +153,17 @@ Options:
   --base <branch>                Pull-request base branch
   --agents <selection>           claude, codex, claude,codex, codex,claude, or none
   --credential-source <source>   existing or file; never a credential value
+  --scope-mode <mode>            optional or forbidden
+  --scope <token>                Confirm an allowed scope; repeatable
+  --issue-context <expectation>  optional, recommended, or required
+  --merge-strategy <strategy>    squash or platform
+  --delete-branch                Delete the branch after a confirmed squash merge
+  --pr-template <preference>     create or preserve
   --live                         Make one provider request after the offline doctor check
 
 After guided confirmation or deterministic invocation, init may install the exact Diffwright
 version and write package.json, .env.local, .gitignore,
-CLAUDE.md, or AGENTS.md. Existing custom package scripts
+CLAUDE.md, AGENTS.md, or .diffwrightrc.json. Existing custom package scripts
 and file content are preserved. The offline doctor check runs after setup;
 --live opts into one additional provider request.
 

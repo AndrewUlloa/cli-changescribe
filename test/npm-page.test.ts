@@ -189,6 +189,12 @@ test('CLI reference documents every supported option and exit behavior', () => {
     '--model',
     '--agents',
     '--credential-source',
+    '--scope-mode',
+    '--scope',
+    '--issue-context',
+    '--merge-strategy',
+    '--delete-branch',
+    '--pr-template',
     '--version',
   ]) {
     assert.ok(reference.includes(`\`${option}`), option);

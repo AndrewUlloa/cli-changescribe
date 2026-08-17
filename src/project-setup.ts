@@ -8,7 +8,10 @@ import {
 import type { CommandRunner } from './subprocess';
 
 const MAX_PACKAGE_BYTES = 1024 * 1024;
+const MAX_SCOPE_SUGGESTIONS = 128;
+const MAX_SCOPE_DIRECTORY_ENTRIES = 256;
 const GATE_NAMES = Object.freeze(['lint', 'typecheck', 'test', 'build'] as const);
+const SCOPE_TOKEN_RE = /^[a-z0-9][a-z0-9._/-]{0,63}$/u;
 
 export interface ProjectManifest {
   name?: string;
@@ -16,7 +19,82 @@ export interface ProjectManifest {
   bin?: Record<string, string>;
   packageManager?: string;
   scripts?: Record<string, string>;
+  workspaces?: readonly string[] | { readonly packages?: readonly string[] };
   [key: string]: unknown;
+}
+
+function workspacePatterns(manifest: ProjectManifest): readonly string[] {
+  const workspaces = manifest.workspaces;
+  if (Array.isArray(workspaces)) {
+    return workspaces.filter(
+      (value): value is string => typeof value === 'string',
+    );
+  }
+  const packages = workspaces === undefined
+    ? undefined
+    : (workspaces as { readonly packages?: readonly string[] }).packages;
+  return Array.isArray(packages)
+    ? packages.filter((value): value is string => typeof value === 'string')
+    : [];
+}
+
+function addDirectoryScopes(
+  root: string,
+  scopes: Set<string>,
+): void {
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(root, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  if (entries.length > MAX_SCOPE_DIRECTORY_ENTRIES) {
+    return;
+  }
+  for (const entry of entries) {
+    if (
+      scopes.size >= MAX_SCOPE_SUGGESTIONS ||
+      entry.name.startsWith('.') ||
+      entry.isSymbolicLink() ||
+      !entry.isDirectory() ||
+      !SCOPE_TOKEN_RE.test(entry.name)
+    ) {
+      continue;
+    }
+    scopes.add(entry.name);
+  }
+}
+
+export function discoverScopeSuggestions(options: {
+  readonly cwd: string;
+  readonly runner: Pick<CommandRunner, 'exec'>;
+}): readonly string[] {
+  const manifest = readProjectManifest(options.cwd);
+  const scopes = new Set<string>();
+  for (const pattern of workspacePatterns(manifest)) {
+    const match = /^([A-Za-z0-9][A-Za-z0-9._-]*)\/\*$/u.exec(pattern);
+    const parent = match?.[1];
+    if (!parent || parent === 'node_modules') {
+      continue;
+    }
+    addDirectoryScopes(path.join(options.cwd, parent), scopes);
+  }
+  addDirectoryScopes(path.join(options.cwd, 'src'), scopes);
+
+  const history = tryGit(options.runner, options.cwd, [
+    'log',
+    '-n',
+    '50',
+    '--format=%s',
+  ]);
+  for (const subject of history?.split(/\r\n|\n|\r/u) ?? []) {
+    const scope = /^[a-z][a-z0-9-]{0,31}\(([a-z0-9][a-z0-9._/-]{0,63})\)!?:/u
+      .exec(subject)?.[1];
+    if (scope && scopes.size < MAX_SCOPE_SUGGESTIONS) {
+      scopes.add(scope);
+    }
+  }
+  return Object.freeze([...scopes].sort((left, right) => left.localeCompare(right)));
 }
 
 export interface ProjectDiscovery {
@@ -66,7 +144,7 @@ export function readProjectManifest(cwd: string): ProjectManifest {
 }
 
 function tryGit(
-  runner: CommandRunner,
+  runner: Pick<CommandRunner, 'exec'>,
   cwd: string,
   args: readonly string[],
 ): string | null {

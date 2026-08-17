@@ -23,11 +23,21 @@ import {
 } from './provider';
 import {
   buildScriptPlan,
+  discoverScopeSuggestions,
   discoverProject,
   readProjectManifest,
   type ProjectManifest,
   type ScriptPlan,
 } from './project-setup';
+import {
+  DEFAULT_MERGE_POLICY,
+  DEFAULT_PULL_REQUEST_POLICY,
+  parseRepositoryPolicyContents,
+  type IssueContextExpectation,
+  type MergeStrategy,
+  type PullRequestTemplatePreference,
+  type ScopeMode,
+} from './repository-policy';
 import {
   createNodePrompter,
   PromptCancelledError,
@@ -45,7 +55,9 @@ import {
   transformEnvLocal,
   transformManagedDocument,
   transformPackageJsonScripts,
+  transformRepositoryPolicy,
   type EnvSafetyChecks,
+  type RepositoryPolicyPreferences,
   type SemanticMutation,
   type TransformResult,
 } from './setup-files';
@@ -68,6 +80,12 @@ interface InitOptions {
   readonly base?: string;
   readonly agents?: 'claude' | 'codex' | 'both' | 'none';
   readonly credentialSource?: 'existing' | 'file';
+  readonly scopeMode?: ScopeMode;
+  readonly scopes?: readonly string[];
+  readonly issueContext?: IssueContextExpectation;
+  readonly mergeStrategy?: MergeStrategy;
+  readonly deleteBranch: boolean;
+  readonly prTemplate?: PullRequestTemplatePreference;
 }
 
 interface WizardAnswers {
@@ -80,6 +98,7 @@ interface WizardAnswers {
   readonly credentialName?: string;
   readonly credentialValue?: string;
   readonly configureLater: boolean;
+  readonly policy: Readonly<RepositoryPolicyPreferences>;
 }
 
 export interface InitDependencies {
@@ -247,6 +266,20 @@ function valueAfter(argv: string[], option: string): string | undefined {
   return index === -1 ? undefined : argv[index + 1];
 }
 
+function valuesAfter(argv: string[], option: string): readonly string[] {
+  const values: string[] = [];
+  for (let index = 0; index < argv.length; index += 1) {
+    if (argv[index] === option) {
+      const value = argv[index + 1];
+      if (value !== undefined) {
+        values.push(value);
+      }
+      index += 1;
+    }
+  }
+  return Object.freeze([...new Set(values)]);
+}
+
 function parseOptions(argv: string[]): InitOptions {
   validateInitArguments(argv);
   const rawAgents = valueAfter(argv, '--agents');
@@ -257,6 +290,7 @@ function parseOptions(argv: string[]): InitOptions {
     yes: argv.includes('--yes'),
     dryRun: argv.includes('--dry-run'),
     live: argv.includes('--live'),
+    deleteBranch: argv.includes('--delete-branch'),
     ...(valueAfter(argv, '--provider')
       ? { provider: valueAfter(argv, '--provider') as ProviderId }
       : {}),
@@ -273,6 +307,36 @@ function parseOptions(argv: string[]): InitOptions {
             argv,
             '--credential-source',
           ) as InitOptions['credentialSource'],
+        }
+      : {}),
+    ...(valueAfter(argv, '--scope-mode')
+      ? { scopeMode: valueAfter(argv, '--scope-mode') as ScopeMode }
+      : {}),
+    ...(valuesAfter(argv, '--scope').length > 0
+      ? { scopes: valuesAfter(argv, '--scope') }
+      : {}),
+    ...(valueAfter(argv, '--issue-context')
+      ? {
+          issueContext: valueAfter(
+            argv,
+            '--issue-context',
+          ) as IssueContextExpectation,
+        }
+      : {}),
+    ...(valueAfter(argv, '--merge-strategy')
+      ? {
+          mergeStrategy: valueAfter(
+            argv,
+            '--merge-strategy',
+          ) as MergeStrategy,
+        }
+      : {}),
+    ...(valueAfter(argv, '--pr-template')
+      ? {
+          prTemplate: valueAfter(
+            argv,
+            '--pr-template',
+          ) as PullRequestTemplatePreference,
         }
       : {}),
   });
@@ -299,6 +363,57 @@ function readOptionalSafeFile(filename: string): string {
     }
     throw error;
   }
+}
+
+function policyPreferencesFromContents(
+  contents: string,
+): Readonly<RepositoryPolicyPreferences> {
+  if (contents.length === 0) {
+    return Object.freeze({
+      scopeMode: 'optional',
+      issueContext: DEFAULT_PULL_REQUEST_POLICY.issueContext,
+      template: DEFAULT_PULL_REQUEST_POLICY.template,
+      mergeStrategy: DEFAULT_MERGE_POLICY.strategy,
+      deleteBranch: DEFAULT_MERGE_POLICY.deleteBranch,
+    });
+  }
+  const policy = parseRepositoryPolicyContents(contents);
+  return Object.freeze({
+    scopeMode: policy.title.scopeMode,
+    ...(policy.title.allowedScopes
+      ? { allowedScopes: Object.freeze([...policy.title.allowedScopes]) }
+      : {}),
+    issueContext: policy.version === 2
+      ? policy.pullRequest.issueContext
+      : DEFAULT_PULL_REQUEST_POLICY.issueContext,
+    template: policy.version === 2
+      ? policy.pullRequest.template
+      : DEFAULT_PULL_REQUEST_POLICY.template,
+    mergeStrategy: policy.version === 2
+      ? policy.merge.strategy
+      : DEFAULT_MERGE_POLICY.strategy,
+    deleteBranch: policy.version === 2
+      ? policy.merge.deleteBranch
+      : DEFAULT_MERGE_POLICY.deleteBranch,
+  });
+}
+
+function parseScopeList(value: string): readonly string[] | string {
+  const scopes = value
+    .split(',')
+    .map((scope) => scope.trim())
+    .filter(Boolean);
+  if (
+    scopes.length === 0 ||
+    scopes.length > 128 ||
+    scopes.some((scope) => !/^[a-z0-9][a-z0-9._/-]{0,63}$/u.test(scope))
+  ) {
+    return 'Use 1–128 comma-separated lowercase scope tokens.';
+  }
+  if (new Set(scopes).size !== scopes.length) {
+    return 'Scope tokens must be unique.';
+  }
+  return Object.freeze(scopes);
 }
 
 function isGitRepository(runner: CommandRunner, cwd: string): boolean {
@@ -552,6 +667,8 @@ function printPreview(options: {
   readonly installDisplay: string | null;
   readonly scriptPlan: ScriptPlan;
   readonly envTransform: TransformResult;
+  readonly policyTransform: TransformResult;
+  readonly policy: Readonly<RepositoryPolicyPreferences>;
   readonly gitignoreNeeded: boolean;
   readonly agentFiles: readonly string[];
   readonly configured: boolean;
@@ -591,6 +708,22 @@ function printPreview(options: {
   for (const mutation of options.envTransform.mutations) {
     log(`- Environment ${mutation.action}: ${mutation.name} [hidden]`);
   }
+  for (const mutation of options.policyTransform.mutations) {
+    log(`- Repository policy ${mutation.action}: ${mutation.name}`);
+  }
+  log(
+    `- Commit scopes: ${
+      options.policy.scopeMode === 'forbidden'
+        ? 'forbidden'
+        : options.policy.allowedScopes?.join(', ') ?? 'optional without an allowlist'
+    }`,
+  );
+  log(`- Issue context: ${options.policy.issueContext}`);
+  log(
+    `- Merge workflow: ${options.policy.mergeStrategy}` +
+      (options.policy.deleteBranch ? ' with branch deletion' : ''),
+  );
+  log(`- PR template: ${options.policy.template}`);
   if (options.gitignoreNeeded) {
     log('- Git ignore: add effective .env.local rule');
   }
@@ -735,6 +868,8 @@ async function chooseInteractiveAnswers(options: {
   readonly discovery: ReturnType<typeof discoverProject>;
   readonly envSafety: EnvSafetyChecks;
   readonly envPath: string;
+  readonly currentPolicy: Readonly<RepositoryPolicyPreferences>;
+  readonly scopeSuggestions: readonly string[];
 }): Promise<WizardAnswers> {
   const defaultProvider = existingProviderId(options.runtimeValues) ?? 'openai';
   const provider = await options.prompter.select<ProviderId>(
@@ -850,6 +985,113 @@ async function chooseInteractiveAnswers(options: {
     ] as const,
     { defaultValue: 'both' },
   );
+  type ScopeChoice = 'confirmed' | 'any' | 'none';
+  const confirmedScopes =
+    options.currentPolicy.allowedScopes ?? options.scopeSuggestions;
+  const scopeChoices: Array<SelectChoice<ScopeChoice>> = [
+    ...(confirmedScopes.length > 0
+      ? [{
+          value: 'confirmed' as const,
+          label: 'Use confirmed scopes',
+          description: confirmedScopes.join(', '),
+        }]
+      : []),
+    {
+      value: 'any',
+      label: 'Allow any clear scope',
+      description: 'Use a scope only when one subsystem clearly dominates',
+    },
+    {
+      value: 'none',
+      label: 'Omit scopes',
+      description: 'Generate unscoped Conventional Commit titles',
+    },
+  ];
+  const scopeChoice = await options.prompter.select(
+    'Commit scopes',
+    scopeChoices,
+    {
+      defaultValue: options.currentPolicy.scopeMode === 'forbidden'
+        ? 'none'
+        : confirmedScopes.length > 0
+          ? 'confirmed'
+          : 'any',
+    },
+  );
+  let allowedScopes: readonly string[] | undefined;
+  if (scopeChoice === 'confirmed') {
+    const scopeText = await options.prompter.input('Confirmed scopes', {
+      defaultValue: confirmedScopes.join(', '),
+      validate: (value) => {
+        const parsed = parseScopeList(value);
+        return typeof parsed === 'string' ? parsed : undefined;
+      },
+    });
+    const parsed = parseScopeList(scopeText);
+    if (typeof parsed === 'string') {
+      throw new Error(parsed);
+    }
+    allowedScopes = parsed;
+  }
+  const issueContext = await options.prompter.select<IssueContextExpectation>(
+    'Issue context for pull requests',
+    [
+      {
+        value: 'recommended',
+        label: 'Recommended',
+        description: 'Prompt for context on behavioral or substantial changes',
+      },
+      {
+        value: 'required',
+        label: 'Required',
+        description: 'Require a linked issue before PR generation',
+      },
+      {
+        value: 'optional',
+        label: 'Optional',
+        description: 'Do not require or recommend linked issue context',
+      },
+    ],
+    { defaultValue: options.currentPolicy.issueContext },
+  );
+  const mergeStrategy = await options.prompter.select<MergeStrategy>(
+    'Merge completed pull requests',
+    [
+      {
+        value: 'squash',
+        label: 'Guarded squash merge',
+        description: 'Validate the reviewed PR, then create one main-branch commit',
+      },
+      {
+        value: 'platform',
+        label: 'Hosting platform',
+        description: 'Leave merge strategy and execution outside Diffwright',
+      },
+    ],
+    { defaultValue: options.currentPolicy.mergeStrategy },
+  );
+  const deleteBranch = mergeStrategy === 'squash'
+    ? await options.prompter.confirm(
+        'Delete the feature branch after a confirmed squash merge?',
+        options.currentPolicy.deleteBranch,
+      )
+    : false;
+  const template = await options.prompter.select<PullRequestTemplatePreference>(
+    'Pull-request template',
+    [
+      {
+        value: 'create',
+        label: 'Create when absent',
+        description: 'Never overwrite an existing repository template',
+      },
+      {
+        value: 'preserve',
+        label: 'Preserve current state',
+        description: 'Do not create or change a pull-request template',
+      },
+    ],
+    { defaultValue: options.currentPolicy.template },
+  );
   return {
     provider,
     model,
@@ -860,6 +1102,14 @@ async function chooseInteractiveAnswers(options: {
     ...(credentialName ? { credentialName } : {}),
     ...(credentialValue ? { credentialValue } : {}),
     configureLater,
+    policy: Object.freeze({
+      scopeMode: scopeChoice === 'none' ? 'forbidden' : 'optional',
+      ...(allowedScopes ? { allowedScopes } : {}),
+      issueContext,
+      template,
+      mergeStrategy,
+      deleteBranch,
+    }),
   };
 }
 
@@ -921,6 +1171,14 @@ async function runGuidedInit(
   dependencies: InitDependencies,
 ): Promise<void> {
   const options = parseOptions(argv);
+  const hasPolicyOptions = argv.some((argument) => [
+    '--scope-mode',
+    '--scope',
+    '--issue-context',
+    '--merge-strategy',
+    '--delete-branch',
+    '--pr-template',
+  ].includes(argument));
   const interactive =
     dependencies.inputIsTTY &&
     dependencies.outputIsTTY &&
@@ -929,13 +1187,17 @@ async function runGuidedInit(
     options.model === undefined &&
     options.base === undefined &&
     options.agents === undefined &&
-    options.credentialSource === undefined;
+    options.credentialSource === undefined &&
+    !hasPolicyOptions;
   const packagePath = path.join(dependencies.cwd, 'package.json');
   if (!fs.existsSync(packagePath)) {
     throw new Error('No package.json found in the current directory.');
   }
   const envPath = path.join(dependencies.cwd, '.env.local');
   readOptionalSafeFile(envPath);
+  const policyPath = path.join(dependencies.cwd, '.diffwrightrc.json');
+  const policyContents = readOptionalSafeFile(policyPath);
+  const currentPolicy = policyPreferencesFromContents(policyContents);
   const discovery = discoverProject({
     cwd: dependencies.cwd,
     runner: dependencies.runner,
@@ -977,6 +1239,11 @@ async function runGuidedInit(
           discovery,
           envSafety,
           envPath,
+          currentPolicy,
+          scopeSuggestions: discoverScopeSuggestions({
+            cwd: dependencies.cwd,
+            runner: dependencies.runner,
+          }),
         })
       : ((): WizardAnswers => {
           const detected = existingResolvedProvider(runtime.values);
@@ -1029,6 +1296,21 @@ async function runGuidedInit(
               );
             }
           }
+          const scopeMode = options.scopeMode ??
+            (options.scopes ? 'optional' : currentPolicy.scopeMode);
+          const allowedScopes = scopeMode === 'forbidden'
+            ? undefined
+            : options.scopes ?? currentPolicy.allowedScopes;
+          const mergeStrategy =
+            options.mergeStrategy ?? currentPolicy.mergeStrategy;
+          if (options.deleteBranch && mergeStrategy === 'platform') {
+            throw new Error(
+              '--delete-branch requires --merge-strategy squash or an existing squash merge policy.',
+            );
+          }
+          const deleteBranch = mergeStrategy === 'platform'
+            ? false
+            : options.deleteBranch || currentPolicy.deleteBranch;
           return {
             provider,
             model,
@@ -1039,6 +1321,15 @@ async function runGuidedInit(
             gates: [...discovery.gates],
             agents: options.agents ?? 'none',
             configureLater: false,
+            policy: Object.freeze({
+              scopeMode,
+              ...(allowedScopes ? { allowedScopes } : {}),
+              issueContext:
+                options.issueContext ?? currentPolicy.issueContext,
+              template: options.prTemplate ?? currentPolicy.template,
+              mergeStrategy,
+              deleteBranch,
+            }),
           };
         })();
 
@@ -1064,6 +1355,11 @@ async function runGuidedInit(
     };
     const existingEnvContents = readOptionalSafeFile(envPath);
     const envTransform = transformEnvLocal(existingEnvContents, envUpdates);
+    const policyPreviewPlan = planSetupFile({
+      path: policyPath,
+      kind: 'repository-policy',
+      transform: (contents) => transformRepositoryPolicy(contents, answers.policy),
+    });
     const gitignorePath = path.join(dependencies.cwd, '.gitignore');
     const gitignoreContents = readOptionalSafeFile(gitignorePath);
     const gitignoreNeeded = !hasEffectiveLocalEnvIgnore(gitignoreContents);
@@ -1174,6 +1470,8 @@ async function runGuidedInit(
       installDisplay: installCommand?.display ?? null,
       scriptPlan: initialScriptPlan,
       envTransform,
+      policyTransform: policyPreviewPlan,
+      policy: answers.policy,
       gitignoreNeeded,
       agentFiles,
       configured,
@@ -1297,6 +1595,8 @@ async function runGuidedInit(
       if (packagePlan.changed) appliedPaths.push(packagePlan.path);
       applySetupFile(gitignorePlan);
       if (gitignorePlan.changed) appliedPaths.push(gitignorePlan.path);
+      applySetupFile(policyPreviewPlan);
+      if (policyPreviewPlan.changed) appliedPaths.push(policyPreviewPlan.path);
       for (const plan of agentPlans) {
         applySetupFile(plan);
         if (plan.changed) appliedPaths.push(plan.path);

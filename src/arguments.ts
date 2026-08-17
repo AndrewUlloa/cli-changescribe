@@ -55,8 +55,18 @@ export function validateInitArguments(argv: string[]): void {
     '--base',
     '--agents',
     '--credential-source',
+    '--scope-mode',
+    '--scope',
+    '--issue-context',
+    '--merge-strategy',
+    '--pr-template',
   ]);
-  const booleanOptions = new Set(['--yes', '--dry-run', '--live']);
+  const booleanOptions = new Set([
+    '--yes',
+    '--dry-run',
+    '--live',
+    '--delete-branch',
+  ]);
   const supportedProviders = new Set<string>(SUPPORTED_PROVIDER_IDS);
   const agentSelections = new Set([
     'claude',
@@ -82,7 +92,11 @@ export function validateInitArguments(argv: string[]): void {
 
     const value = requireValue(argv, index, option);
     const previousValue = seenValues.get(option);
-    if (previousValue !== undefined && previousValue !== value) {
+    if (
+      option !== '--scope' &&
+      previousValue !== undefined &&
+      previousValue !== value
+    ) {
       throw new CliArgumentError(
         `${option} cannot be supplied with conflicting values.`,
       );
@@ -114,12 +128,77 @@ export function validateInitArguments(argv: string[]): void {
         '--credential-source must be either existing or file.',
       );
     }
+    if (
+      option === '--scope-mode' &&
+      value !== 'optional' &&
+      value !== 'forbidden'
+    ) {
+      throw new CliArgumentError(
+        '--scope-mode must be either optional or forbidden.',
+      );
+    }
+    if (
+      option === '--scope' &&
+      !/^[a-z0-9][a-z0-9._/-]{0,63}$/u.test(value)
+    ) {
+      throw new CliArgumentError('--scope must be a safe lowercase scope token.');
+    }
+    if (
+      option === '--issue-context' &&
+      value !== 'optional' &&
+      value !== 'recommended' &&
+      value !== 'required'
+    ) {
+      throw new CliArgumentError(
+        '--issue-context must be optional, recommended, or required.',
+      );
+    }
+    if (
+      option === '--merge-strategy' &&
+      value !== 'squash' &&
+      value !== 'platform'
+    ) {
+      throw new CliArgumentError(
+        '--merge-strategy must be either squash or platform.',
+      );
+    }
+    if (
+      option === '--pr-template' &&
+      value !== 'create' &&
+      value !== 'preserve'
+    ) {
+      throw new CliArgumentError(
+        '--pr-template must be either create or preserve.',
+      );
+    }
     index += 1;
   }
 
   if (argv.includes('--live') && argv.includes('--dry-run')) {
     throw new CliArgumentError('--live cannot be combined with --dry-run.');
   }
+  if (
+    valueAfterInitOption(argv, '--scope-mode') === 'forbidden' &&
+    argv.includes('--scope')
+  ) {
+    throw new CliArgumentError('--scope cannot be used when scopes are forbidden.');
+  }
+  if (
+    valueAfterInitOption(argv, '--merge-strategy') === 'platform' &&
+    argv.includes('--delete-branch')
+  ) {
+    throw new CliArgumentError(
+      '--delete-branch requires the squash merge strategy.',
+    );
+  }
+}
+
+function valueAfterInitOption(
+  argv: readonly string[],
+  option: string,
+): string | undefined {
+  const index = argv.lastIndexOf(option);
+  return index === -1 ? undefined : argv[index + 1];
 }
 
 export function normalizeIssueReference(value: string): string {

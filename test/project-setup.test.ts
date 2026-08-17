@@ -36,6 +36,10 @@ interface CommandRunner {
 }
 
 interface ProjectSetupModule {
+  discoverScopeSuggestions(options: {
+    cwd: string;
+    runner: CommandRunner;
+  }): readonly string[];
   discoverProject(options: {
     cwd: string;
     runner: CommandRunner;
@@ -192,6 +196,46 @@ test('uses a remote-only origin main before the current feature branch', (contex
       runningVersion: '1.2.3',
     }).defaultBranch,
     'main',
+  );
+});
+
+test('suggests only bounded high-confidence workspace, component, and history scopes', (context) => {
+  const cwd = fixture(context, {
+    name: 'consumer',
+    scripts: {},
+    workspaces: ['packages/*', 'apps/*'],
+  } as ProjectManifest);
+  for (const directory of ['packages/cli', 'packages/provider', 'apps/web', 'src/parser']) {
+    fs.mkdirSync(path.join(cwd, directory), { recursive: true });
+  }
+  fs.mkdirSync(path.join(cwd, 'packages/.hidden'), { recursive: true });
+  fs.symlinkSync(
+    path.join(cwd, 'packages/cli'),
+    path.join(cwd, 'packages/linked'),
+  );
+  const runner = gitRunner({
+    'log -n 50 --format=%s':
+      'feat(release): publish artifacts\nfix(cli): validate input\ninvalid subject\n',
+  });
+
+  assert.deepEqual(
+    setup.discoverScopeSuggestions({ cwd, runner }),
+    ['cli', 'parser', 'provider', 'release', 'web'],
+  );
+});
+
+test('returns no scope suggestions for flat or unsafe project structure', (context) => {
+  const cwd = fixture(context, {
+    name: 'consumer',
+    scripts: {},
+    workspaces: ['../outside/*', '**/*', 'packages/nested/*'],
+  } as ProjectManifest);
+  fs.mkdirSync(path.join(cwd, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(cwd, 'src', 'flat.ts'), 'export {};\n');
+
+  assert.deepEqual(
+    setup.discoverScopeSuggestions({ cwd, runner: gitRunner({}) }),
+    [],
   );
 });
 
