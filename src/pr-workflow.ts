@@ -1015,6 +1015,7 @@ async function main(argv: string[], timings: OperationTimings): Promise<void> {
     protectRepositoryPolicyEvidence(
       collectPullRequestEvidence({
         baseBranch: args.base,
+        historyLimit: args.limit,
       }),
     ),
   );
@@ -1036,7 +1037,7 @@ async function main(argv: string[], timings: OperationTimings): Promise<void> {
         initialEvidence.coverage.complete ? 'complete' : 'incomplete'
       }`,
     );
-    step(`Legacy history limit (net diff unaffected): ${args.limit}`);
+    step(`Authored history limit (net diff unaffected): ${args.limit}`);
     step(`Output: ${args.out}`);
     step(`Issue: ${args.issue || '(not provided)'}`);
     step(`Create PR: ${args.createPr ? 'yes' : 'no'}`);
@@ -1175,7 +1176,11 @@ async function main(argv: string[], timings: OperationTimings): Promise<void> {
   const freshGitEvidence = args.createPr
     ? timings.measureSync('git-evidence', () =>
         protectRepositoryPolicyEvidence(
-          collectPullRequestEvidence({ baseBranch: args.base, fetch: false }),
+          collectPullRequestEvidence({
+            baseBranch: args.base,
+            fetch: false,
+            historyLimit: args.limit,
+          }),
         ),
       )
     : initialEvidence;

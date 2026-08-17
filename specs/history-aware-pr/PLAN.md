@@ -40,13 +40,13 @@
 
 ### Task 2: Collect immutable authored history
 
-- [ ] Add bounded NUL-safe `merge-base..HEAD` history collection using fixed Git
+- [x] Add bounded NUL-safe `merge-base..HEAD` history collection using fixed Git
   argv and the existing command runner.
-- [ ] Wire the existing `--limit` value into initial and post-gate evidence
+- [x] Wire the existing `--limit` value into initial and post-gate evidence
   collection without changing final-diff coverage.
-- [ ] Recheck head/base snapshot identity and reject malformed or oversized
+- [x] Recheck head/base snapshot identity and reject malformed or oversized
   history generically.
-- [ ] Add module/distribution inventories and focused Git fixtures.
+- [x] Add focused Git fixtures without introducing another runtime module.
 - **Acceptance:** only range commits appear; ordering is deterministic; subjects
   and bodies remain provided; empty history is valid; secrets are redacted in
   model messages.

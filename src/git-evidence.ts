@@ -5,6 +5,8 @@ import {
   type ChangeStatus,
   type CoverageGap,
   type EvidenceBundle,
+  type EvidenceItem,
+  type HistoryEvidenceItem,
 } from './change-evidence';
 import { defaultCommandRunner, type CommandRunner } from './subprocess';
 
@@ -12,6 +14,7 @@ const DEFAULT_MAX_PATCH_CHARS_PER_FILE = 1024 * 1024;
 const DEFAULT_MAX_TOTAL_PATCH_CHARS = 6 * 1024 * 1024;
 const MAX_SUPPORTED_PATCH_CHARS_PER_FILE = 2 * 1024 * 1024;
 const GIT_METADATA_BUFFER_BYTES = 10 * 1024 * 1024;
+const MAX_HISTORY_COMMITS = 10_000;
 
 export interface PullRequestEvidenceOptions {
   baseBranch: string;
@@ -19,6 +22,7 @@ export interface PullRequestEvidenceOptions {
   fetch?: boolean;
   maxPatchCharsPerFile?: number;
   maxTotalPatchChars?: number;
+  historyLimit?: number;
 }
 
 interface ChangedPath {
@@ -56,6 +60,14 @@ export function collectPullRequestEvidence(
     'Total patch limit',
     DEFAULT_MAX_TOTAL_PATCH_CHARS,
   );
+  const historyLimit =
+    options.historyLimit === undefined
+      ? undefined
+      : validateLimit(
+          options.historyLimit,
+          'History limit',
+          MAX_HISTORY_COMMITS,
+        );
 
   if (options.fetch !== false) {
     tryFetchBase(baseBranch, cwd, runner);
@@ -105,7 +117,7 @@ export function collectPullRequestEvidence(
     ),
   );
 
-  const items: ChangeEvidenceItem[] = [];
+  const items: EvidenceItem[] = [];
   const gaps: CoverageGap[] = [];
   let collectedPatchChars = 0;
 
@@ -189,6 +201,18 @@ export function collectPullRequestEvidence(
     });
   }
 
+  if (historyLimit !== undefined) {
+    items.push(
+      ...collectHistory(
+        mergeBaseSha,
+        headSha,
+        historyLimit,
+        cwd,
+        runner,
+      ),
+    );
+  }
+
   const currentHead = revParse('HEAD^{commit}', cwd, runner, 'HEAD');
   if (currentHead !== headSha) {
     throw new Error(
@@ -202,6 +226,50 @@ export function collectPullRequestEvidence(
     receipts: [],
     coverage: { complete: gaps.length === 0, gaps },
   });
+}
+
+function collectHistory(
+  mergeBaseSha: string,
+  headSha: string,
+  limit: number,
+  cwd: string,
+  runner: CommandRunner,
+): HistoryEvidenceItem[] {
+  const output = runGit(
+    [
+      'log',
+      '--reverse',
+      `--max-count=${limit}`,
+      '--format=%H%x00%s%x00%b',
+      '-z',
+      `${mergeBaseSha}..${headSha}`,
+      '--',
+    ],
+    cwd,
+    runner,
+    'Authored-history collection',
+  );
+  const fields = splitNullFields(output);
+  if (fields.length % 3 !== 0) {
+    throw new Error('Git returned malformed authored history.');
+  }
+  const history: HistoryEvidenceItem[] = [];
+  for (let index = 0; index < fields.length; index += 3) {
+    const sha = fields[index];
+    const subject = fields[index + 1];
+    const body = fields[index + 2];
+    if (sha === undefined || subject === undefined || body === undefined) {
+      throw new Error('Git returned malformed authored history.');
+    }
+    history.push({
+      id: `history-${history.length + 1}`,
+      kind: 'history',
+      basis: 'provided',
+      source: { kind: 'git-history', locator: sha },
+      payload: { sha, subject, body },
+    });
+  }
+  return history;
 }
 
 export function assertEvidenceSnapshotCurrent(

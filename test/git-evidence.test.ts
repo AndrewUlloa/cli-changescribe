@@ -49,6 +49,14 @@ interface EvidenceBundle {
   };
 }
 
+interface HistoryItem {
+  id: string;
+  kind: 'history';
+  basis: 'provided';
+  source: { kind: string; locator: string };
+  payload: { sha: string; subject: string; body: string };
+}
+
 interface GitEvidenceModule {
   collectPullRequestEvidence(options: {
     baseBranch: string;
@@ -56,6 +64,7 @@ interface GitEvidenceModule {
     fetch?: boolean;
     maxPatchCharsPerFile?: number;
     maxTotalPatchChars?: number;
+    historyLimit?: number;
   }, runner?: CommandRunner): EvidenceBundle;
   assertEvidenceSnapshotCurrent(
     snapshot: EvidenceBundle['snapshot'],
@@ -215,6 +224,117 @@ test('uses the final net diff and excludes reverted intermediate values', (conte
   assert.match(final.items[0].payload.patch ?? '', /-timeout=30/);
   assert.match(final.items[0].payload.patch ?? '', /\+timeout=45/);
   assert.doesNotMatch(final.items[0].payload.patch ?? '', /timeout=60/);
+});
+
+test('collects bounded authored history from the pinned branch range', (context) => {
+  const repository = materializeRepository({
+    id: 'authored-history',
+    baseFiles: { 'src/value.ts': 'export const value = 1;\n' },
+    commits: [
+      {
+        message: 'feat: add intermediate value',
+        body: 'Why: expose the first supported value.',
+        operations: [
+          {
+            kind: 'write',
+            path: 'src/value.ts',
+            content: 'export const value = 2;\n',
+          },
+        ],
+      },
+      {
+        message: 'refactor: rename the exported value',
+        operations: [
+          {
+            kind: 'write',
+            path: 'src/value.ts',
+            content: 'export const currentValue = 2;\n',
+          },
+        ],
+      },
+      {
+        message: 'fix: return the final value',
+        body: 'Why: callers require the value to remain three.',
+        operations: [
+          {
+            kind: 'write',
+            path: 'src/value.ts',
+            content: 'export const currentValue = 3;\n',
+          },
+        ],
+      },
+    ],
+  });
+  context.after(() =>
+    fs.rmSync(repository.directory, { recursive: true, force: true }),
+  );
+
+  const bundle = gitEvidence.collectPullRequestEvidence({
+    cwd: repository.directory,
+    baseBranch: repository.baseBranch,
+    fetch: false,
+    historyLimit: 2,
+  });
+  const history = bundle.items.filter(
+    (item) => (item as unknown as HistoryItem).kind === 'history',
+  ) as unknown as HistoryItem[];
+
+  assert.deepEqual(
+    history.map((item) => item.payload.subject),
+    ['refactor: rename the exported value', 'fix: return the final value'],
+  );
+  assert.equal(history[0].payload.body, '');
+  assert.equal(
+    history[1].payload.body,
+    'Why: callers require the value to remain three.\n',
+  );
+  for (const item of history) {
+    assert.equal(item.basis, 'provided');
+    assert.equal(item.source.kind, 'git-history');
+    assert.equal(item.source.locator, item.payload.sha);
+    assert.match(item.payload.sha, /^[0-9a-f]{40}$/u);
+  }
+});
+
+test('keeps reverted commits as supplemental history without final change evidence', (context) => {
+  const repository = materializeRepository(fixture('revert-to-base'));
+  context.after(() =>
+    fs.rmSync(repository.directory, { recursive: true, force: true }),
+  );
+
+  const bundle = gitEvidence.collectPullRequestEvidence({
+    cwd: repository.directory,
+    baseBranch: repository.baseBranch,
+    fetch: false,
+    historyLimit: 10,
+  });
+
+  assert.equal(bundle.items.some((item) => item.kind === 'change'), false);
+  assert.equal(
+    bundle.items.some((item) => (item as unknown as HistoryItem).kind === 'history'),
+    true,
+  );
+  assert.equal(bundle.coverage.complete, true);
+});
+
+test('rejects invalid authored-history limits before Git execution', (context) => {
+  const repository = materializeRepository(fixture('delete-only'));
+  context.after(() =>
+    fs.rmSync(repository.directory, { recursive: true, force: true }),
+  );
+
+  for (const historyLimit of [0, -1, Number.MAX_SAFE_INTEGER]) {
+    assert.throws(
+      () =>
+        gitEvidence.collectPullRequestEvidence({
+          cwd: repository.directory,
+          baseBranch: repository.baseBranch,
+          fetch: false,
+          historyLimit,
+        }),
+      /History limit is invalid/,
+    );
+  }
 });
 
 test('excludes changes made only on the base branch after divergence', (context) => {

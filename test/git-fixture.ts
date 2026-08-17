@@ -12,6 +12,7 @@ export interface FixtureOperation {
 
 export interface FixtureCommit {
   message: string;
+  body?: string;
   operations: FixtureOperation[];
 }
 
@@ -105,7 +106,12 @@ export function materializeRepository(
       applyOperation(directory, operation);
     }
     git(directory, ['add', '--all']);
-    git(directory, ['commit', '-m', commit.message]);
+    git(directory, [
+      'commit',
+      '-m',
+      commit.message,
+      ...(commit.body === undefined ? [] : ['-m', commit.body]),
+    ]);
   }
 
   return { directory, baseBranch, featureBranch };
