@@ -69,11 +69,11 @@
 
 ### Task 4: Enforce proportionate detailed coverage
 
-- [ ] Add pure required-claim and per-claim-span calculations.
-- [ ] Require non-primary Changes claims to cover all substantive IDs for broad
+- [x] Add pure required-claim and per-claim-span calculations.
+- [x] Require non-primary Changes claims to cover all substantive IDs for broad
   PRs after criticism.
-- [ ] Emit one stable generic diagnostic without evidence text.
-- [ ] Add boundary and permutation tests.
+- [x] Emit one stable generic diagnostic without evidence text.
+- [x] Add boundary and permutation tests.
 - **Acceptance:** one broad Summary cannot satisfy a 23-item PR; five bounded
   detailed claims can; PRs below four substantive items remain concise.
 - **Verify:** artifact-completeness focused suite.

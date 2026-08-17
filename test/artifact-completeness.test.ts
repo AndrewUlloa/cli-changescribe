@@ -7,6 +7,7 @@ interface ArtifactDraft {
     readonly kind: string;
     readonly basis: string;
     readonly evidenceIds: readonly string[];
+    readonly significance?: 'primary' | 'supporting' | 'incidental';
   }[];
 }
 
@@ -27,6 +28,30 @@ interface CompletenessModule {
     },
   ): CompletenessReport;
   assertArtifactCompleteness(
+    draft: ArtifactDraft,
+    evidence: unknown,
+    selectionPolicy?: {
+      readonly supportingPaths?: readonly string[];
+      readonly primaryPaths?: readonly string[];
+    },
+  ): void;
+  evaluateArtifactNarrativeBreadth(
+    draft: ArtifactDraft,
+    evidence: unknown,
+    selectionPolicy?: {
+      readonly supportingPaths?: readonly string[];
+      readonly primaryPaths?: readonly string[];
+    },
+  ): {
+    readonly complete: boolean;
+    readonly requiredClaimCount: number;
+    readonly maximumEvidenceIdsPerClaim: number;
+    readonly detailClaimIds: readonly string[];
+    readonly coveredEvidenceIds: readonly string[];
+    readonly missingEvidenceIds: readonly string[];
+    readonly overbroadClaimIds: readonly string[];
+  };
+  assertArtifactNarrativeBreadth(
     draft: ArtifactDraft,
     evidence: unknown,
     selectionPolicy?: {
@@ -87,6 +112,7 @@ function observedChange(
     kind: 'change',
     basis: 'observed',
     evidenceIds,
+    significance: id === 'claim-primary' ? 'primary' : 'supporting',
   };
 }
 
@@ -236,5 +262,134 @@ test('uses the artifact selection override semantics without weakening coverage'
       },
     ).requiredEvidenceIds,
     ['change-docs'],
+  );
+});
+
+test('scales detailed narrative requirements proportionately and deterministically', () => {
+  const boundaries = [
+    { count: 0, claims: 0, span: 0 },
+    { count: 3, claims: 0, span: 0 },
+    { count: 4, claims: 2, span: 3 },
+    { count: 23, claims: 5, span: 6 },
+    { count: 25, claims: 5, span: 6 },
+    { count: 36, claims: 6, span: 7 },
+    { count: 100, claims: 6, span: 18 },
+  ];
+
+  for (const expected of boundaries) {
+    const changes = Array.from({ length: expected.count }, (_, index) => ({
+      id: `change-${String(index + 1).padStart(3, '0')}`,
+      path: `src/module-${String(index + 1).padStart(3, '0')}.ts`,
+    }));
+    const report = completeness.evaluateArtifactNarrativeBreadth(
+      draft([]),
+      evidence([...changes].reverse()),
+    );
+    assert.equal(report.requiredClaimCount, expected.claims);
+    assert.equal(report.maximumEvidenceIdsPerClaim, expected.span);
+  }
+});
+
+test('does not let one broad primary claim satisfy detailed coverage', () => {
+  const changes = Array.from({ length: 23 }, (_, index) => ({
+    id: `change-${String(index + 1).padStart(2, '0')}`,
+    path: `src/module-${String(index + 1).padStart(2, '0')}.ts`,
+  }));
+  const ids = changes.map((change) => change.id);
+  const candidate = draft([
+    observedChange('claim-primary', ...ids),
+    observedChange('claim-catch-all', ...ids),
+  ]);
+  const report = completeness.evaluateArtifactNarrativeBreadth(
+    candidate,
+    evidence(changes),
+  );
+
+  assert.equal(report.complete, false);
+  assert.equal(report.requiredClaimCount, 5);
+  assert.equal(report.maximumEvidenceIdsPerClaim, 6);
+  assert.deepEqual(report.detailClaimIds, []);
+  assert.deepEqual(report.coveredEvidenceIds, []);
+  assert.deepEqual(report.missingEvidenceIds, [...ids].sort());
+  assert.deepEqual(report.overbroadClaimIds, ['claim-catch-all']);
+  assert.throws(
+    () => completeness.assertArtifactNarrativeBreadth(candidate, evidence(changes)),
+    (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.equal(
+        error.message,
+        'Pull-request artifact needs more grounded change detail.',
+      );
+      assert.doesNotMatch(error.message, /module|change-/iu);
+      return true;
+    },
+  );
+});
+
+test('accepts five bounded detailed claims for the PR 20 scale', () => {
+  const changes = Array.from({ length: 23 }, (_, index) => ({
+    id: `change-${String(index + 1).padStart(2, '0')}`,
+    path: `src/module-${String(index + 1).padStart(2, '0')}.ts`,
+  }));
+  const ids = changes.map((change) => change.id);
+  const detailClaims = Array.from({ length: 5 }, (_, index) =>
+    observedChange(
+      `claim-detail-${index + 1}`,
+      ...ids.slice(index * 5, index === 4 ? ids.length : (index + 1) * 5),
+    ),
+  );
+  const candidate = draft([
+    observedChange('claim-primary', ...ids),
+    ...detailClaims,
+  ]);
+  const report = completeness.evaluateArtifactNarrativeBreadth(
+    candidate,
+    evidence(changes),
+  );
+
+  assert.equal(report.complete, true);
+  assert.equal(report.requiredClaimCount, 5);
+  assert.equal(report.maximumEvidenceIdsPerClaim, 6);
+  assert.deepEqual(report.detailClaimIds, [
+    'claim-detail-1',
+    'claim-detail-2',
+    'claim-detail-3',
+    'claim-detail-4',
+    'claim-detail-5',
+  ]);
+  assert.deepEqual(report.coveredEvidenceIds, [...ids].sort());
+  assert.deepEqual(report.missingEvidenceIds, []);
+  assert.deepEqual(report.overbroadClaimIds, []);
+  assert.doesNotThrow(() =>
+    completeness.assertArtifactNarrativeBreadth(candidate, evidence(changes)),
+  );
+});
+
+test('keeps small and supporting-only pull requests adaptive', () => {
+  const small = evidence([
+    { id: 'change-a', path: 'src/a.ts' },
+    { id: 'change-b', path: 'src/b.ts' },
+    { id: 'change-c', path: 'src/c.ts' },
+  ]);
+  assert.equal(
+    completeness.evaluateArtifactNarrativeBreadth(
+      draft([observedChange('claim-primary', 'change-a', 'change-b', 'change-c')]),
+      small,
+    ).complete,
+    true,
+  );
+
+  const supportingOnly = evidence([
+    { id: 'change-docs', path: 'README.md' },
+    { id: 'change-tests', path: 'test/readme.test.ts' },
+    { id: 'change-manifest', path: 'package.json' },
+    { id: 'change-lock', path: 'package-lock.json' },
+  ]);
+  assert.equal(
+    completeness.evaluateArtifactNarrativeBreadth(
+      draft([observedChange('claim-primary', 'change-docs')]),
+      supportingOnly,
+    ).complete,
+    true,
   );
 });
