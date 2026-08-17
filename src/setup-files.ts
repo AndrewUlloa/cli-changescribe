@@ -56,6 +56,15 @@ export interface PlanSetupFileOptions {
   readonly kind: SetupFileKind;
   readonly transform: (contents: string) => TransformResult;
   readonly envSafety?: EnvSafetyChecks;
+  readonly root?: string;
+  readonly createParent?: boolean;
+}
+
+interface DirectorySnapshot {
+  readonly path: string;
+  readonly exists: boolean;
+  readonly device: number | null;
+  readonly inode: number | null;
 }
 
 export interface SetupFilePlan extends TransformResult {
@@ -64,6 +73,9 @@ export interface SetupFilePlan extends TransformResult {
   readonly expectedHash: string | null;
   readonly expectedMode: number | null;
   readonly mode: number;
+  readonly root: string | null;
+  readonly directories: readonly Readonly<DirectorySnapshot>[];
+  readonly createParent: boolean;
 }
 
 export interface ApplySetupFileOptions {
@@ -512,6 +524,93 @@ function readSnapshot(targetPath: string): FileSnapshot {
   };
 }
 
+function directoryChain(
+  rootPath: string,
+  targetPath: string,
+  allowMissing: boolean,
+): readonly Readonly<DirectorySnapshot>[] {
+  const root = path.resolve(rootPath);
+  const target = path.resolve(targetPath);
+  if (target === root || !target.startsWith(`${root}${path.sep}`)) {
+    throw new Error('Setup target must remain inside the selected project root.');
+  }
+  const parent = path.dirname(target);
+  const relativeParent = path.relative(root, parent);
+  if (relativeParent.startsWith('..') || path.isAbsolute(relativeParent)) {
+    throw new Error('Setup target parent must remain inside the project root.');
+  }
+  const components = relativeParent === '' ? [] : relativeParent.split(path.sep);
+  const directories = [root];
+  for (let index = 0; index < components.length; index += 1) {
+    directories.push(path.join(root, ...components.slice(0, index + 1)));
+  }
+
+  let missingSeen = false;
+  const snapshots: DirectorySnapshot[] = [];
+  for (const directory of directories) {
+    try {
+      const stats = fs.lstatSync(directory);
+      if (missingSeen) {
+        throw new Error('A setup parent appeared beneath a missing directory.');
+      }
+      if (stats.isSymbolicLink() || !stats.isDirectory()) {
+        throw new Error('Setup parent directories must be real directories.');
+      }
+      snapshots.push({
+        path: directory,
+        exists: true,
+        device: stats.dev,
+        inode: stats.ino,
+      });
+    } catch (error) {
+      if (errorCode(error) !== 'ENOENT') {
+        throw error;
+      }
+      if (!allowMissing || directory === root) {
+        throw new Error('Setup target parent directory does not exist.');
+      }
+      missingSeen = true;
+      snapshots.push({
+        path: directory,
+        exists: false,
+        device: null,
+        inode: null,
+      });
+    }
+  }
+  return Object.freeze(snapshots.map((snapshot) => Object.freeze(snapshot)));
+}
+
+function assertDirectoriesCurrent(
+  directories: readonly Readonly<DirectorySnapshot>[],
+): void {
+  for (const expected of directories) {
+    try {
+      const stats = fs.lstatSync(expected.path);
+      if (
+        !expected.exists ||
+        stats.isSymbolicLink() ||
+        !stats.isDirectory() ||
+        stats.dev !== expected.device ||
+        stats.ino !== expected.inode
+      ) {
+        throw new Error('Setup parent directory changed since it was planned.');
+      }
+    } catch (error) {
+      if (errorCode(error) === 'ENOENT' && !expected.exists) {
+        continue;
+      }
+      if (
+        error instanceof Error &&
+        error.message === 'Setup parent directory changed since it was planned.'
+      ) {
+        throw error;
+      }
+      throw new Error('Setup parent directory changed since it was planned.');
+    }
+  }
+}
+
 function assertEnvironmentSafe(
   targetPath: string,
   checks: EnvSafetyChecks | undefined,
@@ -533,6 +632,10 @@ function defaultMode(kind: SetupFileKind): number {
 
 export function planSetupFile(options: PlanSetupFileOptions): SetupFilePlan {
   const targetPath = path.resolve(options.path);
+  const root = options.root === undefined ? null : path.resolve(options.root);
+  const directories = root === null
+    ? Object.freeze([] as Readonly<DirectorySnapshot>[])
+    : directoryChain(root, targetPath, options.createParent === true);
   if (options.kind === 'environment') {
     assertEnvironmentSafe(targetPath, options.envSafety);
   }
@@ -545,6 +648,9 @@ export function planSetupFile(options: PlanSetupFileOptions): SetupFilePlan {
     expectedHash: snapshot.hash,
     expectedMode: snapshot.mode,
     mode,
+    root,
+    directories,
+    createParent: options.createParent === true,
     contents: transformed.contents,
     changed: transformed.contents !== snapshot.contents,
     mutations: freezeMutations(
@@ -573,8 +679,10 @@ export function applySetupFile(
   if (plan.kind === 'environment') {
     assertEnvironmentSafe(plan.path, options.envSafety);
   }
+  assertDirectoriesCurrent(plan.directories);
   assertPlanStillCurrent(plan);
 
+  const createdDirectories: string[] = [];
   const directory = path.dirname(plan.path);
   const temporaryPath = path.join(
     directory,
@@ -582,6 +690,19 @@ export function applySetupFile(
   );
   let descriptor: number | undefined;
   try {
+    if (plan.createParent) {
+      for (const directoryPath of plan.directories) {
+        if (directoryPath.exists) {
+          continue;
+        }
+        fs.mkdirSync(directoryPath.path, { mode: 0o755 });
+        const stats = fs.lstatSync(directoryPath.path);
+        if (stats.isSymbolicLink() || !stats.isDirectory()) {
+          throw new Error('Unable to create a safe setup parent directory.');
+        }
+        createdDirectories.push(directoryPath.path);
+      }
+    }
     descriptor = fs.openSync(temporaryPath, 'wx', plan.mode);
     fs.writeFileSync(descriptor, plan.contents, 'utf8');
     fs.fchmodSync(descriptor, plan.mode);
@@ -591,6 +712,18 @@ export function applySetupFile(
 
     if (plan.kind === 'environment') {
       assertEnvironmentSafe(plan.path, options.envSafety);
+    }
+    for (const expected of plan.directories) {
+      const stats = fs.lstatSync(expected.path);
+      const created = createdDirectories.includes(expected.path);
+      if (
+        stats.isSymbolicLink() ||
+        !stats.isDirectory() ||
+        (!created &&
+          (stats.dev !== expected.device || stats.ino !== expected.inode))
+      ) {
+        throw new Error('Setup parent directory changed during file application.');
+      }
     }
     assertPlanStillCurrent(plan);
     fs.renameSync(temporaryPath, plan.path);
@@ -607,6 +740,13 @@ export function applySetupFile(
     } catch (cleanupError) {
       if (errorCode(cleanupError) !== 'ENOENT') {
         // Preserve the original failure.
+      }
+    }
+    for (const directoryPath of [...createdDirectories].reverse()) {
+      try {
+        fs.rmdirSync(directoryPath);
+      } catch {
+        // Preserve the original failure and any non-empty directory.
       }
     }
     throw error;

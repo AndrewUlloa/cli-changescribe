@@ -206,12 +206,12 @@ Non-decisions:
   - **Files:** `src/init.ts`, setup planner/transformer, init/project tests
   - **Size:** M
 
-- [ ] **Task 12: Generate repository workflow guidance and PR template**
+- [x] **Task 12: Generate repository workflow guidance and PR template**
   - **Description:** Create a managed reviewer-oriented PR template when absent and update managed agent blocks with semantic titles, context, exact validation, substantive coverage, and squash merging through project scripts.
   - **Acceptance:**
-    - [ ] Existing user prose/templates remain untouched outside managed boundaries.
-    - [ ] Generated guidance matches actual scripts/config.
-    - [ ] Manual contributors see Summary, Validation, Context, and conditional compatibility/security/non-goal prompts.
+    - [x] Existing user prose/templates remain untouched outside managed boundaries.
+    - [x] Generated guidance matches actual scripts/config.
+    - [x] Manual contributors see Summary, Validation, Context, and conditional compatibility/security/non-goal prompts.
   - **Verify:** setup-file and init idempotency/concurrency tests
   - **Depends on:** Tasks 8, 10, 11
   - **Files:** `src/init.ts`, `src/setup-files.ts`, focused tests, template fixture

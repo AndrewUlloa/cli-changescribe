@@ -98,9 +98,14 @@ install lifecycle scripts are disabled. In Diffwright's own validated checkout,
 the self-hosted workflow does not create a self-dependency: generated scripts
 build and invoke `node ./bin/diffwright.js` directly.
 
-The wizard can add branch-aware, gate-aware package scripts and one managed block
-to selected `CLAUDE.md` and/or `AGENTS.md` files. Text outside those marked
-blocks and custom package scripts are preserved.
+The wizard can add branch-aware, gate-aware package scripts, a `pr:merge`
+script for guarded squash policy, and one managed block to selected `CLAUDE.md`
+and/or `AGENTS.md` files. The managed guidance covers semantic Conventional
+Commit types, confirmed scopes, context, substantive PR coverage, exact
+validation, and the approved merge path. When requested, init also creates a
+reviewer-oriented `.github/pull_request_template.md` only if the repository has
+no user template; reruns update only Diffwright's own marked block. Text outside
+those marked blocks and custom package scripts are preserved.
 
 ### 2. Configure your provider
 

@@ -219,8 +219,27 @@ test('--yes configures a validated self-host without a stale global or self-depe
     'npm run build && node ./bin/diffwright.js pr --base main --create-pr --mode feature',
   );
   assert.equal(manifest.scripts['staging:pr'], undefined);
-  assert.match(fs.readFileSync(path.join(cwd, 'CLAUDE.md'), 'utf8'), /npm run commit/);
-  assert.match(fs.readFileSync(path.join(cwd, 'CLAUDE.md'), 'utf8'), /npm run feature:pr/);
+  assert.equal(
+    manifest.scripts['pr:merge'],
+    'npm run build && node ./bin/diffwright.js merge',
+  );
+  const claude = fs.readFileSync(path.join(cwd, 'CLAUDE.md'), 'utf8');
+  assert.match(claude, /npm run commit/);
+  assert.match(claude, /npm run feature:pr/);
+  assert.match(claude, /npm run pr:merge/);
+  assert.match(claude, /feat.*user-visible capability/);
+  assert.match(claude, /every substantive final-diff area/);
+  assert.match(claude, /validation that actually ran/);
+  const template = fs.readFileSync(
+    path.join(cwd, '.github', 'pull_request_template.md'),
+    'utf8',
+  );
+  assert.match(template, /## Summary/);
+  assert.match(template, /## Validation/);
+  assert.match(template, /## Context/);
+  assert.match(template, /## Compatibility and risk/);
+  assert.match(template, /## Security/);
+  assert.match(template, /## Non-goals/);
   assert.match(
     fs.readFileSync(path.join(cwd, '.env.local'), 'utf8'),
     /DIFFWRIGHT_PROVIDER="ollama"/,
@@ -968,6 +987,92 @@ test('interactive setup refuses to overwrite repository policy changed after pre
   );
 });
 
+test('setup preserves an existing user pull-request template', async (context) => {
+  const cwd = fixture(context, {
+    name: 'diffwright',
+    version: '1.2.3',
+    bin: { diffwright: 'bin/diffwright.js' },
+    scripts: {},
+  });
+  fs.mkdirSync(path.join(cwd, 'bin'));
+  fs.mkdirSync(path.join(cwd, '.github'));
+  fs.writeFileSync(path.join(cwd, 'bin', 'diffwright.js'), '#!/usr/bin/env node\n');
+  fs.writeFileSync(path.join(cwd, '.gitignore'), '.env.local\n');
+  const templatePath = path.join(cwd, '.github', 'pull_request_template.md');
+  const customTemplate = '# Team review\n\nKeep this exact prose.\n';
+  fs.writeFileSync(templatePath, customTemplate);
+
+  await init.runInit(
+    ['--yes', '--provider', 'ollama', '--model', 'llama3.2'],
+    {
+      cwd,
+      inputIsTTY: false,
+      outputIsTTY: false,
+      env: {},
+      runner: gitRunner({ cwd }),
+      runningPackageRoot: cwd,
+      runningVersion: '1.2.3',
+      runDoctor: async () => undefined,
+      log: () => undefined,
+      warn: () => undefined,
+    },
+  );
+
+  assert.equal(fs.readFileSync(templatePath, 'utf8'), customTemplate);
+});
+
+test('setup refuses a pull-request template created after preview', async (context) => {
+  const cwd = fixture(context, {
+    name: 'diffwright',
+    version: '1.2.3',
+    bin: { diffwright: 'bin/diffwright.js' },
+    scripts: {},
+  });
+  fs.mkdirSync(path.join(cwd, 'bin'));
+  fs.writeFileSync(path.join(cwd, 'bin', 'diffwright.js'), '#!/usr/bin/env node\n');
+  fs.writeFileSync(path.join(cwd, '.gitignore'), '.env.local\n');
+  const customTemplate = '# Concurrent team template\n';
+  const prompter = new FakePrompter(
+    ['llama3.2', 'main'],
+    ['ollama', 'none', 'any', 'recommended', 'squash', 'create'],
+    [false, true],
+    [],
+    (message) => {
+      if (message === 'Apply this setup?') {
+        fs.mkdirSync(path.join(cwd, '.github'));
+        fs.writeFileSync(
+          path.join(cwd, '.github', 'pull_request_template.md'),
+          customTemplate,
+        );
+      }
+    },
+  );
+
+  await assert.rejects(
+    init.runInit([], {
+      cwd,
+      inputIsTTY: true,
+      outputIsTTY: true,
+      env: {},
+      runner: gitRunner({ cwd }),
+      prompter,
+      runningPackageRoot: cwd,
+      runningVersion: '1.2.3',
+      runDoctor: async () => undefined,
+      log: () => undefined,
+      warn: () => undefined,
+    }),
+    /template state changed after preview/i,
+  );
+  assert.equal(
+    fs.readFileSync(
+      path.join(cwd, '.github', 'pull_request_template.md'),
+      'utf8',
+    ),
+    customTemplate,
+  );
+});
+
 test('headless setup preserves a valid legacy Groq model override', async (context) => {
   const cwd = fixture(context, { name: 'consumer', scripts: {} });
   const original = fs.readFileSync(path.join(cwd, 'package.json'), 'utf8');
@@ -1424,6 +1529,7 @@ test('a second identical setup run preserves content and mtimes', async (context
     '.gitignore',
     '.env.local',
     '.diffwrightrc.json',
+    path.join('.github', 'pull_request_template.md'),
     'CLAUDE.md',
   ]
     .map((name) => path.join(cwd, name));

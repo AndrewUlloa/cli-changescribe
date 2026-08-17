@@ -146,6 +146,8 @@ The guided plan can:
    through the detected npm, pnpm, Yarn, or Bun command, with install lifecycle
    scripts disabled. This updates the applicable manifest and lockfile.
 2. Add branch-aware `commit`, `pr:summary`, and feature/release PR scripts.
+   A squash policy also adds `pr:merge`, which invokes the guarded merge command
+   without baking in noninteractive approval.
    Selected existing `lint`, `typecheck`, `test`, and `build` scripts run before
    commit generation. A feature PR targets `staging` only when that branch is
    present and selected; otherwise it targets the detected default branch.
@@ -157,9 +159,15 @@ The guided plan can:
    Diffwright version is available. Existing title/editorial values are
    preserved; only confirmed workflow preferences are added or updated.
 5. Add one marker-delimited managed block to selected root `CLAUDE.md` and/or
-   `AGENTS.md` files. The block names the actual generated scripts and forbids
+   `AGENTS.md` files. The block names the actual generated scripts, defines
+   semantic title/scope/context/coverage/validation expectations, and forbids
    raw Git/GitHub mutation for shipping work. Text outside the block is
    preserved.
+6. Create `.github/pull_request_template.md` when policy requests it and no
+   repository template exists. The template prompts manual contributors for
+   Summary, Validation, Context, and conditional compatibility, security, and
+   non-goal notes. Existing user templates are never overwritten; reruns may
+   update only Diffwright's own marker-delimited block.
 
 Custom package scripts are not replaced. Exact managed Diffwright or
 ChangeScribe values may be migrated; a custom collision receives a

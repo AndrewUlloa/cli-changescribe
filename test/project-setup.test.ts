@@ -27,6 +27,7 @@ interface ScriptPlan {
     summary: string;
     featurePr: string;
     stagingPr: string | null;
+    merge: string | null;
   };
   changes: Array<{ name: string; action: string }>;
 }
@@ -54,6 +55,7 @@ interface ProjectSetupModule {
     hasStaging: boolean;
     selectedGates: string[];
     selfHosted: boolean;
+    mergeStrategy?: 'squash' | 'platform';
   }): ScriptPlan;
 }
 
@@ -277,6 +279,7 @@ test('builds explicit staging and self-hosted scripts', () => {
     hasStaging: true,
     selectedGates: ['build'],
     selfHosted: true,
+    mergeStrategy: 'squash',
   });
 
   assert.equal(
@@ -291,6 +294,35 @@ test('builds explicit staging and self-hosted scripts', () => {
     plan.scripts['staging:pr'],
     'pnpm run build && node ./bin/diffwright.js pr --base main --create-pr --mode release',
   );
+  assert.equal(
+    plan.scripts['pr:merge'],
+    'pnpm run build && node ./bin/diffwright.js merge',
+  );
+});
+
+test('preserves custom merge scripts and removes only managed merge scripts', () => {
+  const custom = setup.buildScriptPlan({
+    manifest: { scripts: { 'pr:merge': 'custom merge command' } },
+    manager: 'npm',
+    baseBranch: 'main',
+    hasStaging: false,
+    selectedGates: [],
+    selfHosted: false,
+    mergeStrategy: 'platform',
+  });
+  assert.equal(custom.scripts['pr:merge'], 'custom merge command');
+  assert.equal(custom.effective.merge, null);
+
+  const managed = setup.buildScriptPlan({
+    manifest: { scripts: { 'pr:merge': 'diffwright merge' } },
+    manager: 'npm',
+    baseBranch: 'main',
+    hasStaging: false,
+    selectedGates: [],
+    selfHosted: false,
+    mergeStrategy: 'platform',
+  });
+  assert.equal('pr:merge' in managed.scripts, false);
 });
 
 test('does not generate a release script when staging exists but is not selected', () => {

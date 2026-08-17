@@ -51,6 +51,8 @@ import {
 } from './runtime-config';
 import {
   applySetupFile,
+  MANAGED_BLOCK_END,
+  MANAGED_BLOCK_START,
   planSetupFile,
   transformEnvLocal,
   transformManagedDocument,
@@ -576,6 +578,95 @@ function seedAgentDocument(filename: string, contents: string): string {
   return `${title}\n\n`;
 }
 
+const PULL_REQUEST_TEMPLATE_PATH = path.join(
+  '.github',
+  'pull_request_template.md',
+);
+
+type PullRequestTemplateState = 'absent' | 'managed' | 'custom' | 'other';
+
+function entryExists(filename: string): boolean {
+  try {
+    fs.lstatSync(filename);
+    return true;
+  } catch (error) {
+    if (errorCode(error) === 'ENOENT') {
+      return false;
+    }
+    throw error;
+  }
+}
+
+function pullRequestTemplateState(cwd: string): PullRequestTemplateState {
+  const target = path.join(cwd, PULL_REQUEST_TEMPLATE_PATH);
+  if (entryExists(target)) {
+    const contents = readOptionalSafeFile(target);
+    const hasStart = contents.includes(MANAGED_BLOCK_START);
+    const hasEnd = contents.includes(MANAGED_BLOCK_END);
+    return hasStart && hasEnd ? 'managed' : 'custom';
+  }
+  const fixedCandidates = [
+    path.join(cwd, 'pull_request_template.md'),
+    path.join(cwd, 'PULL_REQUEST_TEMPLATE.md'),
+    path.join(cwd, 'docs', 'pull_request_template.md'),
+    path.join(cwd, 'docs', 'PULL_REQUEST_TEMPLATE.md'),
+    path.join(cwd, '.github', 'PULL_REQUEST_TEMPLATE.md'),
+  ];
+  const directoryCandidates = [
+    path.join(cwd, '.github', 'PULL_REQUEST_TEMPLATE'),
+    path.join(cwd, '.github', 'pull_request_template'),
+  ];
+  return [...fixedCandidates, ...directoryCandidates].some(entryExists)
+    ? 'other'
+    : 'absent';
+}
+
+function renderPullRequestTemplateBody(): string {
+  return `## Summary
+<!-- Explain the reviewer-relevant outcome and the substantive areas changed. -->
+
+## Validation
+<!-- List only commands or manual checks that actually ran. Include limitations. -->
+
+## Context
+<!-- Link the issue or context that supports why this change is needed. -->
+
+## Compatibility and risk
+<!-- Describe compatibility impact and concrete risks when applicable; otherwise remove. -->
+
+## Security
+<!-- Describe security impact when applicable; otherwise remove. -->
+
+## Non-goals
+<!-- State deliberate exclusions when they help reviewers; otherwise remove. -->
+
+- [ ] The title uses the correct Conventional Commit type and a confirmed scope only when one subsystem dominates.
+- [ ] The summary accounts for every substantive final-diff area.
+- [ ] Validation reports exact observed results without inferred counts or guarantees.`;
+}
+
+function planPullRequestTemplate(
+  cwd: string,
+  preference: PullRequestTemplatePreference,
+): { readonly state: PullRequestTemplateState; readonly plan: ReturnType<typeof planSetupFile> | null } {
+  const state = pullRequestTemplateState(cwd);
+  if (preference === 'preserve' || state === 'custom' || state === 'other') {
+    return Object.freeze({ state, plan: null });
+  }
+  const target = path.join(cwd, PULL_REQUEST_TEMPLATE_PATH);
+  return Object.freeze({
+    state,
+    plan: planSetupFile({
+      path: target,
+      root: cwd,
+      createParent: true,
+      kind: 'agent-document',
+      transform: (contents) =>
+        transformManagedDocument(contents, renderPullRequestTemplateBody()),
+    }),
+  });
+}
+
 function renderWorkflowBlock(options: {
   readonly manager: ProjectManifest['packageManager'] | string;
   readonly baseBranch: string;
@@ -583,6 +674,7 @@ function renderWorkflowBlock(options: {
   readonly hasStaging: boolean;
   readonly gates: readonly string[];
   readonly scripts: ScriptPlan['effective'];
+  readonly policy: Readonly<RepositoryPolicyPreferences>;
 }): string {
   const run = (script: string): string =>
     buildRunScriptCommand(
@@ -595,7 +687,20 @@ function renderWorkflowBlock(options: {
   const topology = options.hasStaging
     ? `Branch each independent feature from \`${options.baseBranch}\`. Use \`${run(options.scripts.stagingPr as string)}\` only to promote staging into \`${options.defaultBranch}\`.`
     : `Branch each independent feature from \`${options.baseBranch}\`. This workflow does not use a staging branch.`;
-  return `## Git workflow\n\n${topology} Never branch new work from another unfinished feature branch.\n\nNever use raw \`git add\`, \`git commit\`, \`git push\`, \`gh pr create\`, or \`gh pr edit\` for work intended to ship. Read-only Git and GitHub inspection commands are allowed.\n\nCommit and push only with \`${run(options.scripts.commit)}\`. Create or update a feature pull request only with \`${run(options.scripts.featurePr)}\`. ${gateText}\n\nIf a generated command or gate fails, fix the underlying error and rerun the same project script. Never use \`--no-verify\`, skip hooks or gates, replace generated commit/PR text by hand, or fall back to raw Git/GitHub mutation.`;
+  const scopeText = options.policy.scopeMode === 'forbidden'
+    ? 'Do not add commit scopes in this repository.'
+    : options.policy.allowedScopes
+      ? `Use a scope only when one subsystem clearly dominates, and only from: ${options.policy.allowedScopes.join(', ')}.`
+      : 'Use a scope only when one stable subsystem clearly dominates; broad changes stay unscoped.';
+  const contextText = options.policy.issueContext === 'required'
+    ? 'Every pull request requires explicit issue or context evidence.'
+    : options.policy.issueContext === 'recommended'
+      ? 'Provide issue or context evidence for behavioral or substantial changes.'
+      : 'Add issue or context evidence whenever it is needed to support rationale.';
+  const mergeText = options.policy.mergeStrategy === 'squash' && options.scripts.merge
+    ? `Merge a completed pull request only with \`${run(options.scripts.merge)}\`; it validates the live repository, title, head, checks, reviews, and merge state before creating one squash commit.`
+    : 'Merging is handled by the hosting platform under repository policy.';
+  return `## Git workflow\n\n${topology} Never branch new work from another unfinished feature branch.\n\nNever use raw \`git add\`, \`git commit\`, \`git push\`, \`gh pr create\`, \`gh pr edit\`, or \`gh pr merge\` for work intended to ship. Read-only Git and GitHub inspection commands are allowed.\n\nCommit and push only with \`${run(options.scripts.commit)}\`. Create or update a feature pull request only with \`${run(options.scripts.featurePr)}\`. ${mergeText} ${gateText}\n\nUse Conventional Commit types semantically: \`feat\` adds a user-visible capability, \`fix\` corrects faulty behavior, \`docs\`/\`test\`/\`ci\`/\`build\` describe exclusive work in those domains, \`refactor\` preserves behavior, and \`perf\` requires performance evidence. ${scopeText}\n\n${contextText} Generated pull requests must account for every substantive final-diff area and report only validation that actually ran, including limitations.\n\nIf a generated command or gate fails, fix the underlying error and rerun the same project script. Never use \`--no-verify\`, skip hooks or gates, replace generated commit/PR text by hand, or fall back to raw Git/GitHub mutation.`;
 }
 
 function doctorInvocation(
@@ -657,7 +762,8 @@ function sameEffectiveScripts(left: ScriptPlan, right: ScriptPlan): boolean {
     left.effective.commit === right.effective.commit &&
     left.effective.summary === right.effective.summary &&
     left.effective.featurePr === right.effective.featurePr &&
-    left.effective.stagingPr === right.effective.stagingPr
+    left.effective.stagingPr === right.effective.stagingPr &&
+    left.effective.merge === right.effective.merge
   );
 }
 
@@ -669,6 +775,8 @@ function printPreview(options: {
   readonly envTransform: TransformResult;
   readonly policyTransform: TransformResult;
   readonly policy: Readonly<RepositoryPolicyPreferences>;
+  readonly templateState: PullRequestTemplateState;
+  readonly templatePlan: ReturnType<typeof planSetupFile> | null;
   readonly gitignoreNeeded: boolean;
   readonly agentFiles: readonly string[];
   readonly configured: boolean;
@@ -723,7 +831,13 @@ function printPreview(options: {
     `- Merge workflow: ${options.policy.mergeStrategy}` +
       (options.policy.deleteBranch ? ' with branch deletion' : ''),
   );
-  log(`- PR template: ${options.policy.template}`);
+  if (options.templatePlan?.changed) {
+    log(`- PR template: ${options.templateState === 'managed' ? 'update managed block' : 'create managed template'}`);
+  } else if (options.templateState === 'custom' || options.templateState === 'other') {
+    log('- PR template: preserve existing repository template');
+  } else {
+    log(`- PR template: ${options.policy.template}`);
+  }
   if (options.gitignoreNeeded) {
     log('- Git ignore: add effective .env.local rule');
   }
@@ -1372,6 +1486,7 @@ async function runGuidedInit(
       hasStaging: usesStaging,
       selectedGates: answers.gates,
       selfHosted: discovery.selfHosted,
+      mergeStrategy: answers.policy.mergeStrategy,
     });
     transformPackageJsonScripts(
       readOptionalSafeFile(packagePath),
@@ -1386,6 +1501,7 @@ async function runGuidedInit(
       hasStaging: usesStaging,
       gates: answers.gates,
       scripts: initialScriptPlan.effective,
+      policy: answers.policy,
     });
     const agentPreviews = agentFiles.map((filename) => ({
       filename,
@@ -1394,6 +1510,10 @@ async function runGuidedInit(
         workflowBody,
       ),
     }));
+    const templatePreview = planPullRequestTemplate(
+      dependencies.cwd,
+      answers.policy.template,
+    );
 
     const exactLocal = discovery.selfHosted || verifyExactLocalExecutable({
       dependencies,
@@ -1472,6 +1592,8 @@ async function runGuidedInit(
       envTransform,
       policyTransform: policyPreviewPlan,
       policy: answers.policy,
+      templateState: templatePreview.state,
+      templatePlan: templatePreview.plan,
       gitignoreNeeded,
       agentFiles,
       configured,
@@ -1527,6 +1649,7 @@ async function runGuidedInit(
               hasStaging: usesStaging,
               selectedGates: answers.gates,
               selfHosted: discovery.selfHosted,
+              mergeStrategy: answers.policy.mergeStrategy,
             });
             if (!sameEffectiveScripts(initialScriptPlan, planned)) {
               throw new Error(
@@ -1551,6 +1674,7 @@ async function runGuidedInit(
           hasStaging: usesStaging,
           gates: answers.gates,
           scripts: finalScriptPlan.effective,
+          policy: answers.policy,
         });
         const plannedGitignore = planSetupFile({
           path: gitignorePath,
@@ -1573,6 +1697,13 @@ async function runGuidedInit(
                 finalWorkflowBody,
               ),
           }));
+        if (
+          pullRequestTemplateState(dependencies.cwd) !== templatePreview.state
+        ) {
+          throw new Error(
+            'Pull-request template state changed after preview. Review the repository template and rerun init.',
+          );
+        }
         return {
           packagePlan: plannedPackage,
           currentScriptPlan: finalScriptPlan,
@@ -1597,6 +1728,12 @@ async function runGuidedInit(
       if (gitignorePlan.changed) appliedPaths.push(gitignorePlan.path);
       applySetupFile(policyPreviewPlan);
       if (policyPreviewPlan.changed) appliedPaths.push(policyPreviewPlan.path);
+      if (templatePreview.plan) {
+        applySetupFile(templatePreview.plan);
+        if (templatePreview.plan.changed) {
+          appliedPaths.push(templatePreview.plan.path);
+        }
+      }
       for (const plan of agentPlans) {
         applySetupFile(plan);
         if (plan.changed) appliedPaths.push(plan.path);
@@ -1697,6 +1834,11 @@ async function runGuidedInit(
     if (currentScriptPlan.effective.stagingPr) {
       dependencies.log(
         `Release PR workflow: ${buildRunScriptCommand(discovery.manager, currentScriptPlan.effective.stagingPr).display}`,
+      );
+    }
+    if (currentScriptPlan.effective.merge) {
+      dependencies.log(
+        `Guarded merge workflow: ${buildRunScriptCommand(discovery.manager, currentScriptPlan.effective.merge).display}`,
       );
     }
     dependencies.log('✅ Setup complete. Diffwright is ready for this repository.');

@@ -68,6 +68,8 @@ interface SetupFilesModule {
     kind: SetupFileKind;
     transform(contents: string): TransformResult;
     envSafety?: EnvSafetyChecks;
+    root?: string;
+    createParent?: boolean;
   }): SetupFilePlan;
   applySetupFile(
     plan: SetupFilePlan,
@@ -558,4 +560,61 @@ test('apply rechecks environment safety and removes its temporary file on failur
   );
   assert.equal(fs.existsSync(envPath), false);
   assert.deepEqual(fs.readdirSync(directory), []);
+});
+
+test('nested setup creates a missing safe parent only after apply', (context) => {
+  const directory = temporaryDirectory(context);
+  const target = path.join(directory, '.github', 'pull_request_template.md');
+  const plan = setupFiles.planSetupFile({
+    path: target,
+    root: directory,
+    createParent: true,
+    kind: 'agent-document',
+    transform: (contents) => setupFiles.transformManagedDocument(contents, '## Summary'),
+  });
+
+  assert.equal(fs.existsSync(path.dirname(target)), false);
+  setupFiles.applySetupFile(plan);
+  assert.equal(fs.statSync(path.dirname(target)).isDirectory(), true);
+  assert.match(fs.readFileSync(target, 'utf8'), /## Summary/);
+});
+
+test('nested setup rejects symlinked and concurrently replaced parents', (context) => {
+  if (process.platform === 'win32') {
+    context.skip('POSIX directory identity fixture');
+    return;
+  }
+  const directory = temporaryDirectory(context);
+  const external = temporaryDirectory(context);
+  const github = path.join(directory, '.github');
+  const target = path.join(github, 'pull_request_template.md');
+  fs.symlinkSync(external, github);
+  assert.throws(
+    () => setupFiles.planSetupFile({
+      path: target,
+      root: directory,
+      createParent: true,
+      kind: 'agent-document',
+      transform: (contents) => setupFiles.transformManagedDocument(contents, '## Summary'),
+    }),
+    /parent directories must be real directories/i,
+  );
+
+  fs.unlinkSync(github);
+  fs.mkdirSync(github);
+  const plan = setupFiles.planSetupFile({
+    path: target,
+    root: directory,
+    createParent: true,
+    kind: 'agent-document',
+    transform: (contents) => setupFiles.transformManagedDocument(contents, '## Summary'),
+  });
+  fs.renameSync(github, `${github}-original`);
+  fs.mkdirSync(github);
+
+  assert.throws(
+    () => setupFiles.applySetupFile(plan),
+    /parent directory changed/i,
+  );
+  assert.equal(fs.existsSync(target), false);
 });

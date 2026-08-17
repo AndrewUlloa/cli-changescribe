@@ -112,6 +112,7 @@ export interface ScriptPlan {
     summary: string;
     featurePr: string;
     stagingPr: string | null;
+    merge: string | null;
   }>;
   readonly changes: ReadonlyArray<Readonly<{ name: string; action: string }>>;
 }
@@ -301,6 +302,10 @@ const MANAGED_SCRIPT_VALUES: Readonly<Record<string, ReadonlySet<string>>> = {
     'changescribe staging:pr',
     'changescribe staging:pr --yes',
   ]),
+  'pr:merge': new Set([
+    'diffwright merge',
+    'changescribe merge',
+  ]),
 };
 
 const MANAGED_GATE_PREFIX =
@@ -317,6 +322,7 @@ function isStrictGeneratedScript(name: string, value: string): boolean {
       `pr --base ${SAFE_GENERATED_BRANCH} --create-pr(?: --yes)? --mode feature`,
     'staging:pr':
       `pr --base ${SAFE_GENERATED_BRANCH} --create-pr(?: --yes)? --mode release`,
+    'pr:merge': 'merge',
   };
   const suffix = suffixes[name];
   return suffix !== undefined && new RegExp(
@@ -373,6 +379,7 @@ export function buildScriptPlan(options: {
   readonly hasStaging: boolean;
   readonly selectedGates: readonly string[];
   readonly selfHosted: boolean;
+  readonly mergeStrategy?: 'squash' | 'platform';
 }): ScriptPlan {
   if (!safeBranchName(options.baseBranch)) {
     throw new Error('Unsafe branch name for generated scripts.');
@@ -457,9 +464,29 @@ export function buildScriptPlan(options: {
     }
   }
 
+  let merge: string | null = null;
+  if (options.mergeStrategy === 'squash') {
+    merge = setManagedScript(
+      scripts,
+      'pr:merge',
+      commandChain([...selfHostBuildCommands, `${cli} merge`]),
+      changes,
+    );
+  } else {
+    const existing = scripts['pr:merge'];
+    if (
+      existing !== undefined &&
+      ((MANAGED_SCRIPT_VALUES['pr:merge']?.has(existing) ?? false) ||
+        isStrictGeneratedScript('pr:merge', existing))
+    ) {
+      delete scripts['pr:merge'];
+      changes.push({ name: 'pr:merge', action: 'remove' });
+    }
+  }
+
   return Object.freeze({
     scripts: Object.freeze(scripts),
-    effective: Object.freeze({ commit, summary, featurePr, stagingPr }),
+    effective: Object.freeze({ commit, summary, featurePr, stagingPr, merge }),
     changes: Object.freeze(changes.map((change) => Object.freeze(change))),
   });
 }
