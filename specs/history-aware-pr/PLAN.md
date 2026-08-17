@@ -56,11 +56,11 @@
 
 ### Task 3: Define safe history-backed claims
 
-- [ ] Permit a conservative provided problem/rationale/risk/follow-up claim to
+- [x] Permit a conservative provided problem/rationale/risk/follow-up claim to
   cite a nonempty history body.
-- [ ] Keep subject-only history ineligible for those claims.
-- [ ] Require observed change evidence alongside history for every change claim.
-- [ ] Update the model and critic instructions without exposing repository policy.
+- [x] Keep subject-only history ineligible for those claims.
+- [x] Require observed change evidence alongside history for every change claim.
+- [x] Update the model and critic instructions without exposing repository policy.
 - **Acceptance:** adversarial subject-only and unrelated-history cases fail;
   nonempty cited body plus matching critic approval succeeds.
 - **Verify:** change-evidence, artifact-draft, and critic focused tests.

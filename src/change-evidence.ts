@@ -500,6 +500,11 @@ function validateClaimKind(
   cited: readonly EvidenceItem[],
   receiptsById: ReadonlyMap<string, VerificationReceipt>,
 ): void {
+  const hasAuthoredIntent = cited.some(
+    (evidence) =>
+      evidence.kind === 'intent' ||
+      (evidence.kind === 'history' && evidence.payload.body.trim().length > 0),
+  );
   if (
     claim.kind === 'change' &&
     !cited.some((evidence) => evidence.kind === 'change')
@@ -508,8 +513,7 @@ function validateClaimKind(
   }
   if (
     claim.kind === 'problem' &&
-    (claim.basis !== 'provided' ||
-      !cited.some((evidence) => evidence.kind === 'intent'))
+    (claim.basis !== 'provided' || !hasAuthoredIntent)
   ) {
     throw new Error(
       `Problem claim ${claim.id} requires provided intent evidence.`,
@@ -517,7 +521,7 @@ function validateClaimKind(
   }
   if (
     claim.kind === 'rationale' &&
-    !cited.some((evidence) => evidence.kind === 'intent')
+    (claim.basis !== 'provided' || !hasAuthoredIntent)
   ) {
     throw new Error(
       `Rationale claim ${claim.id} requires provided intent evidence.`,
@@ -567,14 +571,14 @@ function validateClaimKind(
   }
   if (
     claim.kind === 'follow-up' &&
-    !cited.some((evidence) => evidence.kind === 'intent')
+    (claim.basis !== 'provided' || !hasAuthoredIntent)
   ) {
     throw new Error(`Follow-up claim ${claim.id} requires provided intent.`);
   }
   if (
     claim.kind === 'risk' &&
     claim.basis !== 'inferred' &&
-    !cited.some((evidence) => evidence.kind === 'intent')
+    (claim.basis !== 'provided' || !hasAuthoredIntent)
   ) {
     throw new Error(`Risk claim ${claim.id} requires provided intent.`);
   }
