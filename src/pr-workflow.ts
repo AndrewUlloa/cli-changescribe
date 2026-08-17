@@ -15,7 +15,9 @@ import {
 } from './artifact-draft';
 import {
   evaluateArtifactCompleteness,
+  evaluateArtifactNarrativeBreadth,
   IncompleteArtifactCoverageError,
+  IncompleteArtifactNarrativeError,
   substantiveChangeEvidenceIds,
   SUBSTANTIVE_COVERAGE_REPAIR_INSTRUCTION,
 } from './artifact-completeness';
@@ -219,6 +221,10 @@ function buildArtifactMessages(
   const serialized = serializeEvidenceBundle(evidence);
   const primaryEvidenceIds = eligiblePrimaryChangeEvidenceIds(evidence);
   const substantiveEvidenceIds = substantiveChangeEvidenceIds(evidence);
+  const narrativeBreadth = evaluateArtifactNarrativeBreadth(
+    { claims: [] },
+    evidence,
+  );
   const examplePrimaryEvidenceId = primaryEvidenceIds[0] ?? 'change-1';
   const exampleType = semantics.preferredType ?? semantics.allowedTypes[0];
   if (exampleType === undefined) {
@@ -286,6 +292,14 @@ function buildArtifactMessages(
         `Required substantive change evidence IDs: ${JSON.stringify(substantiveEvidenceIds)}`,
         'The title and primary Summary claim must conservatively represent the complete required substantive change evidence set, not an incidental implementation detail. Cite that complete set on the primary claim.',
         'When required substantive change evidence IDs are present, their complete union must be cited by observed change claims across Summary and Changes.',
+        ...(narrativeBreadth.requiredClaimCount === 0 ||
+        repairInstruction === PRIMARY_GROUNDING_REPAIR_INSTRUCTION
+          ? []
+          : [
+              `For this pull request, include at least ${String(narrativeBreadth.requiredClaimCount)} non-primary observed change claims in the Changes section.`,
+              `Each non-primary change claim may cite at most ${String(narrativeBreadth.maximumEvidenceIdsPerClaim)} substantive change evidence IDs, and their union must cover every required substantive change evidence ID.`,
+              'Use those bounded claims to describe distinct reviewer-relevant change themes. Do not satisfy this requirement with generic restatements of the Summary.',
+            ]),
         'This model evidence projection retains every safe-to-egress changed line for each required substantive change while omitting unchanged diff context and supporting-file patches. Repository-policy contents remain metadata-only, configured secret values are redacted, and supporting files are accounted for by the deterministic Changes map. Omitted or protected patches cannot support model-authored prose.',
         'Use null for title.scope instead of omitting it or using an empty string.',
         'Allowed claim kinds: change, problem, rationale, verification, compatibility, risk, review-focus, non-goal, follow-up.',
@@ -1302,13 +1316,23 @@ async function main(argv: string[], timings: OperationTimings): Promise<void> {
     );
   }
   const completeness = evaluateArtifactCompleteness(filteredDraft, evidence);
-  if (!completeness.complete) {
+  const narrativeBreadth = evaluateArtifactNarrativeBreadth(
+    filteredDraft,
+    evidence,
+  );
+  if (!completeness.complete || !narrativeBreadth.complete) {
     if (providerRequestCount + 2 > MAX_PROVIDER_REQUESTS) {
-      throw new IncompleteArtifactCoverageError();
+      throw !completeness.complete
+        ? new IncompleteArtifactCoverageError()
+        : new IncompleteArtifactNarrativeError();
     }
-    warn(
-      'Substantive coverage is incomplete; requesting one full-draft repair...',
-    );
+    warn(!completeness.complete
+      ? 'Substantive coverage is incomplete; requesting one full-draft repair...'
+      : 'Grounded change detail is incomplete; requesting one full-draft repair...');
+    const breadthRepairInstruction =
+      narrativeBreadth.requiredClaimCount === 0
+        ? ''
+        : ` Include at least ${String(narrativeBreadth.requiredClaimCount)} non-primary observed change claims in Changes, cite at most ${String(narrativeBreadth.maximumEvidenceIdsPerClaim)} substantive change evidence IDs per detail claim, and cover every substantive change evidence ID across those detail claims.`;
     const coverageGeneration = await generateArtifactDraft(
       resolved,
       evidence,
@@ -1319,7 +1343,7 @@ async function main(argv: string[], timings: OperationTimings): Promise<void> {
       knownSecrets,
       repositoryPolicy.policy,
       timings,
-      SUBSTANTIVE_COVERAGE_REPAIR_INSTRUCTION,
+      `${SUBSTANTIVE_COVERAGE_REPAIR_INSTRUCTION}${breadthRepairInstruction}`,
       1,
     );
     providerRequestCount += coverageGeneration.requestCount;
@@ -1332,8 +1356,19 @@ async function main(argv: string[], timings: OperationTimings): Promise<void> {
       evidence,
     );
     removedCandidateIds = coverageCritique.removedCandidateIds;
-    if (!evaluateArtifactCompleteness(filteredDraft, evidence).complete) {
+    const repairedCompleteness = evaluateArtifactCompleteness(
+      filteredDraft,
+      evidence,
+    );
+    const repairedNarrativeBreadth = evaluateArtifactNarrativeBreadth(
+      filteredDraft,
+      evidence,
+    );
+    if (!repairedCompleteness.complete) {
       throw new IncompleteArtifactCoverageError();
+    }
+    if (!repairedNarrativeBreadth.complete) {
+      throw new IncompleteArtifactNarrativeError();
     }
   }
   assertArtifactUsesModelEvidence(filteredDraft, modelEvidence);

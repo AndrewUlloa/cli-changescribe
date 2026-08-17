@@ -113,6 +113,9 @@ async function createCompletionServer(
     primaryRejectedCritiques?: number;
     titleSubjectRejectedCritiques?: number;
     omittedSupportingResponses?: number;
+    completeNarrativeInitial?: boolean;
+    completeNarrativeRepair?: boolean;
+    rejectNarrativeClaim?: boolean;
   } = {},
 ): Promise<{
   baseURL: string;
@@ -197,9 +200,12 @@ async function createCompletionServer(
                                 )
                               : candidate.candidateId === 'claim:claim-plan'
                                 ? false
-                                : candidate.candidateId ===
+                              : candidate.candidateId ===
                                     'claim:claim-coverage'
                                   ? !options.rejectCoverageClaim
+                                  : candidate.candidateId ===
+                                      'claim:claim-narrative-b'
+                                    ? !options.rejectNarrativeClaim
                                   : true,
                         }),
                       ),
@@ -225,7 +231,10 @@ async function createCompletionServer(
                           id: responseClaimId,
                           kind: 'change',
                           text: 'route completions through provider-neutral configuration.',
-                          evidenceIds: ['change-1'],
+                          evidenceIds: options.completeNarrativeRepair ||
+                            options.completeNarrativeInitial
+                            ? ['change-1', 'change-2', 'change-3', 'change-4']
+                            : ['change-1'],
                           basis: 'observed',
                           significance: 'primary',
                         },
@@ -260,6 +269,28 @@ async function createCompletionServer(
                               significance: 'supporting',
                             }]
                           : []),
+                        ...((options.completeNarrativeInitial &&
+                          artifactRequestCount === 1) ||
+                        (options.completeNarrativeRepair && isCoverageRepair)
+                          ? [
+                              {
+                                id: 'claim-narrative-a',
+                                kind: 'change',
+                                text: 'group the first two source changes.',
+                                evidenceIds: ['change-1', 'change-2'],
+                                basis: 'observed',
+                                significance: 'supporting',
+                              },
+                              {
+                                id: 'claim-narrative-b',
+                                kind: 'change',
+                                text: 'group the remaining source changes.',
+                                evidenceIds: ['change-3', 'change-4'],
+                                basis: 'observed',
+                                significance: 'supporting',
+                              },
+                            ]
+                          : []),
                         ...(artifactRequestCount <=
                         (options.omittedSupportingResponses ?? 0)
                           ? [{
@@ -288,6 +319,17 @@ async function createCompletionServer(
                           ? [{
                               kind: 'changes',
                               claimIds: ['claim-coverage'],
+                            }]
+                          : []),
+                        ...((options.completeNarrativeInitial &&
+                          artifactRequestCount === 1) ||
+                        (options.completeNarrativeRepair && isCoverageRepair)
+                          ? [{
+                              kind: 'changes',
+                              claimIds: [
+                                'claim-narrative-a',
+                                'claim-narrative-b',
+                              ],
                             }]
                           : []),
                         ...(artifactRequestCount <=
@@ -1161,6 +1203,24 @@ function addSubstantiveCoverageFixture(directory: string): void {
   git(directory, ['commit', '--quiet', '-m', 'feat: add two source changes']);
 }
 
+function addBroadNarrativeFixture(directory: string): void {
+  git(directory, ['switch', '--quiet', '-c', 'feature']);
+  fs.mkdirSync(path.join(directory, 'src'), { recursive: true });
+  for (const name of ['first', 'second', 'third', 'fourth']) {
+    fs.writeFileSync(
+      path.join(directory, 'src', `${name}.ts`),
+      `export const ${name} = true;\n`,
+    );
+  }
+  git(directory, ['add', 'src']);
+  git(directory, [
+    'commit',
+    '--quiet',
+    '-m',
+    'feat: add four related source changes',
+  ]);
+}
+
 test('PR repairs incomplete substantive coverage from original evidence within five requests', async (context) => {
   const directory = createRepository(context);
   addSubstantiveCoverageFixture(directory);
@@ -1259,6 +1319,104 @@ test('PR coverage repair never exceeds the five-request ceiling after primary re
     result.stderr,
     /does not cover every substantive change/i,
   );
+  assert.equal(fs.existsSync(output), false);
+});
+
+test('PR repairs a broad one-claim narrative into proportionate grounded detail', async (context) => {
+  const directory = createRepository(context);
+  addBroadNarrativeFixture(directory);
+  const output = path.join(directory, 'summary.md');
+  const server = await createCompletionServer(context, {
+    completeNarrativeRepair: true,
+  });
+
+  const result = await run(
+    directory,
+    ['pr', '--base', 'main', '--out', output],
+    customEnvironment(server.baseURL),
+  );
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.equal(server.requests.length, 4);
+  assert.match(result.stdout, /grounded change detail.*repair/i);
+  const initialRequest = JSON.stringify(server.requests[0]?.body);
+  assert.match(initialRequest, /at least 2 non-primary observed change claims/i);
+  assert.match(initialRequest, /at most 3 substantive change evidence IDs/i);
+  const repairRequest = JSON.stringify(server.requests[2]?.body);
+  assert.match(repairRequest, /Repair category: substantive-coverage/);
+  const rendered = fs.readFileSync(output, 'utf8');
+  assert.match(rendered, /group the first two source changes\./);
+  assert.match(rendered, /group the remaining source changes\./);
+});
+
+test('PR accepts an initially detailed broad narrative in two requests', async (context) => {
+  const directory = createRepository(context);
+  addBroadNarrativeFixture(directory);
+  const output = path.join(directory, 'summary.md');
+  const server = await createCompletionServer(context, {
+    completeNarrativeInitial: true,
+  });
+
+  const result = await run(
+    directory,
+    ['pr', '--base', 'main', '--out', output],
+    customEnvironment(server.baseURL),
+  );
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.equal(server.requests.length, 2);
+  assert.doesNotMatch(result.stdout, /full-draft repair/i);
+  assert.match(
+    fs.readFileSync(output, 'utf8'),
+    /group the remaining source changes\./,
+  );
+});
+
+test('PR primary replacement preserves supported broad narrative detail', async (context) => {
+  const directory = createRepository(context);
+  addBroadNarrativeFixture(directory);
+  const output = path.join(directory, 'summary.md');
+  const server = await createCompletionServer(context, {
+    completeNarrativeInitial: true,
+    primaryRejectedCritiques: 1,
+  });
+
+  const result = await run(
+    directory,
+    ['pr', '--base', 'main', '--out', output],
+    customEnvironment(server.baseURL),
+  );
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.equal(server.requests.length, 4);
+  const replacementRequest = JSON.stringify(server.requests[2]?.body);
+  assert.doesNotMatch(
+    replacementRequest,
+    /at least 2 non-primary observed change claims/i,
+  );
+  const rendered = fs.readFileSync(output, 'utf8');
+  assert.match(rendered, /group the first two source changes\./);
+  assert.match(rendered, /group the remaining source changes\./);
+});
+
+test('PR fails closed when criticism reopens a broad narrative gap', async (context) => {
+  const directory = createRepository(context);
+  addBroadNarrativeFixture(directory);
+  const output = path.join(directory, 'summary.md');
+  const server = await createCompletionServer(context, {
+    completeNarrativeRepair: true,
+    rejectNarrativeClaim: true,
+  });
+
+  const result = await run(
+    directory,
+    ['pr', '--base', 'main', '--out', output],
+    customEnvironment(server.baseURL),
+  );
+
+  assert.equal(result.status, 1, result.stderr || result.stdout);
+  assert.equal(server.requests.length, 4);
+  assert.match(result.stderr, /needs more grounded change detail/i);
   assert.equal(fs.existsSync(output), false);
 });
 

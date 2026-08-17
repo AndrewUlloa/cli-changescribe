@@ -82,11 +82,11 @@
 
 ### Task 5: Integrate breadth with every repair path
 
-- [ ] Give the initial draft and each repair exact bounded detail requirements.
-- [ ] Revalidate after deterministic repair, primary replacement merge, coverage
+- [x] Give the initial draft and each repair exact bounded detail requirements.
+- [x] Revalidate after deterministic repair, primary replacement merge, coverage
   repair, and critic pruning.
-- [ ] Preserve already supported detailed claims byte-for-byte.
-- [ ] Keep normal request count at two and combined maximum at five.
+- [x] Preserve already supported detailed claims byte-for-byte.
+- [x] Keep normal request count at two and combined maximum at five.
 - **Acceptance:** fake-provider workflows cover normal success, one repair,
   critic-reopened detail gaps, and terminal ceiling behavior.
 - **Verify:** workflow-byok focused tests and security suite.
@@ -95,8 +95,8 @@
 
 ### Checkpoint: Runtime contract
 
-- [ ] Typecheck passes.
-- [ ] Focused history, evidence, completeness, critic, and workflow tests pass.
+- [x] Typecheck passes.
+- [x] Focused history, evidence, completeness, critic, and workflow tests pass.
 - [ ] Full suite passes.
 - [ ] No provider size/request/security invariant regresses.
 
