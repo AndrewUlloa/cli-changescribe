@@ -340,8 +340,10 @@ or require one newly audited primary replacement, but it is not an oracle.
 An optional root `.diffwrightrc.json` can add accepted Conventional Commit
 types, forbid or allowlist scopes, set the advisory title target from 1 through
 72 characters, and configure advisory sentence, absolute-language,
-duplicate-claim, and terminology checks. The 72-character maximum and
-evidence/security boundaries cannot be loosened.
+duplicate-claim, and terminology checks. Version 2 also records bounded local
+workflow preferences for issue context, PR-template creation, squash versus
+platform-managed merging, and post-squash branch deletion. The 72-character
+maximum and evidence/security boundaries cannot be loosened.
 
 Additional types extend local validation and the interactive PR editing path.
 Automatic generation intentionally asks for the standard Conventional Commit
@@ -353,9 +355,16 @@ feature branch cannot weaken the rules that review it. Policy patch contents
 are replaced with bounded metadata before any provider request. Warnings never
 rewrite approved text.
 
+Existing version-1 files retain their exact resolved shape and behavior.
+Version 2 defaults to recommended issue context, creating a template only when
+none exists, squash merging, and preserving the feature branch. Platform-
+managed merging cannot request Diffwright branch deletion. Grounding, critic,
+coverage, redaction, freshness, and request ceilings are not configuration
+fields and cannot be disabled.
+
 See the shipped
 [JSON Schema](https://github.com/AndrewUlloa/diffwright/blob/main/documentation/diffwrightrc.schema.json)
-for the exact version-1 fields and bounds.
+for the exact version-1 and version-2 fields and bounds.
 
 The default PR output is `.pr-summaries/PR_SUMMARY.md`; the slim GitHub body is
 `.pr-summaries/PR_SUMMARY.final.md`. A separate temporary backup is also

@@ -350,7 +350,7 @@ keys, unknown fields, unsupported controls, and out-of-range values fail closed.
 ```json
 {
   "$schema": "https://raw.githubusercontent.com/AndrewUlloa/diffwright/main/documentation/diffwrightrc.schema.json",
-  "version": 1,
+  "version": 2,
   "title": {
     "additionalTypes": ["security"],
     "scopeMode": "optional",
@@ -364,6 +364,14 @@ keys, unknown fields, unsupported controls, and out-of-range values fail closed.
     "terminologyGroups": [
       { "name": "pull request", "terms": ["pull request", "PR"] }
     ]
+  },
+  "pullRequest": {
+    "issueContext": "recommended",
+    "template": "create"
+  },
+  "merge": {
+    "strategy": "squash",
+    "deleteBranch": false
   }
 }
 ```
@@ -375,6 +383,20 @@ from 1 through 72 characters and cannot exceed the immutable 72-character
 header maximum. Editorial
 findings cover sentence length, vague absolutes, normalized duplicate claims,
 and mixed terminology. They are warnings only.
+
+Existing version-1 files are accepted without adding resolved fields or
+changing their default digest. Version 2 adds only bounded local workflow
+preferences. `pullRequest.issueContext` is `optional`, `recommended`, or
+`required`; `pullRequest.template` is `create` or `preserve`; and
+`merge.strategy` is `squash` or `platform`. `merge.deleteBranch` applies only
+after Diffwright confirms its own squash merge, so it must remain `false` for a
+platform-managed merge. Missing version-2 sections resolve to recommended
+issue context, create-when-absent templates, squash merging, and no branch
+deletion.
+
+Evidence coverage, the critic, grounding, redaction, snapshot freshness, and
+request ceilings are immutable product safeguards. They are intentionally not
+configuration fields; unknown attempts to weaken them fail closed.
 
 Additional types extend local validation and can be selected during
 interactive PR editing. Automatic generation continues to request only the

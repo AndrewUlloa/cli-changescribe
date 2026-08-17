@@ -197,7 +197,7 @@ test('CLI reference documents every supported option and exit behavior', () => {
   assert.match(reference, /Closes #/);
 });
 
-test('repository policy schema is shipped and matches the documented v1 surface', () => {
+test('repository policy schema is shipped and matches the documented v1/v2 surface', () => {
   const schemaPath = path.join(
     repoRoot,
     'documentation/diffwrightrc.schema.json',
@@ -214,6 +214,8 @@ test('repository policy schema is shipped and matches the documented v1 surface'
   assert.deepEqual(Object.keys(schema.properties ?? {}).sort(), [
     '$schema',
     'editorial',
+    'merge',
+    'pullRequest',
     'title',
     'version',
   ]);
@@ -238,11 +240,24 @@ test('repository policy schema is shipped and matches the documented v1 surface'
     'style',
     'test',
   ]);
+  assert.ok(schema.$defs?.pullRequestPolicy);
+  assert.ok(schema.$defs?.mergePolicy);
+  assert.deepEqual(
+    (schema.properties?.version as { enum?: number[] }).enum,
+    [1, 2],
+  );
   assert.match(readme, /diffwrightrc\.schema\.json/);
   assert.match(
     repositoryFile('documentation/cli-reference.md'),
     /diffwrightrc\.schema\.json/,
   );
+  assert.match(
+    repositoryFile('documentation/cli-reference.md'),
+    /version 2.*issueContext.*template.*strategy.*deleteBranch/is,
+  );
+  assert.match(readme, /version 2.*issue context.*PR-template.*branch deletion/is);
+  assert.match(readme, /Grounding, critic,/i);
+  assert.match(readme, /cannot be disabled/i);
   assert.match(
     repositoryFile('documentation/troubleshooting.md'),
     /diffwrightrc\.schema\.json/,

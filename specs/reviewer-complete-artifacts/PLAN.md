@@ -184,12 +184,12 @@ Non-decisions:
 
 ### Phase 4: Policy and Guided Init
 
-- [ ] **Task 10: Add revision-pinned repository policy v2**
+- [x] **Task 10: Add revision-pinned repository policy v2**
   - **Description:** Accept v1 unchanged and add bounded v2 title, issue-context, merge, and PR-template preferences; reject unknown safety-disabling keys.
   - **Acceptance:**
-    - [ ] V1 behavior is byte-compatible.
-    - [ ] V2 is strictly parsed, frozen, pinned, and protected from provider egress.
-    - [ ] Grounding/critic/coverage cannot be configured off.
+    - [x] V1 behavior is byte-compatible.
+    - [x] V2 is strictly parsed, frozen, pinned, and protected from provider egress.
+    - [x] Grounding/critic/coverage cannot be configured off.
   - **Verify:** `npm run build && npm run build:test && node --test .test-dist/repository-policy.test.js`
   - **Depends on:** Tasks 7–9
   - **Files:** `src/repository-policy.ts`, schema, policy tests, distribution/npm-page tests
