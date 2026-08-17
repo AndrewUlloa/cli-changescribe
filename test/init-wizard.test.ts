@@ -219,14 +219,115 @@ test('--yes configures a validated self-host without a stale global or self-depe
     'npm run build && node ./bin/diffwright.js pr --base main --create-pr --mode feature',
   );
   assert.equal(manifest.scripts['staging:pr'], undefined);
-  assert.match(fs.readFileSync(path.join(cwd, 'CLAUDE.md'), 'utf8'), /npm run commit/);
-  assert.match(fs.readFileSync(path.join(cwd, 'CLAUDE.md'), 'utf8'), /npm run feature:pr/);
+  assert.equal(
+    manifest.scripts['pr:merge'],
+    'npm run build && node ./bin/diffwright.js merge',
+  );
+  const claude = fs.readFileSync(path.join(cwd, 'CLAUDE.md'), 'utf8');
+  assert.match(claude, /npm run commit/);
+  assert.match(claude, /npm run feature:pr/);
+  assert.match(claude, /npm run pr:merge/);
+  assert.match(claude, /feat.*user-visible capability/);
+  assert.match(claude, /every substantive final-diff area/);
+  assert.match(claude, /validation that actually ran/);
+  const template = fs.readFileSync(
+    path.join(cwd, '.github', 'pull_request_template.md'),
+    'utf8',
+  );
+  assert.match(template, /## Summary/);
+  assert.match(template, /## Validation/);
+  assert.match(template, /## Context/);
+  assert.match(template, /## Compatibility and risk/);
+  assert.match(template, /## Security/);
+  assert.match(template, /## Non-goals/);
   assert.match(
     fs.readFileSync(path.join(cwd, '.env.local'), 'utf8'),
     /DIFFWRIGHT_PROVIDER="ollama"/,
   );
+  assert.deepEqual(
+    JSON.parse(fs.readFileSync(path.join(cwd, '.diffwrightrc.json'), 'utf8')),
+    {
+      $schema:
+        'https://raw.githubusercontent.com/AndrewUlloa/diffwright/main/documentation/diffwrightrc.schema.json',
+      version: 2,
+      title: { scopeMode: 'optional' },
+      pullRequest: { issueContext: 'recommended', template: 'create' },
+      merge: { strategy: 'squash', deleteBranch: false },
+    },
+  );
   assert.deepEqual(doctorCalls, [[]]);
   assert.match(output.join('\n'), /Setup complete/);
+});
+
+test('headless policy flags migrate v1 without losing custom editorial settings', async (context) => {
+  const cwd = fixture(context, {
+    name: 'diffwright',
+    version: '1.2.3',
+    bin: { diffwright: 'bin/diffwright.js' },
+    scripts: {},
+  });
+  fs.mkdirSync(path.join(cwd, 'bin'));
+  fs.writeFileSync(path.join(cwd, 'bin', 'diffwright.js'), '#!/usr/bin/env node\n');
+  fs.writeFileSync(path.join(cwd, '.gitignore'), '.env.local\n');
+  fs.writeFileSync(
+    path.join(cwd, '.diffwrightrc.json'),
+    `${JSON.stringify({
+      version: 1,
+      title: { additionalTypes: ['security'] },
+      editorial: { maxSentenceWords: 20 },
+    }, null, 2)}\n`,
+  );
+
+  await init.runInit(
+    [
+      '--yes',
+      '--provider',
+      'ollama',
+      '--model',
+      'llama3.2',
+      '--scope-mode',
+      'optional',
+      '--scope',
+      'cli',
+      '--scope',
+      'release',
+      '--issue-context',
+      'required',
+      '--merge-strategy',
+      'squash',
+      '--delete-branch',
+      '--pr-template',
+      'preserve',
+    ],
+    {
+      cwd,
+      inputIsTTY: false,
+      outputIsTTY: false,
+      env: {},
+      runner: gitRunner({ cwd }),
+      runningPackageRoot: cwd,
+      runningVersion: '1.2.3',
+      runDoctor: async () => undefined,
+      log: () => undefined,
+      warn: () => undefined,
+    },
+  );
+
+  const policy = JSON.parse(
+    fs.readFileSync(path.join(cwd, '.diffwrightrc.json'), 'utf8'),
+  );
+  assert.equal(policy.version, 2);
+  assert.deepEqual(policy.title.additionalTypes, ['security']);
+  assert.deepEqual(policy.title.allowedScopes, ['cli', 'release']);
+  assert.equal(policy.editorial.maxSentenceWords, 20);
+  assert.deepEqual(policy.pullRequest, {
+    issueContext: 'required',
+    template: 'preserve',
+  });
+  assert.deepEqual(policy.merge, {
+    strategy: 'squash',
+    deleteBranch: true,
+  });
 });
 
 test('--dry-run renders a redacted external install plan and writes nothing', async (context) => {
@@ -287,6 +388,7 @@ test('--dry-run renders a redacted external install plan and writes nothing', as
   );
 
   assert.equal(fs.readFileSync(path.join(cwd, 'package.json'), 'utf8'), original);
+  assert.equal(fs.existsSync(path.join(cwd, '.diffwrightrc.json')), false);
   assert.equal(fs.existsSync(path.join(cwd, '.env.local')), false);
   assert.equal(fs.existsSync(path.join(cwd, 'AGENTS.md')), false);
   assert.equal(spawnCount, 0);
@@ -705,8 +807,8 @@ test('declining the interactive preview leaves the project byte-identical', asyn
   fs.writeFileSync(path.join(cwd, 'bin', 'diffwright.js'), '#!/usr/bin/env node\n');
   const prompter = new FakePrompter(
     ['llama3.2', 'main'],
-    ['ollama', 'none'],
-    [true, false],
+    ['ollama', 'none', 'any', 'recommended', 'squash', 'create'],
+    [true, false, false],
   );
 
   await init.runInit([], {
@@ -741,8 +843,8 @@ test('interactive credential setup writes mode 0600 and never includes the key i
   const secret = 'not-visible-in-preview-or-errors';
   const prompter = new FakePrompter(
     ['openai/test-model', 'main'],
-    ['groq', 'file', 'both'],
-    [true, true, false],
+    ['groq', 'file', 'both', 'any', 'recommended', 'squash', 'create'],
+    [true, false, true, false],
     [secret],
   );
   const output: string[] = [];
@@ -777,6 +879,198 @@ test('interactive credential setup writes mode 0600 and never includes the key i
   );
   assert.doesNotMatch(output.join('\n'), new RegExp(secret));
   assert.equal(doctorCount, 1);
+});
+
+test('interactive setup confirms detected scopes and workflow preferences', async (context) => {
+  const cwd = fixture(context, {
+    name: 'diffwright',
+    version: '1.2.3',
+    bin: { diffwright: 'bin/diffwright.js' },
+    scripts: {},
+  });
+  fs.mkdirSync(path.join(cwd, 'bin'));
+  fs.writeFileSync(path.join(cwd, 'bin', 'diffwright.js'), '#!/usr/bin/env node\n');
+  fs.mkdirSync(path.join(cwd, 'src', 'parser'), { recursive: true });
+  fs.writeFileSync(path.join(cwd, '.gitignore'), '.env.local\n');
+  const prompter = new FakePrompter(
+    ['llama3.2', 'main', 'parser, cli'],
+    ['ollama', 'none', 'confirmed', 'required', 'squash', 'preserve'],
+    [true, true, false],
+  );
+
+  await init.runInit([], {
+    cwd,
+    inputIsTTY: true,
+    outputIsTTY: true,
+    env: {},
+    runner: gitRunner({ cwd }),
+    prompter,
+    runningPackageRoot: cwd,
+    runningVersion: '1.2.3',
+    runDoctor: async () => undefined,
+    log: () => undefined,
+    warn: () => undefined,
+  });
+
+  const policy = JSON.parse(
+    fs.readFileSync(path.join(cwd, '.diffwrightrc.json'), 'utf8'),
+  );
+  assert.deepEqual(policy.title.allowedScopes, ['parser', 'cli']);
+  assert.deepEqual(policy.pullRequest, {
+    issueContext: 'required',
+    template: 'preserve',
+  });
+  assert.deepEqual(policy.merge, {
+    strategy: 'squash',
+    deleteBranch: true,
+  });
+  assert.equal(prompter.inputDefaults[2], 'parser');
+});
+
+test('interactive setup refuses to overwrite repository policy changed after preview', async (context) => {
+  const cwd = fixture(context, {
+    name: 'diffwright',
+    version: '1.2.3',
+    bin: { diffwright: 'bin/diffwright.js' },
+    scripts: {},
+  });
+  fs.mkdirSync(path.join(cwd, 'bin'));
+  fs.writeFileSync(path.join(cwd, 'bin', 'diffwright.js'), '#!/usr/bin/env node\n');
+  fs.writeFileSync(path.join(cwd, '.gitignore'), '.env.local\n');
+  const externalPolicy = `${JSON.stringify({
+    version: 2,
+    title: {
+      scopeMode: 'optional',
+      allowedScopes: ['external'],
+    },
+    pullRequest: {
+      issueContext: 'optional',
+      template: 'preserve',
+    },
+    merge: {
+      strategy: 'platform',
+      deleteBranch: false,
+    },
+  }, null, 2)}\n`;
+  const prompter = new FakePrompter(
+    ['llama3.2', 'main'],
+    ['ollama', 'none', 'any', 'recommended', 'squash', 'create'],
+    [false, true],
+    [],
+    (message) => {
+      if (message === 'Apply this setup?') {
+        fs.writeFileSync(path.join(cwd, '.diffwrightrc.json'), externalPolicy);
+      }
+    },
+  );
+
+  await assert.rejects(
+    init.runInit([], {
+      cwd,
+      inputIsTTY: true,
+      outputIsTTY: true,
+      env: {},
+      runner: gitRunner({ cwd }),
+      prompter,
+      runningPackageRoot: cwd,
+      runningVersion: '1.2.3',
+      runDoctor: async () => undefined,
+      log: () => undefined,
+      warn: () => undefined,
+    }),
+    /setup target changed since it was planned/i,
+  );
+
+  assert.equal(
+    fs.readFileSync(path.join(cwd, '.diffwrightrc.json'), 'utf8'),
+    externalPolicy,
+  );
+});
+
+test('setup preserves an existing user pull-request template', async (context) => {
+  const cwd = fixture(context, {
+    name: 'diffwright',
+    version: '1.2.3',
+    bin: { diffwright: 'bin/diffwright.js' },
+    scripts: {},
+  });
+  fs.mkdirSync(path.join(cwd, 'bin'));
+  fs.mkdirSync(path.join(cwd, '.github'));
+  fs.writeFileSync(path.join(cwd, 'bin', 'diffwright.js'), '#!/usr/bin/env node\n');
+  fs.writeFileSync(path.join(cwd, '.gitignore'), '.env.local\n');
+  const templatePath = path.join(cwd, '.github', 'pull_request_template.md');
+  const customTemplate = '# Team review\n\nKeep this exact prose.\n';
+  fs.writeFileSync(templatePath, customTemplate);
+
+  await init.runInit(
+    ['--yes', '--provider', 'ollama', '--model', 'llama3.2'],
+    {
+      cwd,
+      inputIsTTY: false,
+      outputIsTTY: false,
+      env: {},
+      runner: gitRunner({ cwd }),
+      runningPackageRoot: cwd,
+      runningVersion: '1.2.3',
+      runDoctor: async () => undefined,
+      log: () => undefined,
+      warn: () => undefined,
+    },
+  );
+
+  assert.equal(fs.readFileSync(templatePath, 'utf8'), customTemplate);
+});
+
+test('setup refuses a pull-request template created after preview', async (context) => {
+  const cwd = fixture(context, {
+    name: 'diffwright',
+    version: '1.2.3',
+    bin: { diffwright: 'bin/diffwright.js' },
+    scripts: {},
+  });
+  fs.mkdirSync(path.join(cwd, 'bin'));
+  fs.writeFileSync(path.join(cwd, 'bin', 'diffwright.js'), '#!/usr/bin/env node\n');
+  fs.writeFileSync(path.join(cwd, '.gitignore'), '.env.local\n');
+  const customTemplate = '# Concurrent team template\n';
+  const prompter = new FakePrompter(
+    ['llama3.2', 'main'],
+    ['ollama', 'none', 'any', 'recommended', 'squash', 'create'],
+    [false, true],
+    [],
+    (message) => {
+      if (message === 'Apply this setup?') {
+        fs.mkdirSync(path.join(cwd, '.github'));
+        fs.writeFileSync(
+          path.join(cwd, '.github', 'pull_request_template.md'),
+          customTemplate,
+        );
+      }
+    },
+  );
+
+  await assert.rejects(
+    init.runInit([], {
+      cwd,
+      inputIsTTY: true,
+      outputIsTTY: true,
+      env: {},
+      runner: gitRunner({ cwd }),
+      prompter,
+      runningPackageRoot: cwd,
+      runningVersion: '1.2.3',
+      runDoctor: async () => undefined,
+      log: () => undefined,
+      warn: () => undefined,
+    }),
+    /template state changed after preview/i,
+  );
+  assert.equal(
+    fs.readFileSync(
+      path.join(cwd, '.github', 'pull_request_template.md'),
+      'utf8',
+    ),
+    customTemplate,
+  );
 });
 
 test('headless setup preserves a valid legacy Groq model override', async (context) => {
@@ -815,8 +1109,8 @@ test('switching providers does not reuse the previous provider model', async (co
   fs.writeFileSync(path.join(cwd, 'bin', 'diffwright.js'), '#!/usr/bin/env node\n');
   const prompter = new FakePrompter(
     ['openai/new-model', 'main'],
-    ['openai', 'later', 'none'],
-    [false],
+    ['openai', 'later', 'none', 'any', 'recommended', 'squash', 'create'],
+    [false, false],
   );
 
   await init.runInit([], {
@@ -853,8 +1147,8 @@ test('an agent-file edit after preview is preserved instead of overwritten', asy
   const claudePath = path.join(cwd, 'CLAUDE.md');
   const prompter = new FakePrompter(
     ['llama3.2', 'main'],
-    ['ollama', 'claude'],
-    [true, false],
+    ['ollama', 'claude', 'any', 'recommended', 'squash', 'create'],
+    [false, true, false],
     [],
     (message) => {
       if (message === 'Apply this setup?') {
@@ -960,8 +1254,8 @@ test('a no-Git wildcard negation added after preview cannot expose .env.local', 
   fs.writeFileSync(ignorePath, '.env.local\n');
   const prompter = new FakePrompter(
     ['llama3.2', 'main'],
-    ['ollama', 'none'],
-    [true, false],
+    ['ollama', 'none', 'any', 'recommended', 'squash', 'create'],
+    [false, true, false],
     [],
     (message) => {
       if (message === 'Apply this setup?') {
@@ -1046,8 +1340,8 @@ test('configure later applies nonsecret setup but reports that setup is incomple
   fs.writeFileSync(path.join(cwd, 'bin', 'diffwright.js'), '#!/usr/bin/env node\n');
   const prompter = new FakePrompter(
     ['openai/test-model', 'main'],
-    ['openai', 'later', 'none'],
-    [true],
+    ['openai', 'later', 'none', 'any', 'recommended', 'squash', 'create'],
+    [false, true],
   );
   const output: string[] = [];
 
@@ -1116,8 +1410,8 @@ test('--live stays interactive and reports a post-offline live failure distinctl
   fs.writeFileSync(path.join(cwd, 'bin', 'diffwright.js'), '#!/usr/bin/env node\n');
   const prompter = new FakePrompter(
     ['llama3.2', 'main'],
-    ['ollama', 'none'],
-    [true],
+    ['ollama', 'none', 'any', 'recommended', 'squash', 'create'],
+    [false, true],
   );
   const doctorCalls: string[][] = [];
 
@@ -1156,8 +1450,8 @@ test('offline and live doctor reuse the exact provider destination that received
   fs.writeFileSync(path.join(cwd, '.gitignore'), '.env.local\n');
   const prompter = new FakePrompter(
     ['custom/model', 'https://api.example.com/v1', 'main'],
-    ['custom', 'file', 'none'],
-    [true, true],
+    ['custom', 'file', 'none', 'any', 'recommended', 'squash', 'create'],
+    [false, true, true],
     ['custom-provider-secret'],
   );
   const resolvedCalls: Array<{
@@ -1230,7 +1524,14 @@ test('a second identical setup run preserves content and mtimes', async (context
   ];
 
   await init.runInit(argv, dependencies);
-  const targets = ['package.json', '.gitignore', '.env.local', 'CLAUDE.md']
+  const targets = [
+    'package.json',
+    '.gitignore',
+    '.env.local',
+    '.diffwrightrc.json',
+    path.join('.github', 'pull_request_template.md'),
+    'CLAUDE.md',
+  ]
     .map((name) => path.join(cwd, name));
   const first = targets.map((filename) => ({
     contents: fs.readFileSync(filename, 'utf8'),

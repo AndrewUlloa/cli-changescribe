@@ -48,6 +48,17 @@ interface VerificationReceipt {
   exitCode: number | null;
   durationMs: number;
   source: 'diffwright' | 'external';
+  result?: {
+    type: 'test-summary';
+    tests: number;
+    passed: number;
+    failed: number;
+    skipped: number;
+    cancelled: number;
+    todo: number;
+  };
+  limitation?: 'output-unrecognized';
+  skipReason?: 'not-configured' | 'user-requested';
 }
 
 interface EvidenceBundleInput {
@@ -74,10 +85,13 @@ interface DraftClaim {
   id: string;
   kind:
     | 'change'
+    | 'problem'
     | 'rationale'
     | 'verification'
+    | 'compatibility'
     | 'risk'
     | 'review-focus'
+    | 'non-goal'
     | 'follow-up';
   text: string;
   evidenceIds: readonly string[];
@@ -232,6 +246,70 @@ test('rejects duplicate identifiers, inconsistent coverage, and invalid receipts
   );
 });
 
+test('validates structured receipt results, limitations, and skip reasons', () => {
+  const recognized = baseInput();
+  recognized.receipts[0].result = {
+    type: 'test-summary',
+    tests: 3,
+    passed: 2,
+    failed: 0,
+    skipped: 1,
+    cancelled: 0,
+    todo: 0,
+  };
+  assert.doesNotThrow(() => createEvidenceBundle(recognized));
+
+  const unrecognized = baseInput();
+  unrecognized.receipts[0].limitation = 'output-unrecognized';
+  assert.doesNotThrow(() => createEvidenceBundle(unrecognized));
+
+  const inconsistent = baseInput();
+  inconsistent.receipts[0].result = {
+    type: 'test-summary',
+    tests: 2,
+    passed: 1,
+    failed: 0,
+    skipped: 0,
+    cancelled: 0,
+    todo: 0,
+  };
+  assert.throws(
+    () => createEvidenceBundle(inconsistent),
+    /test summary is invalid/i,
+  );
+
+  const skipped = baseInput();
+  skipped.receipts[0] = {
+    ...skipped.receipts[0],
+    status: 'skipped',
+    exitCode: null,
+    durationMs: 0,
+    skipReason: 'user-requested',
+  };
+  assert.doesNotThrow(() => createEvidenceBundle(skipped));
+
+  const missingReason = baseInput();
+  missingReason.receipts[0] = {
+    ...missingReason.receipts[0],
+    status: 'skipped',
+    exitCode: null,
+    durationMs: 0,
+  };
+  assert.throws(
+    () => createEvidenceBundle(missingReason),
+    /requires a typed reason/i,
+  );
+
+  const rawOutput = baseInput();
+  Object.assign(rawOutput.receipts[0], {
+    rawOutput: 'raw-gate-output-sentinel',
+  });
+  assert.throws(
+    () => createEvidenceBundle(rawOutput),
+    /unsupported fields/i,
+  );
+});
+
 test('accepts every supported constraint value variant', () => {
   for (const value of [
     'main',
@@ -334,6 +412,64 @@ test('validates change, rationale, and verification claims by evidence kind', ()
       ]),
     /references unknown evidence id/,
   );
+});
+
+test('requires provided context for problem, compatibility, and non-goal claims', () => {
+  const input = baseInput();
+  input.items.push(
+    {
+      id: 'constraint-compatibility',
+      kind: 'constraint',
+      basis: 'provided',
+      source: { kind: 'context-file', locator: 'intent.txt' },
+      payload: { name: 'preserved-behavior', value: 'Existing callers remain valid.' },
+    },
+    {
+      id: 'constraint-non-goal',
+      kind: 'constraint',
+      basis: 'provided',
+      source: { kind: 'context-file', locator: 'intent.txt' },
+      payload: { name: 'non-goal', value: 'Do not redesign tokenization.' },
+    },
+  );
+  const bundle = createEvidenceBundle(input);
+  const claims: DraftClaim[] = [
+    {
+      id: 'claim-problem',
+      kind: 'problem',
+      text: 'Empty tokens currently throw.',
+      evidenceIds: ['intent-1'],
+      basis: 'provided',
+      significance: 'supporting',
+    },
+    {
+      id: 'claim-compatibility',
+      kind: 'compatibility',
+      text: 'Existing callers remain valid.',
+      evidenceIds: ['constraint-compatibility'],
+      basis: 'provided',
+      significance: 'supporting',
+    },
+    {
+      id: 'claim-non-goal',
+      kind: 'non-goal',
+      text: 'Do not redesign tokenization.',
+      evidenceIds: ['constraint-non-goal'],
+      basis: 'provided',
+      significance: 'supporting',
+    },
+  ];
+
+  assert.doesNotThrow(() => assertSupportedClaims(bundle, claims));
+  for (const claim of claims) {
+    assert.throws(
+      () =>
+        assertSupportedClaims(bundle, [
+          { ...claim, basis: 'observed', evidenceIds: ['change-1'] },
+        ]),
+      /requires provided intent|requires provided intent or/i,
+    );
+  }
 });
 
 test('fails universal and identifier claims that exceed their cited evidence', () => {

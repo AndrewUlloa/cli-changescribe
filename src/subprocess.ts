@@ -9,13 +9,16 @@ import { sanitizeChildEnvironment } from './runtime-config';
 export interface CommandOptions {
   readonly cwd?: string;
   readonly encoding?: 'utf8';
+  readonly input?: string;
   readonly maxBuffer?: number;
   readonly stdio?: StdioOptions;
+  readonly timeout?: number;
 }
 
 export interface SpawnOptions {
   readonly cwd?: string;
   readonly encoding?: 'utf8';
+  readonly maxBuffer?: number;
   readonly stdio?: StdioOptions;
 }
 

@@ -24,11 +24,35 @@ export interface RepositoryTitlePolicy {
   readonly maximumLength: number;
 }
 
-export interface RepositoryPolicy {
+export interface RepositoryPolicyV1 {
   readonly version: 1;
   readonly title: Readonly<RepositoryTitlePolicy>;
   readonly editorial: Readonly<EditorialPolicy>;
 }
+
+export type IssueContextExpectation = 'optional' | 'recommended' | 'required';
+export type PullRequestTemplatePreference = 'create' | 'preserve';
+export type MergeStrategy = 'squash' | 'platform';
+
+export interface RepositoryPullRequestPolicy {
+  readonly issueContext: IssueContextExpectation;
+  readonly template: PullRequestTemplatePreference;
+}
+
+export interface RepositoryMergePolicy {
+  readonly strategy: MergeStrategy;
+  readonly deleteBranch: boolean;
+}
+
+export interface RepositoryPolicyV2 {
+  readonly version: 2;
+  readonly title: Readonly<RepositoryTitlePolicy>;
+  readonly editorial: Readonly<EditorialPolicy>;
+  readonly pullRequest: Readonly<RepositoryPullRequestPolicy>;
+  readonly merge: Readonly<RepositoryMergePolicy>;
+}
+
+export type RepositoryPolicy = RepositoryPolicyV1 | RepositoryPolicyV2;
 
 export interface RepositoryPolicySource {
   readonly kind: 'defaults' | 'repository';
@@ -87,11 +111,23 @@ const DEFAULT_TITLE_POLICY: Readonly<RepositoryTitlePolicy> = Object.freeze({
   maximumLength: 72,
 });
 
-export const DEFAULT_REPOSITORY_POLICY: Readonly<RepositoryPolicy> =
+export const DEFAULT_REPOSITORY_POLICY: Readonly<RepositoryPolicyV1> =
   Object.freeze({
     version: 1,
     title: DEFAULT_TITLE_POLICY,
     editorial: DEFAULT_EDITORIAL_POLICY,
+  });
+
+export const DEFAULT_PULL_REQUEST_POLICY: Readonly<RepositoryPullRequestPolicy> =
+  Object.freeze({
+    issueContext: 'recommended',
+    template: 'create',
+  });
+
+export const DEFAULT_MERGE_POLICY: Readonly<RepositoryMergePolicy> =
+  Object.freeze({
+    strategy: 'squash',
+    deleteBranch: false,
   });
 
 const DEFAULT_DIGEST = digest(
@@ -323,12 +359,27 @@ export function loadRepositoryPolicy(
   ) {
     throw new Error('Repository policy must contain valid UTF-8 JSON.');
   }
-  const parsed = new StrictJsonParser(contents).parse();
-  const policy = resolvePolicy(parsed);
+  const policy = parseRepositoryPolicyContents(contents);
   return freezeLoadedPolicy(
     policy,
     source('repository', revisionSha, digest(contents)),
   );
+}
+
+export function parseRepositoryPolicyContents(
+  contents: string,
+): Readonly<RepositoryPolicy> {
+  const size = Buffer.byteLength(contents, 'utf8');
+  if (
+    size <= 0 ||
+    size > MAX_CONFIG_BYTES ||
+    contents.startsWith('\ufeff') ||
+    contents.includes('\ufffd') ||
+    Buffer.from(contents, 'utf8').toString('utf8') !== contents
+  ) {
+    throw new Error('Repository policy must contain valid bounded UTF-8 JSON.');
+  }
+  return resolvePolicy(new StrictJsonParser(contents).parse());
 }
 
 export function protectRepositoryPolicyEvidence<T extends EvidenceBundle>(
@@ -372,21 +423,73 @@ export function protectRepositoryPolicyEvidence<T extends EvidenceBundle>(
 
 function resolvePolicy(value: unknown): Readonly<RepositoryPolicy> {
   const root = record(value, 'root');
+  if (root.$schema !== undefined) {
+    boundedString(root.$schema, '$schema', 2_048);
+  }
+  if (root.version === 1) {
+    exactKeys(root, [
+      '$schema',
+      'version',
+      'title',
+      'editorial',
+    ]);
+    const title = resolveTitlePolicy(root.title);
+    const editorial = resolveEditorialPolicy(root.editorial);
+    return deepFreeze({ version: 1, title, editorial });
+  }
+  if (root.version !== 2) {
+    throw new Error('Repository policy version must be 1 or 2.');
+  }
   exactKeys(root, [
     '$schema',
     'version',
     'title',
     'editorial',
+    'pullRequest',
+    'merge',
   ]);
-  if (root.version !== 1) {
-    throw new Error('Repository policy version must be 1.');
-  }
-  if (root.$schema !== undefined) {
-    boundedString(root.$schema, '$schema', 2_048);
-  }
   const title = resolveTitlePolicy(root.title);
   const editorial = resolveEditorialPolicy(root.editorial);
-  return deepFreeze({ version: 1, title, editorial });
+  const pullRequest = resolvePullRequestPolicy(root.pullRequest);
+  const merge = resolveMergePolicy(root.merge);
+  return deepFreeze({ version: 2, title, editorial, pullRequest, merge });
+}
+
+function resolvePullRequestPolicy(
+  value: unknown,
+): Readonly<RepositoryPullRequestPolicy> {
+  if (value === undefined) {
+    return DEFAULT_PULL_REQUEST_POLICY;
+  }
+  const pullRequest = record(value, 'pullRequest');
+  exactKeys(pullRequest, ['issueContext', 'template']);
+  const issueContext = pullRequest.issueContext === undefined
+    ? DEFAULT_PULL_REQUEST_POLICY.issueContext
+    : issueContextExpectation(pullRequest.issueContext);
+  const template = pullRequest.template === undefined
+    ? DEFAULT_PULL_REQUEST_POLICY.template
+    : pullRequestTemplatePreference(pullRequest.template);
+  return deepFreeze({ issueContext, template });
+}
+
+function resolveMergePolicy(value: unknown): Readonly<RepositoryMergePolicy> {
+  if (value === undefined) {
+    return DEFAULT_MERGE_POLICY;
+  }
+  const merge = record(value, 'merge');
+  exactKeys(merge, ['strategy', 'deleteBranch']);
+  const strategy = merge.strategy === undefined
+    ? DEFAULT_MERGE_POLICY.strategy
+    : mergeStrategy(merge.strategy);
+  const deleteBranch = merge.deleteBranch === undefined
+    ? DEFAULT_MERGE_POLICY.deleteBranch
+    : booleanValue(merge.deleteBranch, 'merge.deleteBranch');
+  if (strategy === 'platform' && deleteBranch) {
+    throw new Error(
+      'Repository policy cannot delete branches with platform-managed merges.',
+    );
+  }
+  return deepFreeze({ strategy, deleteBranch });
 }
 
 function resolveTitlePolicy(value: unknown): RepositoryTitlePolicy {
@@ -628,6 +731,36 @@ function boundedInteger(
 function scopeModeValue(value: unknown): ScopeMode {
   if (value !== 'optional' && value !== 'forbidden') {
     throw new Error('Repository policy scopeMode is invalid.');
+  }
+  return value;
+}
+
+function issueContextExpectation(value: unknown): IssueContextExpectation {
+  if (value !== 'optional' && value !== 'recommended' && value !== 'required') {
+    throw new Error('Repository policy pullRequest.issueContext is invalid.');
+  }
+  return value;
+}
+
+function pullRequestTemplatePreference(
+  value: unknown,
+): PullRequestTemplatePreference {
+  if (value !== 'create' && value !== 'preserve') {
+    throw new Error('Repository policy pullRequest.template is invalid.');
+  }
+  return value;
+}
+
+function mergeStrategy(value: unknown): MergeStrategy {
+  if (value !== 'squash' && value !== 'platform') {
+    throw new Error('Repository policy merge.strategy is invalid.');
+  }
+  return value;
+}
+
+function booleanValue(value: unknown, label: string): boolean {
+  if (typeof value !== 'boolean') {
+    throw new Error(`Repository policy ${label} must be a boolean.`);
   }
   return value;
 }

@@ -81,6 +81,13 @@ exact model, credential source, feature-branch base, existing lint/typecheck/tes
 build gates, and optional Claude Code or Codex guardrails. It detects npm, pnpm,
 Yarn, or Bun and whether the repository uses a `staging` branch.
 
+The wizard also configures repository policy: confirmed optional scopes,
+linked-issue expectations, guarded squash versus platform-managed merging,
+post-squash branch deletion, and whether a reviewer-oriented PR template should
+be created when none exists. Scope suggestions come only from bounded workspace
+or component names and existing scoped history, and remain suggestions until
+you confirm them. Headless `--yes` never invents an allowlist.
+
 Before changing anything, the wizard shows one redacted preview and asks for
 confirmation. It never prints a credential. Declining or pressing Ctrl-C before
 confirmation exits without writes or provider calls.
@@ -91,9 +98,14 @@ install lifecycle scripts are disabled. In Diffwright's own validated checkout,
 the self-hosted workflow does not create a self-dependency: generated scripts
 build and invoke `node ./bin/diffwright.js` directly.
 
-The wizard can add branch-aware, gate-aware package scripts and one managed block
-to selected `CLAUDE.md` and/or `AGENTS.md` files. Text outside those marked
-blocks and custom package scripts are preserved.
+The wizard can add branch-aware, gate-aware package scripts, a `pr:merge`
+script for guarded squash policy, and one managed block to selected `CLAUDE.md`
+and/or `AGENTS.md` files. The managed guidance covers semantic Conventional
+Commit types, confirmed scopes, context, substantive PR coverage, exact
+validation, and the approved merge path. When requested, init also creates a
+reviewer-oriented `.github/pull_request_template.md` only if the repository has
+no user template; reruns update only Diffwright's own marked block. Text outside
+those marked blocks and custom package scripts are preserved.
 
 ### 2. Configure your provider
 
@@ -191,9 +203,9 @@ PR-ready output:
 
 - Add a supported `Closes #123` directive to the final body.
 
-## Verification
+## Validation
 
-- Passed: `npm test`
+- Passed: `npm test` in 2.14 s — 327/327 tests passed
 
 ## Review focus
 
@@ -226,12 +238,18 @@ Closes #123
 | `diffwright commit --dry-run` | Generate from the staged diff and print a candidate; no index mutation, commit, or push. |
 | `diffwright commit --all --dry-run` | Explicitly stage all changes, then generate and print a candidate. |
 | `diffwright commit --context-file <path>` | Add bounded source-agnostic intent from a regular project file. |
+| `diffwright commit --timings` | Print local phase durations after success or failure. |
 | `diffwright commit` | Generate from the staged diff, commit it, and push the current branch. |
 | `diffwright commit --all` | Explicitly stage all changes, then generate, commit, and push. |
 | `diffwright pr --dry-run` | Fetch when possible, resolve the commit range, and print the plan; no provider call or output write. |
 | `diffwright pr` | Generate detailed and PR-ready summaries. |
 | `diffwright pr --create-pr` | Run project gates, then create or update the GitHub PR with `gh`. |
 | `diffwright pr --create-pr --yes` | Explicitly approve validated GitHub mutation in noninteractive automation. |
+| `diffwright pr --timings` | Print local phase durations after success or failure. |
+| `diffwright merge --dry-run` | Validate and preview the current PR's pinned squash merge; no mutation. |
+| `diffwright merge` | Validate twice, confirm interactively, and squash-merge the exact reviewed PR head. |
+| `diffwright merge --yes` | Explicitly approve the same pinned squash merge in noninteractive automation. |
+| `diffwright title-check --event-file "$GITHUB_EVENT_PATH"` | Validate a PR-event title against the policy pinned to its base revision. |
 | `diffwright init` | Guide an interactive TTY through project setup; preserve legacy script-only behavior in a no-argument non-TTY. |
 | `diffwright --version` | Print the exact installed Diffwright version. |
 
@@ -245,24 +263,39 @@ documents every flag, default, alias, side effect, and exit behavior.
 |---|---:|---|---|
 | `doctor` | 0 | none | none |
 | `doctor --live` | 1 | none | calls the resolved endpoint |
-| `commit --dry-run` | 2 normally; 3 when the draft needs one repair | reads the staged diff only | no commit or push |
-| `commit --all --dry-run` | 2 normally; 3 when the draft needs one repair | explicitly stages all changes | no commit or push |
-| `commit` | 2 normally; 3 when the draft needs one repair | reads the staged diff and creates an exact snapshot-bound commit | pushes the verified commit SHA |
-| `commit --all` | 2 normally; 3 when the draft needs one repair | explicitly stages all changes and creates an exact snapshot-bound commit | pushes the verified commit SHA |
+| `commit --dry-run` | 2 normally; up to 5 across bounded draft and primary-claim repairs | reads the staged diff only | no commit or push |
+| `commit --all --dry-run` | 2 normally; up to 5 across bounded draft and primary-claim repairs | explicitly stages all changes | no commit or push |
+| `commit` | 2 normally; up to 5 across bounded draft and primary-claim repairs | reads the staged diff and creates an exact snapshot-bound commit | pushes the verified commit SHA |
+| `commit --all` | 2 normally; up to 5 across bounded draft and primary-claim repairs | explicitly stages all changes and creates an exact snapshot-bound commit | pushes the verified commit SHA |
 | `pr --dry-run` | 0 | no summary files | attempts an explicit base-ref fetch; falls back to local refs |
-| `pr` | 2 normally; 3 when the draft needs one repair | overwrites the requested file, a sibling `.final.md`, and a temporary backup | attempts to fetch the base |
+| `pr` | 2 normally; up to 5 across bounded draft and primary-claim repairs | overwrites the requested file, a sibling `.final.md`, and a temporary backup | attempts to fetch the base |
 | `pr --create-pr` | Same structured generation | may run format, always runs the detected package manager's test/build scripts (`npm test` and `npm run build` for npm), then reviews and writes the exact final artifact | pushes the reviewed SHA when creating; an update requires the remote PR head to already equal it |
+| `merge --dry-run` | 0 | none | reads the exact live PR, checks, reviews, title policy, and remote revisions; no merge |
+| `merge` | 0 | none | after confirmation and a second full validation, requests one pinned squash merge, confirms its postcondition, and optionally deletes the unchanged reviewed branch |
+| `title-check` | 0 | none | reads one bounded event file and the base revision's local policy; no network or GitHub mutation |
 | `init --dry-run` | 0 | none | previews the redacted setup plan; no install or live request |
 | no-argument non-TTY `init` | 0 | edits `package.json` only when generic scripts are added or migrated | none |
-| guided or `--yes` `init` | 0 by default; 1 only with explicit live consent | may update `package.json`, a lockfile, `.gitignore`, `.env.local`, `CLAUDE.md`, and `AGENTS.md` after interactive confirmation or deterministic `--yes` planning | may install the exact local package; runs offline doctor; live doctor is separately explicit |
+| guided or `--yes` `init` | 0 by default; 1 only with explicit live consent | may update `package.json`, a lockfile, `.diffwrightrc.json`, `.github/pull_request_template.md`, `.gitignore`, `.env.local`, `CLAUDE.md`, and `AGENTS.md` after interactive confirmation or deterministic `--yes` planning | may install the exact local package; runs offline doctor; live doctor is separately explicit |
 
 Commit and PR synthesis send complete bounded evidence for a structured draft,
 then send the same original evidence and every renderable model-authored claim
 to a separate terminal critic call. The critic uses the same resolved provider
-and model as the draft, and it can only accept or reject; it cannot
-rewrite. One draft repair is possible when deterministic validation rejects the
-first response. Critic rejection is terminal. Oversized or incomplete evidence
-stops instead of being silently truncated.
+and model as the draft and cannot rewrite prose. Diffwright removes critic-
+rejected optional claims and trailers before rendering. If the primary claim is
+rejected, Diffwright requests one smaller replacement from the original evidence
+and audits it again; a second rejection is terminal. One separate draft repair
+is possible when deterministic validation rejects a provider response.
+Oversized or incomplete authoritative evidence stops instead of being silently
+truncated. For mixed large pull requests, the model view retains every safe-to-
+egress changed line from every substantive file, removes only unchanged diff
+context, and omits supporting-file patches. Repository-policy contents remain
+metadata-only and configured secret values remain redacted. The local
+deterministic Changes map still accounts for every supporting file and line
+total, and omitted or protected patches cannot support model-authored prose.
+
+`--timings` is opt-in for `commit` and `pr`. It prints fixed phase names and
+millisecond durations after success or failure. Reports stay local and contain
+no repository paths, evidence text, credentials, or telemetry.
 
 `--create-pr` uses the detected package manager. It runs
 `format` only when that script exists unless you skip it; test and build always
@@ -277,6 +310,32 @@ without arguments. A noninteractive `--create-pr` requires explicit `--yes`.
 Generated consumer scripts keep this review enabled by default; automation can
 append `-- --yes` deliberately.
 
+`merge` operates on exactly one open same-repository PR for the current branch.
+It requires GitHub CLI 2.50.0 or newer.
+It requires a clean working tree, matching local and remote head SHA, a canonical
+Conventional Commit PR title under the pinned base policy, a clean merge state,
+no unresolved review changes, and at least one reported check with every check
+passed or skipped. Repositories that require a merge queue are rejected rather
+than bypassed, including for privileged callers. After confirmation, it repeats
+the validation and calls GitHub's direct pull-request merge API with the numeric
+PR, repository, reviewed
+head SHA, validated title, and squash method. It never uses admin, auto-merge, rebase, merge-commit, or
+branch-deletion fallbacks. A platform-managed policy stops before mutation. If
+the pinned policy requests deletion, Diffwright rechecks the reviewed remote
+repository and deletes the explicit remote ref with an atomic lease on the
+reviewed head SHA, only after the exact squash commit is confirmed. If the
+branch moved or deletion is uncertain, the merge remains complete and the
+command says not to retry it.
+
+The separate `PR title` workflow runs on opened, edited, synchronized,
+reopened, and ready-for-review pull requests. It uses `pull_request_target`
+only to execute the exact trusted base revision with read-only permissions; it
+never checks out or runs pull-request code. The workflow passes only the fixed
+GitHub event-file path to `title-check`, which loads policy from the event's
+full base SHA. A feature branch therefore cannot replace the validator or
+loosen the policy that reviews its own PR, and editing the title retriggers the
+check. The workflow first becomes active after it lands on the default branch.
+
 ### Evidence contract
 
 - Commits use the pinned `HEAD` and Git index tree. Working-tree changes are
@@ -284,8 +343,9 @@ append `-- --yes` deliberately.
 - PRs use the final `merge-base...HEAD` net diff. Reverted intermediate work is
   absent; deletions, renames, type changes, binary metadata, and unusual
   filenames remain visible to the collector.
-- A changed test file is only a code change. Verification text comes only from
-  a captured command receipt with its exact status.
+- A changed test file is only a code change. Validation text comes only from
+  a captured command receipt with its exact status. Recognized TAP totals are
+  exact; unknown output formats are labeled unavailable.
 - The model returns claims and evidence IDs, not final Markdown. Diffwright
   validates the links, chooses supported claims, and renders locally.
 - Coverage limits fail closed. Diffwright does not silently slice a file or
@@ -295,15 +355,18 @@ append `-- --yes` deliberately.
   reviewed tree, parent, and message.
 
 This contract reduces unsupported prose; it does not prove that an arbitrary
-natural-language interpretation is true. The critic is a veto, not an oracle.
+natural-language interpretation is true. The critic can remove optional prose
+or require one newly audited primary replacement, but it is not an oracle.
 
 ### Repository policy
 
 An optional root `.diffwrightrc.json` can add accepted Conventional Commit
 types, forbid or allowlist scopes, set the advisory title target from 1 through
 72 characters, and configure advisory sentence, absolute-language,
-duplicate-claim, and terminology checks. The 72-character maximum and
-evidence/security boundaries cannot be loosened.
+duplicate-claim, and terminology checks. Version 2 also records bounded local
+workflow preferences for issue context, PR-template creation, squash versus
+platform-managed merging, and post-squash branch deletion. The 72-character
+maximum and evidence/security boundaries cannot be loosened.
 
 Additional types extend local validation and the interactive PR editing path.
 Automatic generation intentionally asks for the standard Conventional Commit
@@ -315,9 +378,16 @@ feature branch cannot weaken the rules that review it. Policy patch contents
 are replaced with bounded metadata before any provider request. Warnings never
 rewrite approved text.
 
+Existing version-1 files retain their exact resolved shape and behavior.
+Version 2 defaults to recommended issue context, creating a template only when
+none exists, squash merging, and preserving the feature branch. Platform-
+managed merging cannot request Diffwright branch deletion. Grounding, critic,
+coverage, redaction, freshness, and request ceilings are not configuration
+fields and cannot be disabled.
+
 See the shipped
 [JSON Schema](https://github.com/AndrewUlloa/diffwright/blob/main/documentation/diffwrightrc.schema.json)
-for the exact version-1 fields and bounds.
+for the exact version-1 and version-2 fields and bounds.
 
 The default PR output is `.pr-summaries/PR_SUMMARY.md`; the slim GitHub body is
 `.pr-summaries/PR_SUMMARY.final.md`. A separate temporary backup is also

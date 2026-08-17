@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "commitCases": [
     {
       "id": "simple-fix",
@@ -290,6 +290,130 @@
       "expected": {
         "accepted": false,
         "diagnostic": "universal-claim-with-incomplete-coverage"
+      }
+    }
+  ],
+  "prCases": [
+    {
+      "id": "reviewer-complete-pr-20",
+      "changes": [
+        { "id": "change-01", "path": "src/operation-timings.ts", "status": "added", "additions": 100, "deletions": 20 },
+        { "id": "change-02", "path": "src/cli.ts", "status": "modified", "additions": 50, "deletions": 10 },
+        { "id": "change-03", "path": "src/artifact-critic.ts", "status": "modified", "additions": 120, "deletions": 40 },
+        { "id": "change-04", "path": "src/pr-workflow.ts", "status": "modified", "additions": 160, "deletions": 50 },
+        { "id": "change-05", "path": "src/artifact-completeness.ts", "status": "added", "additions": 80, "deletions": 10 },
+        { "id": "change-06", "path": "src/change-map.ts", "status": "added", "additions": 90, "deletions": 20 },
+        { "id": "change-07", "path": "src/title-semantics.ts", "status": "added", "additions": 33, "deletions": 15 },
+        { "id": "change-08", "path": "README.md", "status": "modified", "additions": 20, "deletions": 8 },
+        { "id": "change-09", "path": "documentation/cli-reference.md", "status": "modified", "additions": 24, "deletions": 8 },
+        { "id": "change-10", "path": "specs/reviewer-complete-artifacts/PLAN.md", "status": "modified", "additions": 10, "deletions": 5 },
+        { "id": "change-11", "path": "test/operation-timings.test.ts", "status": "added", "additions": 50, "deletions": 3 },
+        { "id": "change-12", "path": "test/artifact-critic.test.ts", "status": "modified", "additions": 50, "deletions": 3 },
+        { "id": "change-13", "path": "test/workflow-byok.test.ts", "status": "modified", "additions": 80, "deletions": 6 },
+        { "id": "change-14", "path": "test/artifact-completeness.test.ts", "status": "added", "additions": 45, "deletions": 2 },
+        { "id": "change-15", "path": "test/change-map.test.ts", "status": "added", "additions": 50, "deletions": 3 },
+        { "id": "change-16", "path": "test/title-semantics.test.ts", "status": "added", "additions": 45, "deletions": 3 },
+        { "id": "change-17", "path": "test/merge.test.ts", "status": "added", "additions": 40, "deletions": 2 },
+        { "id": "change-18", "path": "test/title-check.test.ts", "status": "added", "additions": 35, "deletions": 2 },
+        { "id": "change-19", "path": "test/repository-policy.test.ts", "status": "modified", "additions": 35, "deletions": 3 },
+        { "id": "change-20", "path": "test/evaluation-corpus.test.ts", "status": "modified", "additions": 38, "deletions": 3 }
+      ],
+      "allowedScopes": ["cli", "commit", "evidence", "pr"],
+      "claims": [
+        { "domain": "timings", "evidenceIds": ["change-01", "change-02"] },
+        { "domain": "critic-pruning", "evidenceIds": ["change-03", "change-06"] },
+        { "domain": "grounded-primary-repair", "evidenceIds": ["change-04", "change-05", "change-07"] }
+      ],
+      "requestSequence": ["draft", "critic", "primary-replacement", "critic"],
+      "oracle": {
+        "changeMap": {
+          "documentation": { "files": 3, "additions": 54, "deletions": 21 },
+          "implementation": { "files": 7, "additions": 633, "deletions": 165 },
+          "tests": { "files": 10, "additions": 468, "deletions": 30 }
+        },
+        "requiredDomains": ["timings", "critic-pruning", "grounded-primary-repair"],
+        "allowedTypes": ["chore"],
+        "expectedScope": null,
+        "requestCeiling": 5
+      }
+    },
+    {
+      "id": "documentation-only-pr",
+      "changes": [
+        { "id": "change-01", "path": "README.md", "status": "modified", "additions": 8, "deletions": 2 },
+        { "id": "change-02", "path": "documentation/providers.md", "status": "modified", "additions": 4, "deletions": 1 }
+      ],
+      "allowedScopes": ["provider"],
+      "claims": [
+        { "domain": "documentation", "evidenceIds": ["change-01", "change-02"] }
+      ],
+      "requestSequence": ["draft", "critic"],
+      "oracle": {
+        "changeMap": {
+          "documentation": { "files": 2, "additions": 12, "deletions": 3 }
+        },
+        "requiredDomains": ["documentation"],
+        "allowedTypes": ["docs"],
+        "expectedScope": null,
+        "requestCeiling": 2
+      }
+    },
+    {
+      "id": "scoped-cli-feature-pr",
+      "changes": [
+        { "id": "change-01", "path": "src/cli.ts", "status": "modified", "additions": 18, "deletions": 2 }
+      ],
+      "intents": ["Add a user-visible --report flag."],
+      "allowedScopes": ["cli", "provider"],
+      "claims": [
+        { "domain": "cli-reporting", "evidenceIds": ["change-01"] }
+      ],
+      "requestSequence": ["draft", "critic"],
+      "oracle": {
+        "changeMap": {
+          "implementation": { "files": 1, "additions": 18, "deletions": 2 }
+        },
+        "requiredDomains": ["cli-reporting"],
+        "allowedTypes": ["feat"],
+        "expectedScope": "cli",
+        "requestCeiling": 2
+      }
+    }
+  ],
+  "initCases": [
+    {
+      "id": "headless-safe-defaults",
+      "preferences": {
+        "scopeMode": "optional",
+        "issueContext": "recommended",
+        "template": "create",
+        "mergeStrategy": "squash",
+        "deleteBranch": false
+      },
+      "oracle": {
+        "allowedScopes": null,
+        "issueContext": "recommended",
+        "template": "create",
+        "mergeStrategy": "squash",
+        "deleteBranch": false
+      }
+    },
+    {
+      "id": "confirmed-repository-workflow",
+      "preferences": {
+        "scopeMode": "optional",
+        "allowedScopes": ["cli", "pr"],
+        "issueContext": "required",
+        "template": "preserve",
+        "mergeStrategy": "squash",
+        "deleteBranch": true
+      },
+      "oracle": {
+        "allowedScopes": ["cli", "pr"],
+        "issueContext": "required",
+        "template": "preserve",
+        "mergeStrategy": "squash",
+        "deleteBranch": true
       }
     }
   ]

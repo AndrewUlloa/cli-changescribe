@@ -30,9 +30,58 @@ interface ArtifactDraftModule {
   parseArtifactDraft(input: string, evidence: unknown): unknown;
 }
 
+interface ChangeMapModule {
+  buildChangeMap(evidence: unknown): {
+    fileCount: number;
+    groups: readonly {
+      category: string;
+      fileCount: number;
+      additions: { value: number; complete: boolean };
+      deletions: { value: number; complete: boolean };
+    }[];
+  };
+}
+
+interface CompletenessModule {
+  evaluateArtifactCompleteness(
+    draft: { claims: readonly unknown[] },
+    evidence: unknown,
+  ): {
+    complete: boolean;
+    requiredEvidenceIds: readonly string[];
+    coveredEvidenceIds: readonly string[];
+  };
+}
+
+interface TitleSemanticsModule {
+  evaluateTitleSemantics(
+    evidence: unknown,
+    options?: { allowedScopes?: readonly string[] },
+  ): { allowedTypes: readonly string[]; scope?: string };
+}
+
+interface SetupFilesModule {
+  transformRepositoryPolicy(contents: string, preferences: {
+    scopeMode: 'optional' | 'forbidden';
+    allowedScopes?: readonly string[];
+    issueContext: 'optional' | 'recommended' | 'required';
+    template: 'create' | 'preserve';
+    mergeStrategy: 'squash' | 'platform';
+    deleteBranch: boolean;
+  }): { contents: string };
+}
+
 const renderer: RendererModule = require('../dist/artifact-renderer.js');
 const changeEvidence: ChangeEvidenceModule = require('../dist/change-evidence.js');
 const artifactDraft: ArtifactDraftModule = require('../dist/artifact-draft.js');
+const changeMap: ChangeMapModule = require('../dist/change-map.js');
+const completeness: CompletenessModule = require(
+  '../dist/artifact-completeness.js'
+);
+const titleSemantics: TitleSemanticsModule = require(
+  '../dist/title-semantics.js'
+);
+const setupFiles: SetupFilesModule = require('../dist/setup-files.js');
 
 interface CommitCase {
   id: string;
@@ -61,11 +110,54 @@ interface ClaimCase {
   };
 }
 
+interface PullRequestCase {
+  id: string;
+  changes: Array<{
+    id: string;
+    path: string;
+    status: 'added' | 'modified' | 'deleted' | 'renamed';
+    additions: number;
+    deletions: number;
+  }>;
+  intents?: string[];
+  allowedScopes?: string[];
+  claims: Array<{ domain: string; evidenceIds: string[] }>;
+  requestSequence: string[];
+  oracle: {
+    changeMap: Record<string, { files: number; additions: number; deletions: number }>;
+    requiredDomains: string[];
+    allowedTypes: string[];
+    expectedScope: string | null;
+    requestCeiling: number;
+  };
+}
+
+interface InitCase {
+  id: string;
+  preferences: {
+    scopeMode: 'optional' | 'forbidden';
+    allowedScopes?: string[];
+    issueContext: 'optional' | 'recommended' | 'required';
+    template: 'create' | 'preserve';
+    mergeStrategy: 'squash' | 'platform';
+    deleteBranch: boolean;
+  };
+  oracle: {
+    allowedScopes: string[] | null;
+    issueContext: string;
+    template: string;
+    mergeStrategy: string;
+    deleteBranch: boolean;
+  };
+}
+
 interface EvidenceCorpus {
   schemaVersion: number;
   commitCases: CommitCase[];
   repositoryCases: RepositoryCase[];
   claimCases: ClaimCase[];
+  prCases: PullRequestCase[];
+  initCases: InitCase[];
 }
 
 const repoRoot = path.resolve(__dirname, '..');
@@ -82,15 +174,19 @@ function loadCorpus(): EvidenceCorpus {
 
 test('evidence corpus has a stable schema and unique case identifiers', () => {
   const corpus = loadCorpus();
-  assert.equal(corpus.schemaVersion, 1);
+  assert.equal(corpus.schemaVersion, 2);
   assert.ok(corpus.commitCases.length >= 5);
   assert.ok(corpus.repositoryCases.length >= 5);
   assert.ok(corpus.claimCases.length >= 5);
+  assert.ok(corpus.prCases.length >= 3);
+  assert.ok(corpus.initCases.length >= 2);
 
   const allIds = [
     ...corpus.commitCases.map((fixture) => fixture.id),
     ...corpus.repositoryCases.map((fixture) => fixture.id),
     ...corpus.claimCases.map((fixture) => fixture.id),
+    ...corpus.prCases.map((fixture) => fixture.id),
+    ...corpus.initCases.map((fixture) => fixture.id),
   ];
   assert.equal(new Set(allIds).size, allIds.length);
 
@@ -106,6 +202,130 @@ test('evidence corpus has a stable schema and unique case identifiers', () => {
     if (!fixture.expected.accepted) {
       assert.ok(fixture.expected.diagnostic);
     }
+  }
+});
+
+test('PR corpus executes change maps, substantive coverage, domains, and title semantics', () => {
+  const corpus = loadCorpus();
+  for (const fixture of corpus.prCases) {
+    const evidence = changeEvidence.createEvidenceBundle({
+      snapshot: {
+        headSha: '3'.repeat(40),
+        baseSha: '1'.repeat(40),
+        mergeBaseSha: '2'.repeat(40),
+      },
+      items: [
+        ...fixture.changes.map((change) => ({
+          id: change.id,
+          kind: 'change',
+          basis: 'observed',
+          source: { kind: 'git-diff', locator: change.path },
+          payload: {
+            ...change,
+            binary: false,
+            patch: `+fixture ${change.id}`,
+          },
+        })),
+        ...(fixture.intents ?? []).map((text, index) => ({
+          id: `intent-${String(index + 1)}`,
+          kind: 'intent',
+          basis: 'provided',
+          source: { kind: 'context-file', locator: 'intent.md' },
+          payload: { text },
+        })),
+      ],
+      receipts: [],
+      coverage: { complete: true, gaps: [] },
+    });
+    const map = changeMap.buildChangeMap(evidence);
+    assert.equal(map.fileCount, fixture.changes.length, fixture.id);
+    for (const [category, expected] of Object.entries(fixture.oracle.changeMap)) {
+      const group = map.groups.find((candidate) => candidate.category === category);
+      assert.ok(group, `${fixture.id}:${category}`);
+      assert.deepEqual(
+        {
+          files: group.fileCount,
+          additions: group.additions.value,
+          deletions: group.deletions.value,
+        },
+        expected,
+        `${fixture.id}:${category}`,
+      );
+      assert.equal(group.additions.complete, true, fixture.id);
+      assert.equal(group.deletions.complete, true, fixture.id);
+    }
+
+    const claims = fixture.claims.map((claim, index) => ({
+      id: `claim-${String(index + 1)}`,
+      kind: 'change',
+      basis: 'observed',
+      significance: index === 0 ? 'primary' : 'supporting',
+      evidenceIds: claim.evidenceIds,
+    }));
+    const report = completeness.evaluateArtifactCompleteness({ claims }, evidence);
+    assert.equal(report.complete, true, fixture.id);
+    assert.deepEqual(
+      [...report.coveredEvidenceIds].sort(),
+      [...report.requiredEvidenceIds].sort(),
+      fixture.id,
+    );
+
+    // These oracle assertions validate corpus consistency. Production behavior
+    // is exercised above through the completeness and title-semantics modules.
+    const representedDomains = new Set(
+      fixture.claims
+        .filter((claim) => claim.evidenceIds.length > 0)
+        .map((claim) => claim.domain),
+    );
+    assert.deepEqual(
+      [...representedDomains].sort(),
+      [...fixture.oracle.requiredDomains].sort(),
+      fixture.id,
+    );
+    const semantics = titleSemantics.evaluateTitleSemantics(evidence, {
+      allowedScopes: fixture.allowedScopes,
+    });
+    assert.deepEqual(semantics.allowedTypes, fixture.oracle.allowedTypes, fixture.id);
+    assert.equal(semantics.scope ?? null, fixture.oracle.expectedScope, fixture.id);
+    assert.ok(
+      fixture.requestSequence.length <= fixture.oracle.requestCeiling,
+      fixture.id,
+    );
+    assert.equal(fixture.requestSequence[0], 'draft', fixture.id);
+    assert.equal(
+      fixture.requestSequence.at(-1),
+      'critic',
+      fixture.id,
+    );
+    assert.doesNotMatch(JSON.stringify(evidence), /"domain"/u, fixture.id);
+  }
+});
+
+test('init corpus executes safe policy preferences without inventing scopes', () => {
+  const corpus = loadCorpus();
+  for (const fixture of corpus.initCases) {
+    const transformed = setupFiles.transformRepositoryPolicy(
+      '',
+      fixture.preferences,
+    );
+    const policy = JSON.parse(transformed.contents) as {
+      title: { allowedScopes?: string[] };
+      pullRequest: { issueContext: string; template: string };
+      merge: { strategy: string; deleteBranch: boolean };
+    };
+    assert.deepEqual(
+      policy.title.allowedScopes ?? null,
+      fixture.oracle.allowedScopes,
+      fixture.id,
+    );
+    assert.equal(
+      policy.pullRequest.issueContext,
+      fixture.oracle.issueContext,
+      fixture.id,
+    );
+    assert.equal(policy.pullRequest.template, fixture.oracle.template, fixture.id);
+    assert.equal(policy.merge.strategy, fixture.oracle.mergeStrategy, fixture.id);
+    assert.equal(policy.merge.deleteBranch, fixture.oracle.deleteBranch, fixture.id);
   }
 });
 

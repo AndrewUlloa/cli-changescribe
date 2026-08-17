@@ -13,7 +13,65 @@ type ArtifactResponseKind = 'parse-invalid' | 'render-invalid' | 'valid';
 
 function isArtifactPrompt(serialized: string): boolean {
   return serialized.includes('Produce one evidence-linked draft') ||
-    serialized.includes('previous response failed deterministic validation');
+    serialized.includes('previous response failed deterministic validation') ||
+    serialized.includes('previous primary claim failed evidence review');
+}
+
+function promptText(value: Record<string, unknown>): string {
+  const messages = value.messages;
+  if (!Array.isArray(messages)) {
+    return '';
+  }
+  return messages
+    .map((message) =>
+      typeof message === 'object' && message !== null &&
+      typeof Reflect.get(message, 'content') === 'string'
+        ? String(Reflect.get(message, 'content'))
+        : '',
+    )
+    .join('\n');
+}
+
+function evidenceSupportedType(prompt: string): string {
+  const match = /Supported Conventional Commit types for this evidence: (\[[^\n]+\])/u
+    .exec(prompt);
+  if (match?.[1] === undefined) {
+    return 'chore';
+  }
+  const parsed = JSON.parse(match[1]) as unknown;
+  return Array.isArray(parsed) && typeof parsed[0] === 'string'
+    ? parsed[0]
+    : 'chore';
+}
+
+function evidenceSupportedScope(prompt: string): string | undefined {
+  const match = /Supported Conventional Commit scope for this evidence: ("[^"\n]+").*$/mu
+    .exec(prompt);
+  return match?.[1] === undefined
+    ? undefined
+    : JSON.parse(match[1]) as string;
+}
+
+interface PromptCriticCandidate {
+  readonly candidateId: string;
+  readonly evidenceIds: readonly string[];
+}
+
+function promptCriticCandidates(prompt: string): readonly PromptCriticCandidate[] {
+  const match = /Model-authored candidates:\n(\[[\s\S]+\])$/u.exec(prompt);
+  if (match?.[1] === undefined) {
+    return [];
+  }
+  const parsed = JSON.parse(match[1]) as unknown;
+  return Array.isArray(parsed)
+    ? parsed.filter(
+        (candidate): candidate is PromptCriticCandidate =>
+          typeof candidate === 'object' &&
+          candidate !== null &&
+          typeof Reflect.get(candidate, 'candidateId') === 'string' &&
+          Array.isArray(Reflect.get(candidate, 'evidenceIds')),
+      )
+    : [];
 }
 
 function git(cwd: string, args: string[]): string {
@@ -48,6 +106,13 @@ async function createCompletionServer(
     artifactResponses?: readonly ArtifactResponseKind[];
     scope?: string;
     dishonestSupporting?: boolean;
+    supportedOptional?: boolean;
+    completeCoverageRepair?: boolean;
+    rejectCoverageClaim?: boolean;
+    replacementClaimId?: string;
+    primaryRejectedCritiques?: number;
+    titleSubjectRejectedCritiques?: number;
+    omittedSupportingResponses?: number;
   } = {},
 ): Promise<{
   baseURL: string;
@@ -67,13 +132,30 @@ async function createCompletionServer(
       });
       response.writeHead(200, { 'content-type': 'application/json' });
       const serializedRequest = JSON.stringify(parsed);
+      const artifactPrompt = promptText(parsed);
       const isArtifactCritic = serializedRequest.includes(
         'independently audit every proposed model-authored artifact claim',
       );
       const isArtifactRequest = isArtifactPrompt(serializedRequest);
+      const isCoverageRepair = serializedRequest.includes(
+        'Repair category: substantive-coverage',
+      );
+      const criticRequestCount = requests.filter((item) =>
+        JSON.stringify(item.body).includes(
+          'independently audit every proposed model-authored artifact claim',
+        ),
+      ).length;
       const artifactRequestCount = requests.filter((item) =>
         isArtifactPrompt(JSON.stringify(item.body)),
       ).length;
+      const responseClaimId =
+        options.replacementClaimId !== undefined && artifactRequestCount > 1
+          ? options.replacementClaimId
+          : 'claim-change';
+      const criticPrimaryClaimId =
+        options.replacementClaimId !== undefined && criticRequestCount > 1
+          ? options.replacementClaimId
+          : 'claim-change';
       const configuredResponse =
         options.artifactResponses?.[artifactRequestCount - 1];
       const parseInvalid = isArtifactRequest &&
@@ -101,20 +183,26 @@ async function createCompletionServer(
                 content: isArtifactCritic
                     ? JSON.stringify({
                       schemaVersion: 1,
-                      candidates: [
-                        {
-                          candidateId: 'claim:claim-change',
-                          evidenceIds: ['change-1'],
-                          supported: true,
-                        },
-                        ...(options.dishonestSupporting
-                          ? [{
-                              candidateId: 'claim:claim-plan',
-                              evidenceIds: ['change-1'],
-                              supported: false,
-                            }]
-                          : []),
-                      ],
+                      candidates: promptCriticCandidates(artifactPrompt).map(
+                        (candidate) => ({
+                          candidateId: candidate.candidateId,
+                          evidenceIds: candidate.evidenceIds,
+                          supported:
+                            candidate.candidateId ===
+                              `claim:${criticPrimaryClaimId}`
+                              ? criticRequestCount >
+                                Math.max(
+                                  options.primaryRejectedCritiques ?? 0,
+                                  options.titleSubjectRejectedCritiques ?? 0,
+                                )
+                              : candidate.candidateId === 'claim:claim-plan'
+                                ? false
+                                : candidate.candidateId ===
+                                    'claim:claim-coverage'
+                                  ? !options.rejectCoverageClaim
+                                  : true,
+                        }),
+                      ),
                     })
                   : parseInvalid
                   ? 'not valid artifact json'
@@ -122,19 +210,19 @@ async function createCompletionServer(
                   ? JSON.stringify({
                       schemaVersion: 1,
                       title: {
-                        type: 'fix',
-                        ...(options.scope === undefined
+                        type: evidenceSupportedType(artifactPrompt),
+                        ...(evidenceSupportedScope(artifactPrompt) === undefined
                           ? {}
-                          : { scope: options.scope }),
+                          : { scope: evidenceSupportedScope(artifactPrompt) }),
                         breaking: false,
                         subject: renderInvalid
                           ? 'route completions through provider-neutral configuration.'
                           : 'route completions through provider-neutral configuration',
-                        claimId: 'claim-change',
+                        claimId: responseClaimId,
                       },
                       claims: [
                         {
-                          id: 'claim-change',
+                          id: responseClaimId,
                           kind: 'change',
                           text: 'route completions through provider-neutral configuration.',
                           evidenceIds: ['change-1'],
@@ -151,11 +239,63 @@ async function createCompletionServer(
                               significance: 'supporting',
                             }]
                           : []),
+                        ...(options.supportedOptional &&
+                        artifactRequestCount === 1
+                          ? [{
+                              id: 'claim-supported',
+                              kind: 'change',
+                              text: 'preserve this exact supported detail.',
+                              evidenceIds: ['change-1'],
+                              basis: 'observed',
+                              significance: 'supporting',
+                            }]
+                          : []),
+                        ...(options.completeCoverageRepair && isCoverageRepair
+                          ? [{
+                              id: 'claim-coverage',
+                              kind: 'change',
+                              text: 'cover the second substantive change.',
+                              evidenceIds: ['change-2'],
+                              basis: 'observed',
+                              significance: 'supporting',
+                            }]
+                          : []),
+                        ...(artifactRequestCount <=
+                        (options.omittedSupportingResponses ?? 0)
+                          ? [{
+                              id: 'claim-omitted-supporting',
+                              kind: 'change',
+                              text: 'describe an omitted supporting patch.',
+                              evidenceIds: ['change-2'],
+                              basis: 'observed',
+                              significance: 'supporting',
+                            }]
+                          : []),
                       ],
                       sections: [
-                        { kind: 'summary', claimIds: ['claim-change'] },
+                        { kind: 'summary', claimIds: [responseClaimId] },
                         ...(options.dishonestSupporting
                           ? [{ kind: 'changes', claimIds: ['claim-plan'] }]
+                          : []),
+                        ...(options.supportedOptional &&
+                        artifactRequestCount === 1
+                          ? [{
+                              kind: 'changes',
+                              claimIds: ['claim-supported'],
+                            }]
+                          : []),
+                        ...(options.completeCoverageRepair && isCoverageRepair
+                          ? [{
+                              kind: 'changes',
+                              claimIds: ['claim-coverage'],
+                            }]
+                          : []),
+                        ...(artifactRequestCount <=
+                        (options.omittedSupportingResponses ?? 0)
+                          ? [{
+                              kind: 'changes',
+                              claimIds: ['claim-omitted-supporting'],
+                            }]
                           : []),
                       ],
                       trailers: [],
@@ -584,7 +724,7 @@ test('commit workflow uses explicit custom provider through the shared transport
   assert.match(result.stdout, /Generating commit message with AI \(custom\)/);
   assert.match(
     result.stdout,
-    /fix: route completions through provider-neutral configuration/,
+    /docs: route completions through provider-neutral configuration/,
   );
   assert.doesNotMatch(result.stdout, /workflow-secret|ambient-secret/);
   assert.equal(server.requests.length, 2);
@@ -647,7 +787,7 @@ test('repository policy stays local while standard generation remains valid', as
   assert.match(request, /git-policy-metadata/);
   assert.match(
     result.stdout,
-    /fix: route completions through provider-neutral configuration/,
+    /chore: route completions through provider-neutral configuration/,
   );
 });
 
@@ -702,6 +842,11 @@ test('PR workflow uses an evidence-linked draft and separate terminal critic', a
     JSON.stringify(server.requests[0].body),
     /provider routing source-agnostic/,
   );
+  assert.match(
+    JSON.stringify(server.requests[1]?.body),
+    /primary claim is also the title subject/i,
+  );
+  assert.match(JSON.stringify(server.requests[1]?.body), /title:type/);
   assert.match(fs.readFileSync(output, 'utf8'), /## Summary/);
   assert.doesNotMatch(fs.readFileSync(output, 'utf8'), /5Cs|Pass 2/);
   assert.doesNotMatch(
@@ -726,6 +871,47 @@ test('headless GitHub mutation requires explicit --yes before provider work', as
   assert.equal(result.status, 1);
   assert.match(result.stderr, /interactive review or explicit --yes/i);
   assert.doesNotMatch(result.stdout, /Collecting|Generating|Running npm/);
+});
+
+test('PR workflow projects large supporting patches without losing substantive changed lines', async (context) => {
+  const directory = createRepository(context);
+  git(directory, ['switch', '--quiet', '-c', 'feature']);
+  fs.writeFileSync(
+    path.join(directory, 'app.ts'),
+    'export const route = "provider-neutral";\n',
+  );
+  fs.mkdirSync(path.join(directory, 'docs'));
+  const supportingSentinel = 'supporting-projection-sentinel';
+  fs.writeFileSync(
+    path.join(directory, 'docs', 'large.md'),
+    `${supportingSentinel}\n${'documentation context\n'.repeat(18_000)}`,
+  );
+  git(directory, ['add', 'app.ts', 'docs/large.md']);
+  git(directory, ['commit', '--quiet', '-m', 'feat: add projected evidence fixture']);
+  const output = path.join(directory, 'summary.md');
+  const server = await createCompletionServer(context, {
+    omittedSupportingResponses: 1,
+  });
+
+  const result = await run(
+    directory,
+    ['pr', '--base', 'main', '--out', output],
+    customEnvironment(server.baseURL),
+  );
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.equal(server.requests.length, 3);
+  assert.match(result.stdout, /requesting one repair/u);
+  const requests = JSON.stringify(server.requests.map((request) => request.body));
+  assert.match(requests, /provider-neutral/u);
+  assert.doesNotMatch(requests, new RegExp(supportingSentinel, 'u'));
+  assert.doesNotMatch(
+    fs.readFileSync(output, 'utf8'),
+    /omitted supporting patch/u,
+  );
+  const rendered = fs.readFileSync(output, 'utf8');
+  assert.match(rendered, /\*\*Implementation:\*\* 1 file/u);
+  assert.match(rendered, /\*\*Documentation:\*\* 1 file/u);
 });
 
 test('PR workflow repairs one invalid draft and never chains model summaries', async (context) => {
@@ -758,6 +944,14 @@ test('PR workflow repairs one invalid draft and never chains model summaries', a
     JSON.stringify(server.requests[1].body),
     /not valid artifact json/,
   );
+  assert.match(
+    JSON.stringify(server.requests[1].body),
+    /Repair category: json-shape/,
+  );
+  assert.doesNotMatch(
+    JSON.stringify(server.requests[1].body),
+    /return only a title.*one observed primary/is,
+  );
 });
 
 test('PR workflow repairs a draft that fails deterministic rendering', async (context) => {
@@ -780,6 +974,10 @@ test('PR workflow repairs a draft that fails deterministic rendering', async (co
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.equal(server.requests.length, 3);
   assert.match(result.stdout, /requesting one repair/);
+  assert.match(
+    JSON.stringify(server.requests[1].body),
+    /Repair category: title-policy/,
+  );
   assert.match(
     fs.readFileSync(output, 'utf8'),
     /route completions through provider-neutral configuration/i,
@@ -812,7 +1010,7 @@ test('PR workflow discards a render-invalid draft when its repair cannot be pars
   assert.equal(fs.existsSync(output), false);
 });
 
-test('PR critic vetoes dishonest supporting prose before output or GitHub mutation', async (context) => {
+test('PR critic removes dishonest supporting prose before GitHub mutation', async (context) => {
   const directory = createRepository(context);
   addPrMutationFixture(context, directory);
   const output = path.join(directory, 'summary.md');
@@ -840,11 +1038,252 @@ test('PR critic vetoes dishonest supporting prose before output or GitHub mutati
     env,
   );
 
-  assert.equal(result.status, 1, result.stderr || result.stdout);
-  assert.match(result.stderr, /critique rejected unsupported claims/i);
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /Critic removed 1 unsupported optional item/i);
   assert.equal(server.requests.length, 2);
+  assert.doesNotMatch(fs.readFileSync(output, 'utf8'), /mark the plan/i);
+  assert.doesNotMatch(
+    JSON.parse(fs.readFileSync(capture, 'utf8')).body as string,
+    /mark the plan/i,
+  );
+});
+
+test('PR critic re-audits one grounded replacement for an unsupported primary claim', async (context) => {
+  const directory = createRepository(context);
+  git(directory, ['switch', '--quiet', '-c', 'feature']);
+  fs.appendFileSync(path.join(directory, 'README.md'), 'grounded repair fixture\n');
+  git(directory, ['add', 'README.md']);
+  git(directory, ['commit', '--quiet', '-m', 'fix: add grounded repair fixture']);
+  const output = path.join(directory, 'summary.md');
+  const server = await createCompletionServer(context, {
+    primaryRejectedCritiques: 1,
+    supportedOptional: true,
+    replacementClaimId: 'claim-supported',
+  });
+
+  const result = await run(
+    directory,
+    ['pr', '--base', 'main', '--out', output],
+    customEnvironment(server.baseURL),
+  );
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.equal(server.requests.length, 4);
+  assert.match(result.stdout, /requesting one grounded replacement/i);
+  assert.match(
+    JSON.stringify(server.requests[2].body),
+    /Repair category: primary-grounding/,
+  );
+  assert.match(
+    JSON.stringify(server.requests[2].body),
+    /return only a title.*one observed primary/is,
+  );
+  assert.equal(fs.existsSync(output), true);
+  assert.match(
+    fs.readFileSync(output, 'utf8'),
+    /preserve this exact supported detail\./,
+  );
+  assert.doesNotMatch(
+    JSON.stringify(server.requests[3].body),
+    /preserve this exact supported detail\./,
+  );
+});
+
+test('PR critic repairs an unrepresentative title within the existing request ceiling', async (context) => {
+  const directory = createRepository(context);
+  git(directory, ['switch', '--quiet', '-c', 'feature']);
+  fs.appendFileSync(path.join(directory, 'README.md'), 'title repair fixture\n');
+  git(directory, ['add', 'README.md']);
+  git(directory, ['commit', '--quiet', '-m', 'docs: add title repair fixture']);
+  const output = path.join(directory, 'summary.md');
+  const server = await createCompletionServer(context, {
+    titleSubjectRejectedCritiques: 1,
+  });
+
+  const result = await run(
+    directory,
+    ['pr', '--base', 'main', '--out', output],
+    customEnvironment(server.baseURL),
+  );
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.equal(server.requests.length, 4);
+  assert.match(result.stdout, /requesting one grounded replacement/i);
+  assert.match(
+    JSON.stringify(server.requests[1]?.body),
+    /primary claim is also the title subject/i,
+  );
+  assert.match(
+    JSON.stringify(server.requests[2]?.body),
+    /Preserve these already validated title fields exactly/,
+  );
+  assert.match(
+    JSON.stringify(server.requests[2]?.body),
+    /cite that complete set on the primary claim/i,
+  );
+  assert.doesNotMatch(
+    JSON.stringify(server.requests[2]?.body),
+    /prefer one direct evidence id/i,
+  );
+});
+
+test('PR deterministic and primary repairs stay within five provider requests', async (context) => {
+  const directory = createRepository(context);
+  git(directory, ['switch', '--quiet', '-c', 'feature']);
+  fs.appendFileSync(path.join(directory, 'README.md'), 'combined repair fixture\n');
+  git(directory, ['add', 'README.md']);
+  git(directory, ['commit', '--quiet', '-m', 'fix: add combined repair fixture']);
+  const output = path.join(directory, 'summary.md');
+  const server = await createCompletionServer(context, {
+    invalidArtifactResponses: 1,
+    primaryRejectedCritiques: 1,
+  });
+
+  const result = await run(
+    directory,
+    ['pr', '--base', 'main', '--out', output],
+    customEnvironment(server.baseURL),
+  );
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.equal(server.requests.length, 5);
+  assert.match(result.stdout, /requesting one repair/i);
+  assert.match(result.stdout, /requesting one grounded replacement/i);
+  assert.equal(fs.existsSync(output), true);
+});
+
+function addSubstantiveCoverageFixture(directory: string): void {
+  git(directory, ['switch', '--quiet', '-c', 'feature']);
+  fs.mkdirSync(path.join(directory, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(directory, 'src', 'first.ts'), 'export const first = 1;\n');
+  fs.writeFileSync(path.join(directory, 'src', 'second.ts'), 'export const second = 2;\n');
+  git(directory, ['add', 'src/first.ts', 'src/second.ts']);
+  git(directory, ['commit', '--quiet', '-m', 'feat: add two source changes']);
+}
+
+test('PR repairs incomplete substantive coverage from original evidence within five requests', async (context) => {
+  const directory = createRepository(context);
+  addSubstantiveCoverageFixture(directory);
+  const output = path.join(directory, 'summary.md');
+  const server = await createCompletionServer(context, {
+    invalidArtifactResponses: 1,
+    completeCoverageRepair: true,
+  });
+
+  const result = await run(
+    directory,
+    ['pr', '--base', 'main', '--out', output],
+    customEnvironment(server.baseURL),
+  );
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.equal(server.requests.length, 5);
+  assert.match(result.stdout, /substantive coverage.*repair/i);
+  const repairRequest = JSON.stringify(server.requests[3].body);
+  assert.match(repairRequest, /Repair category: substantive-coverage/);
+  assert.match(repairRequest, /Original evidence bundle/);
+  assert.doesNotMatch(
+    repairRequest,
+    /return only a title.*one observed primary/is,
+  );
+  assert.match(
+    fs.readFileSync(output, 'utf8'),
+    /cover the second substantive change\./,
+  );
+});
+
+test('PR fails closed when the bounded coverage repair remains incomplete', async (context) => {
+  const directory = createRepository(context);
+  addSubstantiveCoverageFixture(directory);
+  const output = path.join(directory, 'summary.md');
+  const server = await createCompletionServer(context);
+
+  const result = await run(
+    directory,
+    ['pr', '--base', 'main', '--out', output],
+    customEnvironment(server.baseURL),
+  );
+
+  assert.equal(result.status, 1, result.stderr || result.stdout);
+  assert.equal(server.requests.length, 4);
+  assert.match(
+    result.stderr,
+    /does not cover every substantive change/i,
+  );
   assert.equal(fs.existsSync(output), false);
-  assert.equal(fs.existsSync(capture), false);
+});
+
+test('PR fails closed when criticism reopens substantive coverage', async (context) => {
+  const directory = createRepository(context);
+  addSubstantiveCoverageFixture(directory);
+  const output = path.join(directory, 'summary.md');
+  const server = await createCompletionServer(context, {
+    completeCoverageRepair: true,
+    rejectCoverageClaim: true,
+  });
+
+  const result = await run(
+    directory,
+    ['pr', '--base', 'main', '--out', output],
+    customEnvironment(server.baseURL),
+  );
+
+  assert.equal(result.status, 1, result.stderr || result.stdout);
+  assert.equal(server.requests.length, 4);
+  assert.match(
+    result.stderr,
+    /does not cover every substantive change/i,
+  );
+  assert.equal(fs.existsSync(output), false);
+});
+
+test('PR coverage repair never exceeds the five-request ceiling after primary repair', async (context) => {
+  const directory = createRepository(context);
+  addSubstantiveCoverageFixture(directory);
+  const output = path.join(directory, 'summary.md');
+  const server = await createCompletionServer(context, {
+    invalidArtifactResponses: 1,
+    completeCoverageRepair: true,
+    primaryRejectedCritiques: 1,
+  });
+
+  const result = await run(
+    directory,
+    ['pr', '--base', 'main', '--out', output],
+    customEnvironment(server.baseURL),
+  );
+
+  assert.equal(result.status, 1, result.stderr || result.stdout);
+  assert.equal(server.requests.length, 5);
+  assert.match(
+    result.stderr,
+    /does not cover every substantive change/i,
+  );
+  assert.equal(fs.existsSync(output), false);
+});
+
+test('PR critic fails closed after one invalid grounded replacement', async (context) => {
+  const directory = createRepository(context);
+  git(directory, ['switch', '--quiet', '-c', 'feature']);
+  fs.appendFileSync(path.join(directory, 'README.md'), 'invalid grounded repair fixture\n');
+  git(directory, ['add', 'README.md']);
+  git(directory, ['commit', '--quiet', '-m', 'fix: add invalid repair fixture']);
+  const output = path.join(directory, 'summary.md');
+  const server = await createCompletionServer(context, {
+    artifactResponses: ['valid', 'parse-invalid'],
+    primaryRejectedCritiques: 1,
+  });
+
+  const result = await run(
+    directory,
+    ['pr', '--base', 'main', '--out', output],
+    customEnvironment(server.baseURL),
+  );
+
+  assert.equal(result.status, 1, result.stderr || result.stdout);
+  assert.match(result.stderr, /invalid grounded primary replacement/i);
+  assert.equal(server.requests.length, 3);
+  assert.equal(fs.existsSync(output), false);
 });
 
 test('PR workflow skips provider and output when branch history reverts to base', async (context) => {
@@ -938,17 +1377,18 @@ test('PR creation links an issue in the body without passing an unsupported gh f
   );
   assert.equal(
     captured.args[captured.args.indexOf('--title') + 1],
-    'fix: route completions through provider-neutral configuration',
+    'docs: route completions through provider-neutral configuration',
   );
   assert.match(captured.body, /(?:^|\n)Closes #123(?:\n|$)/);
-  assert.match(captured.body, /Passed: `npm run build`\n\nCloses #123$/u);
+  assert.match(captured.body, /Passed: `npm run build` in \d+ ms\n\nCloses #123$/u);
   assert.match(
     fs.readFileSync(path.join(directory, 'summary.final.md'), 'utf8'),
     /Closes #123$/u,
   );
-  assert.match(captured.body, /Skipped: `npm run format`/);
-  assert.match(captured.body, /Passed: `npm test`/);
-  assert.match(captured.body, /Passed: `npm run build`/);
+  assert.match(captured.body, /Skipped \(user requested\): `npm run format`/);
+  assert.match(captured.body, /Passed: `npm test` in \d+ ms/);
+  assert.match(captured.body, /test counts unavailable/);
+  assert.match(captured.body, /Passed: `npm run build` in \d+ ms/);
   const title = captured.args[captured.args.indexOf('--title') + 1];
   assert.match(title, /^[a-z][a-z0-9-]*(?:\([a-z0-9._/-]+\))?!?: .+/);
   assert.equal(title.length <= 72, true);
@@ -1026,12 +1466,106 @@ test('PR generation uses pinned base policy and redacts feature policy bytes', a
   };
   assert.equal(
     captured.args[captured.args.indexOf('--title') + 1],
-    'fix: route completions through provider-neutral configuration',
+    'chore: route completions through provider-neutral configuration',
   );
   const requests = JSON.stringify(server.requests.map((request) => request.body));
   assert.equal(requests.includes('\\"scopeMode\\":\\"optional\\"'), false);
   assert.equal(requests.includes('\\"scopeMode\\":\\"forbidden\\"'), false);
   assert.match(requests, /git-policy-metadata/);
+});
+
+test('PR generation enforces version-2 issue-context policy before provider or GitHub work', async (context) => {
+  const runPolicyCase = async (
+    issueContext: 'optional' | 'required',
+    issue?: string,
+  ): Promise<{
+    readonly result: Awaited<ReturnType<typeof run>>;
+    readonly requestCount: number;
+    readonly captureExists: boolean;
+  }> => {
+    const directory = createRepository(context);
+    fs.writeFileSync(
+      path.join(directory, 'package.json'),
+      JSON.stringify(
+        {
+          name: 'fixture',
+          private: true,
+          scripts: {
+            test: 'node -e "process.exit(0)"',
+            build: 'node -e "process.exit(0)"',
+          },
+        },
+        null,
+        2,
+      ),
+    );
+    fs.writeFileSync(
+      path.join(directory, '.diffwrightrc.json'),
+      `${JSON.stringify({
+        version: 2,
+        pullRequest: { issueContext },
+      })}\n`,
+    );
+    git(directory, ['add', 'package.json', '.diffwrightrc.json']);
+    git(directory, ['commit', '--quiet', '-m', 'chore: configure pull requests']);
+    const remote = fs.mkdtempSync(path.join(os.tmpdir(), 'diffwright-remote-'));
+    context.after(() => fs.rmSync(remote, { recursive: true, force: true }));
+    git(remote, ['init', '--quiet', '--bare']);
+    git(directory, ['remote', 'add', 'origin', remote]);
+    git(directory, ['push', '--quiet', '-u', 'origin', 'main']);
+    git(directory, ['switch', '--quiet', '-c', 'feature']);
+    fs.appendFileSync(path.join(directory, 'README.md'), 'issue policy fixture\n');
+    git(directory, ['add', 'README.md']);
+    git(directory, ['commit', '--quiet', '-m', 'feat: add issue policy fixture']);
+
+    const capture = path.join(directory, 'gh-capture.json');
+    const fakeBin = createFakeGh(context, capture);
+    const server = await createCompletionServer(context);
+    const env = customEnvironment(server.baseURL);
+    env.PATH = `${fakeBin}${path.delimiter}${env.PATH ?? ''}`;
+    env.GH_CAPTURE_PATH = capture;
+    const args = [
+      'pr',
+      '--base',
+      'main',
+      '--create-pr',
+      '--yes',
+      '--skip-format',
+    ];
+    if (issue !== undefined) {
+      args.push('--issue', issue);
+    }
+    const result = await run(directory, args, env);
+    return {
+      result,
+      requestCount: server.requests.length,
+      captureExists: fs.existsSync(capture),
+    };
+  };
+
+  const missingRequired = await runPolicyCase('required');
+  assert.equal(missingRequired.result.status, 1);
+  assert.match(missingRequired.result.stderr, /requires --issue/u);
+  assert.equal(missingRequired.requestCount, 0);
+  assert.equal(missingRequired.captureExists, false);
+
+  const linkedRequired = await runPolicyCase('required', '123');
+  assert.equal(
+    linkedRequired.result.status,
+    0,
+    linkedRequired.result.stderr || linkedRequired.result.stdout,
+  );
+  assert.equal(linkedRequired.requestCount > 0, true);
+  assert.equal(linkedRequired.captureExists, true);
+
+  const missingOptional = await runPolicyCase('optional');
+  assert.equal(
+    missingOptional.result.status,
+    0,
+    missingOptional.result.stderr || missingOptional.result.stdout,
+  );
+  assert.equal(missingOptional.requestCount > 0, true);
+  assert.equal(missingOptional.captureExists, true);
 });
 
 test('PR summary without GitHub mutation also redacts feature policy bytes', async (context) => {

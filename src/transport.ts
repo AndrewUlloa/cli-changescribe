@@ -11,11 +11,31 @@ import type { PublicProviderProfile, ResolvedProvider } from './provider';
 export const DEFAULT_TIMEOUT_MS = 120_000;
 
 export type CompletionIntent = 'workflow' | 'doctor';
+export interface JsonSchemaCompletionResponseFormat {
+  readonly type: 'json-schema';
+  readonly name: string;
+  readonly schema: Readonly<Record<string, unknown>>;
+}
+
+export type CompletionResponseFormat =
+  | 'json-object'
+  | JsonSchemaCompletionResponseFormat;
 
 export interface ParsedCompletion {
   readonly content: string;
   readonly reasoning: string;
   readonly finishReason: string | null;
+}
+
+export function isStructuredOutputGenerationFailure(
+  error: unknown,
+): error is TransportError {
+  return error instanceof TransportError &&
+    error.category === 'request_incompatible' &&
+    error.status === 400 &&
+    /failed to validate json|failed_generation/iu.test(
+      error.providerMessage ?? '',
+    );
 }
 
 type ExtendedChatRequest = ChatCompletionCreateParamsNonStreaming & {
@@ -27,6 +47,7 @@ export function buildChatRequest(
   messages: ChatCompletionMessageParam[],
   outputLimit?: number,
   intent: CompletionIntent = 'workflow',
+  responseFormat?: CompletionResponseFormat,
 ): ExtendedChatRequest {
   const request: ExtendedChatRequest = {
     model: profile.model,
@@ -45,6 +66,26 @@ export function buildChatRequest(
     profile.model === 'openai/gpt-oss-120b'
   ) {
     request.reasoning_effort = 'high';
+  }
+  const supportsStructuredOutput =
+    profile.id === 'groq' &&
+    (profile.model === 'openai/gpt-oss-120b' ||
+      profile.model === 'openai/gpt-oss-20b');
+  if (responseFormat === 'json-object' && supportsStructuredOutput) {
+    request.response_format = { type: 'json_object' };
+  } else if (
+    typeof responseFormat === 'object' &&
+    responseFormat.type === 'json-schema' &&
+    supportsStructuredOutput
+  ) {
+    request.response_format = {
+      type: 'json_schema',
+      json_schema: {
+        name: responseFormat.name,
+        strict: true,
+        schema: responseFormat.schema,
+      },
+    };
   }
   return request;
 }
@@ -114,6 +155,7 @@ export interface CompleteChatInput {
   readonly messages: ChatCompletionMessageParam[];
   readonly outputLimit?: number;
   readonly intent?: CompletionIntent;
+  readonly responseFormat?: CompletionResponseFormat;
 }
 
 export async function completeChat(
@@ -129,6 +171,7 @@ export async function completeChat(
         input.messages,
         input.outputLimit,
         input.intent,
+        input.responseFormat,
       ),
     );
     try {

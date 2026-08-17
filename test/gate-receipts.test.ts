@@ -19,6 +19,9 @@ interface GateReceiptsModule {
       cwd?: string;
       runner: CommandRunner;
       clock?: () => number;
+      resultParser?: 'tap';
+      writeStdout?: (output: string) => void;
+      writeStderr?: (output: string) => void;
     },
   ): {
     id: string;
@@ -27,15 +30,29 @@ interface GateReceiptsModule {
     exitCode: number | null;
     durationMs: number;
     source: 'diffwright' | 'external';
+    result?: {
+      type: 'test-summary';
+      tests: number;
+      passed: number;
+      failed: number;
+      skipped: number;
+      cancelled: number;
+      todo: number;
+    };
+    limitation?: 'output-unrecognized';
+    skipReason?: 'not-configured' | 'user-requested';
   };
   createSkippedGateReceipt(
     id: string,
     command: { file: string; args: readonly string[]; display: string },
+    reason: 'not-configured' | 'user-requested',
   ): {
     status: string;
     exitCode: number | null;
     durationMs: number;
+    skipReason: string;
   };
+  parseTapTestSummary(output: string): unknown;
   requirePassedGate(
     receipt: { status: string; command: { display: string } },
     guidance: string,
@@ -83,7 +100,12 @@ test('records the exact successful command, status, and duration', () => {
     {
       file: 'pnpm',
       args: ['run', 'test'],
-      options: { cwd: '/fixture', encoding: 'utf8', stdio: 'inherit' },
+      options: {
+        cwd: '/fixture',
+        encoding: 'utf8',
+        maxBuffer: 8 * 1024 * 1024,
+        stdio: 'pipe',
+      },
     },
   ]);
   assert.deepEqual(receipt, {
@@ -126,14 +148,22 @@ test('records skipped gates separately and rejects unstarted processes', () => {
     args: ['run', 'format'],
     display: 'npm run format',
   };
-  assert.deepEqual(receipts.createSkippedGateReceipt('gate-format', command), {
+  assert.deepEqual(
+    receipts.createSkippedGateReceipt(
+      'gate-format',
+      command,
+      'not-configured',
+    ),
+    {
     id: 'gate-format',
     command,
     status: 'skipped',
     exitCode: null,
     durationMs: 0,
     source: 'diffwright',
-  });
+      skipReason: 'not-configured',
+    },
+  );
 
   const runner: CommandRunner = {
     exec: () => '',
@@ -150,5 +180,109 @@ test('records skipped gates separately and rejects unstarted processes', () => {
   assert.throws(
     () => receipts.runGateReceipt('gate-test', command, { runner }),
     /^Error: Could not run npm run format\.$/,
+  );
+});
+
+test('parses bounded root TAP totals and re-emits raw output locally', () => {
+  const tap = [
+    'TAP version 13',
+    '# Subtest: example',
+    'ok 1 - example',
+    '1..3',
+    '# tests 3',
+    '# suites 1',
+    '# pass 2',
+    '# fail 0',
+    '# cancelled 0',
+    '# skipped 1',
+    '# todo 0',
+    '# duration_ms 42.5',
+    '',
+  ].join('\n');
+  const stdout: string[] = [];
+  const stderr: string[] = [];
+  const runner: CommandRunner = {
+    exec: () => '',
+    spawn: () => ({ ...spawnResult(0), stdout: tap, stderr: 'local warning\n' }),
+  };
+  const receipt = receipts.runGateReceipt(
+    'gate-test',
+    { file: 'npm', args: ['test'], display: 'npm test' },
+    {
+      runner,
+      resultParser: 'tap',
+      writeStdout: (output) => stdout.push(output),
+      writeStderr: (output) => stderr.push(output),
+      clock: () => 10,
+    },
+  );
+
+  assert.deepEqual(receipt.result, {
+    type: 'test-summary',
+    tests: 3,
+    passed: 2,
+    failed: 0,
+    skipped: 1,
+    cancelled: 0,
+    todo: 0,
+  });
+  assert.equal(receipt.limitation, undefined);
+  assert.deepEqual(stdout, [tap]);
+  assert.deepEqual(stderr, ['local warning\n']);
+});
+
+test('marks unrecognized output without inventing test counts', () => {
+  const runner: CommandRunner = {
+    exec: () => '',
+    spawn: () => ({ ...spawnResult(0), stdout: '3 examples, 0 failures\n' }),
+  };
+  const receipt = receipts.runGateReceipt(
+    'gate-test',
+    { file: 'bundle', args: ['exec', 'test'], display: 'bundle exec test' },
+    {
+      runner,
+      resultParser: 'tap',
+      writeStdout: () => undefined,
+      writeStderr: () => undefined,
+    },
+  );
+
+  assert.equal(receipt.result, undefined);
+  assert.equal(receipt.limitation, 'output-unrecognized');
+});
+
+test('uses only a complete final TAP summary and rejects injected duplicates', () => {
+  const realSummary = [
+    '1..1',
+    '# tests 1',
+    '# pass 1',
+    '# fail 0',
+    '# cancelled 0',
+    '# skipped 0',
+    '# todo 0',
+  ].join('\n');
+  const injected = [
+    '1..999',
+    '# tests 999',
+    '# pass 999',
+    '# fail 0',
+    '# cancelled 0',
+    '# skipped 0',
+    '# todo 0',
+    realSummary,
+  ].join('\n');
+
+  assert.deepEqual(receipts.parseTapTestSummary(injected), {
+    type: 'test-summary',
+    tests: 1,
+    passed: 1,
+    failed: 0,
+    skipped: 0,
+    cancelled: 0,
+    todo: 0,
+  });
+  assert.equal(
+    receipts.parseTapTestSummary(`${realSummary}\n# tests 1`),
+    null,
   );
 });

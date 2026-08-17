@@ -21,22 +21,26 @@ exit without running a workflow.
 ## `commit`
 
 ```text
-diffwright commit [--dry-run] [--all] [--context-file <path>]
+diffwright commit [--dry-run] [--all] [--timings] [--context-file <path>]
 ```
 
 | Option | Meaning |
 |---|---|
 | `--dry-run` | Generate and print a candidate without committing or pushing. |
 | `--all` | Explicitly stage all tracked and untracked working-tree changes before analysis. |
+| `--timings` | Print privacy-safe phase durations after success or failure. |
 | `--context-file <path>` | Add bounded source-agnostic intent from a regular project file. Repeatable. |
 
 Diffwright reads only the staged diff by default. An empty index stops before
 provider resolution and leaves the working tree unchanged. `--all` is the only
 stage-all path and uses `git add --all`; combining it with `--dry-run` still
 changes the index. Generation normally makes two provider requests: one
-structured draft and one separate terminal evidence critique. If deterministic draft
-validation fails, one repair request is possible before the terminal critique.
-Critic rejection or failure never triggers another generation request.
+structured draft and one separate terminal evidence critique. If deterministic
+draft validation fails, one repair request is possible. Unsupported optional
+claims and trailers are removed. If the critic rejects the primary claim,
+Diffwright requests one smaller replacement from the original evidence and
+audits it again; a second rejection is terminal. The bounded failure path can
+therefore make up to five provider requests.
 
 Without `--dry-run`, Diffwright creates a commit from the staged snapshot and
 verifies that Git hooks did not change its tree, parent, or message. It pushes
@@ -72,6 +76,12 @@ diffwright init [options]
 | `--base <branch>` | Set the feature pull-request base. |
 | `--agents <targets>` | Install managed rules for `claude`, `codex`, both as `claude,codex`/`codex,claude`, or `none`. |
 | `--credential-source <source>` | Use `existing` configuration or select `file` storage. In deterministic mode the file credential must already exist. This is a source selector, never a credential value. |
+| `--scope-mode <mode>` | Use `optional` scopes or `forbidden` unscoped titles. |
+| `--scope <token>` | Confirm one allowed lowercase scope. Repeat to build an allowlist. |
+| `--issue-context <expectation>` | Set `optional`, `recommended`, or `required` linked-issue context. |
+| `--merge-strategy <strategy>` | Use Diffwright's guarded `squash` path or the hosting `platform`. |
+| `--delete-branch` | Delete the feature branch only after a confirmed Diffwright squash merge. |
+| `--pr-template <preference>` | `create` a managed template only when absent, or `preserve` template state. |
 | `--live` | After offline doctor succeeds, make one provider request. Incompatible with `--dry-run`. |
 
 ### Package runners
@@ -97,8 +107,11 @@ scripts. Add `--dry-run` to any launcher command for a redacted project preview.
 attached to an interactive TTY, `init` starts the wizard. It detects
 the package manager, Git branch topology, existing gates, configuration, and
 agent files; then it asks for provider, exact model, credential source, PR base,
-commit gates, and optional agent guardrails. It renders a redacted plan before
-asking for confirmation.
+commit gates, optional agent guardrails, confirmed scopes, issue-context
+expectations, guarded merge behavior, and PR-template preference. Scope
+suggestions come only from bounded workspace/component names and existing safe
+scoped history; the user confirms them before they enter policy. It renders a
+redacted plan before asking for confirmation.
 
 The credential step also offers **Configure later**. That choice writes only
 the nonsecret setup, skips doctor, and ends with an incomplete-setup message
@@ -114,8 +127,9 @@ credentials or agent files, or runs doctor.
 detected defaults, but a provider that lacks required existing credentials
 fails with corrective guidance. It does not add agent guardrails unless
 `--agents` names them, and `--live` is never implied. Supplying `--provider`,
-`--model`, `--base`, `--agents`, or `--credential-source` also selects headless
-setup. No option accepts a credential value.
+`--model`, `--base`, `--agents`, `--credential-source`, or a policy option also
+selects headless setup. Headless defaults never invent a scope allowlist. No
+option accepts a credential value.
 
 **Preview.** `--dry-run` may collect interactive answers and perform in-memory
 validation, but performs no project dependency install, target-project file
@@ -132,6 +146,8 @@ The guided plan can:
    through the detected npm, pnpm, Yarn, or Bun command, with install lifecycle
    scripts disabled. This updates the applicable manifest and lockfile.
 2. Add branch-aware `commit`, `pr:summary`, and feature/release PR scripts.
+   A squash policy also adds `pr:merge`, which invokes the guarded merge command
+   without baking in noninteractive approval.
    Selected existing `lint`, `typecheck`, `test`, and `build` scripts run before
    commit generation. A feature PR targets `staging` only when that branch is
    present and selected; otherwise it targets the detected default branch.
@@ -139,10 +155,19 @@ The guided plan can:
    variables to `.env.local`. A file credential is accepted only through the
    no-echo secret prompt in an interactive TTY. `.env.local` must be untracked
    and protected by `.gitignore` before a credential is written.
-4. Add one marker-delimited managed block to selected root `CLAUDE.md` and/or
-   `AGENTS.md` files. The block names the actual generated scripts and forbids
+4. Create or migrate `.diffwrightrc.json` version 2 after the exact local
+   Diffwright version is available. Existing title/editorial values are
+   preserved; only confirmed workflow preferences are added or updated.
+5. Add one marker-delimited managed block to selected root `CLAUDE.md` and/or
+   `AGENTS.md` files. The block names the actual generated scripts, defines
+   semantic title/scope/context/coverage/validation expectations, and forbids
    raw Git/GitHub mutation for shipping work. Text outside the block is
    preserved.
+6. Create `.github/pull_request_template.md` when policy requests it and no
+   repository template exists. The template prompts manual contributors for
+   Summary, Validation, Context, and conditional compatibility, security, and
+   non-goal notes. Existing user templates are never overwritten; reruns may
+   update only Diffwright's own marker-delimited block.
 
 Custom package scripts are not replaced. Exact managed Diffwright or
 ChangeScribe values may be migrated; a custom collision receives a
@@ -180,6 +205,7 @@ diffwright pr [options]
 | `--mode <mode>` | `release` only for branch `staging` with base `main`; otherwise `feature` | `feature` or `release`. |
 | `--context-file <path>` | none | Add bounded source-agnostic intent from a regular project file. Repeatable. |
 | `--dry-run` | off | Print the resolved range and plan without model calls or summary writes. |
+| `--timings` | off | Print privacy-safe phase durations after success or failure. |
 | `--create-pr` | off | Run project gates and create or update a PR with `gh`. |
 | `--yes` | off | Approve GitHub mutation noninteractively after validation. Required with `--create-pr` outside a TTY. |
 | `--skip-format` | off | Skip the optional format script. |
@@ -188,11 +214,17 @@ diffwright pr [options]
 Normal PR generation sends one bounded final net-diff evidence bundle and
 expects an evidence-linked JSON draft. It then makes one separate terminal critic
 request over the original evidence and every renderable model-authored claim.
-The critic uses the same resolved provider and model as the draft.
-Deterministic validation can trigger one draft-repair request; critic rejection
-is terminal. Incomplete, binary, or oversized evidence stops explicitly instead
-of being silently summarized. Diffwright renders Markdown locally and writes
-the detailed output, a sibling `.final.md` file, and a temporary backup.
+The critic uses the same resolved provider and model as the draft. Deterministic
+validation can trigger one draft-repair request. Diffwright removes unsupported
+optional claims and trailers. A rejected primary claim triggers one smaller
+replacement generated from the original evidence and a second critique; another
+rejection is terminal. Incomplete, binary, or oversized evidence stops explicitly
+instead of being silently summarized. Diffwright renders Markdown locally and
+writes the detailed output, a sibling `.final.md` file, and a temporary backup.
+
+For both `commit` and `pr`, `--timings` prints fixed phase names and millisecond
+durations in a final local report. The report contains no paths, evidence text,
+credentials, or telemetry and is printed even when the workflow fails.
 
 PR dry-run attempts an explicit fetch into `refs/remotes/origin/<base>` before
 it prints the plan. It uses local refs if fetch fails. It does not call the
@@ -220,11 +252,84 @@ and remote head are rechecked before GitHub mutation. Issue linkage uses the
 body directive `Closes #NUMBER`; that exact suffix is included before review and
 in both the `.final.md` file and GitHub body.
 
+Before project gates, Diffwright preflights a bounded model-evidence projection.
+For mixed large pull requests it retains every safe-to-egress added/deleted line
+and diff header from each substantive change, removes only unchanged context,
+and keeps supporting-file patches out of model-authored claims. Repository-
+policy contents remain metadata-only and configured secret values remain
+redacted. The full local evidence still drives freshness, completeness, and the
+deterministic Changes map, which accounts for every supporting file and line
+total. If the complete substantive projection is still too large, generation
+fails before gates or provider work.
+
 Editing uses `DIFFWRIGHT_EDITOR`, then `EDITOR`, then `vi`. The setting must be
 one executable name without arguments. The edited title and body are
 revalidated, including Conventional Commit grammar, repository policy, UTF-8,
 control characters, size, and known-secret checks. Approved bytes are not
 trimmed or rewritten afterward.
+
+## `merge`
+
+```text
+diffwright merge [--dry-run] [--yes]
+```
+
+`merge` resolves exactly one open same-repository pull request for the attached
+current branch. It requires GitHub CLI 2.50.0 or newer and makes no provider
+request. Before showing a plan it requires:
+
+- a clean working tree and matching local/origin feature-head SHA;
+- an unchanged origin fetch/push repository identity;
+- an open, ready, clean, mergeable PR whose base SHA still matches origin;
+- a base branch that does not require a merge queue;
+- a canonical Conventional Commit title allowed by the policy pinned to that
+  base SHA;
+- no pending review request or latest `CHANGES_REQUESTED` review; and
+- at least one reported GitHub check, with every check passed or skipped.
+
+`--dry-run` performs those reads and prints a bounded plan without mutation.
+Without `--yes`, an interactive TTY asks for confirmation; a noninteractive
+invocation fails closed. After approval, Diffwright repeats the complete
+validation. Any changed repository, branch, SHA, PR field, title, check, or
+review stops the command.
+
+The only merge mutation uses GitHub's direct pull-request merge API with a
+squash request pinned to the numeric PR, explicit repository, reviewed head SHA,
+and validated PR title. It accepts only a mutation response that reports
+`merged: true`; merge-queue use and already-merged no-ops are rejected.
+Diffwright does not use admin, auto-merge, merge-commit, rebase, or
+branch-deletion fallbacks. A version-2 policy with `merge.strategy` set to
+`platform` stops before mutation. It then reads the PR again and reports success only
+when GitHub returns `MERGED` with the same merge-commit OID. If the mutation or
+postcondition is ambiguous, inspect the PR before retrying; Diffwright never
+retries automatically. When `merge.deleteBranch` is `true`, Diffwright next
+revalidates the pinned repository, then deletes the explicit remote ref with an
+atomic lease that requires the reviewed head SHA. A moved branch or deletion
+failure is reported as a partial outcome: the merge is complete, the branch
+needs inspection, and the merge must not be retried.
+
+## `title-check`
+
+```text
+diffwright title-check --event-file <path>
+```
+
+`title-check` reads one bounded, regular UTF-8 GitHub `pull_request` event file.
+It validates the selected repository, action, PR number, and full base/head
+revisions without trusting the title as a command-line value.
+The event repository must match the local `origin`, and the title must be a
+canonical Conventional Commit header allowed by the repository policy loaded
+from the event's exact base SHA. Policy changes on the feature branch therefore
+cannot weaken the check that reviews that same pull request.
+
+The command makes no provider request, network call, GitHub mutation, or file
+write. It accepts exactly one `--event-file`; there is no positional title or
+ambient fallback. The separate `PR title` workflow runs on
+`pull_request_target` only so it can execute the exact trusted base revision
+with read-only permissions and full Git history. It never checks out or runs
+pull-request code. The workflow passes `"$GITHUB_EVENT_PATH"` on opened,
+edited, synchronized, reopened, and ready-for-review events. It becomes active
+after the workflow and command land on the default branch.
 
 ## Aliases
 
@@ -253,15 +358,19 @@ supporting documentation, tests, manifests, and lockfiles from displacing source
 work, rejects unknown evidence IDs, and omits unsupported inference. It renders
 the Conventional title and adaptive body locally. Empty sections are absent.
 
-Verification is never inferred from a changed test file or model prose. PR gate
-commands produce receipts with exact command, status, exit code, and duration;
-only a successful receipt renders as Passed.
+Validation is never inferred from a changed test file or model prose. PR gate
+commands produce receipts with exact command, status, exit code, and duration.
+When Diffwright recognizes a bounded TAP summary, it includes the exact test
+totals. Otherwise it says that test counts are unavailable instead of inventing
+them. Raw gate output remains local and never enters provider evidence.
 
 After deterministic parsing and rendering, a separate critic checks every
 renderable model-authored claim and trailer against only its cited original
-evidence. Verification text is excluded from that model audit because it is
-rendered from receipts. The critic cannot rewrite. Missing, malformed,
-duplicate, mismatched, or negative verdicts stop before preview or mutation.
+evidence. Validation receipt text is excluded from that model audit because it is
+rendered from receipts. The critic cannot rewrite. A negative verdict removes
+an optional claim or trailer. A negative primary verdict permits one grounded
+replacement and second audit; malformed, missing, duplicate, mismatched, or a
+second negative primary verdict stops before preview or mutation.
 
 This is a grounding and provenance contract, not proof that arbitrary prose is
 true and not a claim of formal ASD-STE100 compliance. Editorial checks are
@@ -277,7 +386,7 @@ keys, unknown fields, unsupported controls, and out-of-range values fail closed.
 ```json
 {
   "$schema": "https://raw.githubusercontent.com/AndrewUlloa/diffwright/main/documentation/diffwrightrc.schema.json",
-  "version": 1,
+  "version": 2,
   "title": {
     "additionalTypes": ["security"],
     "scopeMode": "optional",
@@ -291,6 +400,14 @@ keys, unknown fields, unsupported controls, and out-of-range values fail closed.
     "terminologyGroups": [
       { "name": "pull request", "terms": ["pull request", "PR"] }
     ]
+  },
+  "pullRequest": {
+    "issueContext": "recommended",
+    "template": "create"
+  },
+  "merge": {
+    "strategy": "squash",
+    "deleteBranch": false
   }
 }
 ```
@@ -302,6 +419,20 @@ from 1 through 72 characters and cannot exceed the immutable 72-character
 header maximum. Editorial
 findings cover sentence length, vague absolutes, normalized duplicate claims,
 and mixed terminology. They are warnings only.
+
+Existing version-1 files are accepted without adding resolved fields or
+changing their default digest. Version 2 adds only bounded local workflow
+preferences. `pullRequest.issueContext` is `optional`, `recommended`, or
+`required`; `pullRequest.template` is `create` or `preserve`; and
+`merge.strategy` is `squash` or `platform`. `merge.deleteBranch` applies only
+after Diffwright confirms its own squash merge, so it must remain `false` for a
+platform-managed merge. Missing version-2 sections resolve to recommended
+issue context, create-when-absent templates, squash merging, and no branch
+deletion.
+
+Evidence coverage, the critic, grounding, redaction, snapshot freshness, and
+request ceilings are immutable product safeguards. They are intentionally not
+configuration fields; unknown attempts to weaken them fail closed.
 
 Additional types extend local validation and can be selected during
 interactive PR editing. Automatic generation continues to request only the

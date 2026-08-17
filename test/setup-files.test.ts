@@ -4,10 +4,18 @@ import os from 'node:os';
 import path from 'node:path';
 import test, { type TestContext } from 'node:test';
 
-type SetupFileKind = 'package-json' | 'environment' | 'agent-document';
+type SetupFileKind =
+  | 'package-json'
+  | 'environment'
+  | 'repository-policy'
+  | 'agent-document';
 
 interface SemanticMutation {
-  readonly kind: 'package-script' | 'environment' | 'managed-block';
+  readonly kind:
+    | 'package-script'
+    | 'environment'
+    | 'repository-policy'
+    | 'managed-block';
   readonly action: 'added' | 'updated' | 'removed';
   readonly name: string;
   readonly value?: string;
@@ -43,12 +51,25 @@ interface SetupFilesModule {
     contents: string,
     updates: Readonly<Record<string, string>>,
   ): TransformResult;
+  transformRepositoryPolicy(
+    contents: string,
+    preferences: {
+      scopeMode: 'optional' | 'forbidden';
+      allowedScopes?: readonly string[];
+      issueContext: 'optional' | 'recommended' | 'required';
+      template: 'create' | 'preserve';
+      mergeStrategy: 'squash' | 'platform';
+      deleteBranch: boolean;
+    },
+  ): TransformResult;
   transformManagedDocument(contents: string, body: string): TransformResult;
   planSetupFile(options: {
     path: string;
     kind: SetupFileKind;
     transform(contents: string): TransformResult;
     envSafety?: EnvSafetyChecks;
+    root?: string;
+    createParent?: boolean;
   }): SetupFilePlan;
   applySetupFile(
     plan: SetupFilePlan,
@@ -231,6 +252,82 @@ test('environment transform is byte-stable for canonical existing values', () =>
   assert.equal(result.changed, false);
   assert.equal(result.contents, source);
   assert.deepEqual(result.mutations, []);
+});
+
+test('creates, migrates, and idempotently preserves repository policy v2', () => {
+  const preferences = {
+    scopeMode: 'optional' as const,
+    allowedScopes: ['cli', 'release'],
+    issueContext: 'recommended' as const,
+    template: 'create' as const,
+    mergeStrategy: 'squash' as const,
+    deleteBranch: false,
+  };
+  const created = setupFiles.transformRepositoryPolicy('', preferences);
+  assert.equal(created.changed, true);
+  assert.equal(created.mutations[0]?.action, 'added');
+  assert.deepEqual(JSON.parse(created.contents), {
+    $schema:
+      'https://raw.githubusercontent.com/AndrewUlloa/diffwright/main/documentation/diffwrightrc.schema.json',
+    version: 2,
+    title: {
+      scopeMode: 'optional',
+      allowedScopes: ['cli', 'release'],
+    },
+    pullRequest: {
+      issueContext: 'recommended',
+      template: 'create',
+    },
+    merge: {
+      strategy: 'squash',
+      deleteBranch: false,
+    },
+  });
+
+  const legacy = `${JSON.stringify({
+    version: 1,
+    title: { additionalTypes: ['security'], scopeMode: 'forbidden' },
+    editorial: { maxSentenceWords: 20 },
+  }, null, 2)}\n`;
+  const migrated = setupFiles.transformRepositoryPolicy(legacy, preferences);
+  const parsed = JSON.parse(migrated.contents);
+  assert.equal(parsed.version, 2);
+  assert.deepEqual(parsed.title.additionalTypes, ['security']);
+  assert.equal(parsed.editorial.maxSentenceWords, 20);
+  assert.match(migrated.mutations[0]?.name ?? '', /v1 -> v2/);
+
+  const repeated = setupFiles.transformRepositoryPolicy(
+    migrated.contents,
+    preferences,
+  );
+  assert.equal(repeated.changed, false);
+  assert.equal(repeated.contents, migrated.contents);
+});
+
+test('repository policy transform rejects unsafe preferences and malformed input', () => {
+  assert.throws(
+    () => setupFiles.transformRepositoryPolicy(
+      '{"version":1,"version":2}',
+      {
+        scopeMode: 'optional',
+        issueContext: 'optional',
+        template: 'preserve',
+        mergeStrategy: 'platform',
+        deleteBranch: false,
+      },
+    ),
+    /duplicate/i,
+  );
+  assert.throws(
+    () => setupFiles.transformRepositoryPolicy('', {
+      scopeMode: 'optional',
+      issueContext: 'optional',
+      template: 'preserve',
+      mergeStrategy: 'platform',
+      deleteBranch: true,
+    }),
+    /platform-managed/i,
+  );
 });
 
 test('managed document transform adds and replaces one marker block without touching outside bytes', () => {
@@ -463,4 +560,61 @@ test('apply rechecks environment safety and removes its temporary file on failur
   );
   assert.equal(fs.existsSync(envPath), false);
   assert.deepEqual(fs.readdirSync(directory), []);
+});
+
+test('nested setup creates a missing safe parent only after apply', (context) => {
+  const directory = temporaryDirectory(context);
+  const target = path.join(directory, '.github', 'pull_request_template.md');
+  const plan = setupFiles.planSetupFile({
+    path: target,
+    root: directory,
+    createParent: true,
+    kind: 'agent-document',
+    transform: (contents) => setupFiles.transformManagedDocument(contents, '## Summary'),
+  });
+
+  assert.equal(fs.existsSync(path.dirname(target)), false);
+  setupFiles.applySetupFile(plan);
+  assert.equal(fs.statSync(path.dirname(target)).isDirectory(), true);
+  assert.match(fs.readFileSync(target, 'utf8'), /## Summary/);
+});
+
+test('nested setup rejects symlinked and concurrently replaced parents', (context) => {
+  if (process.platform === 'win32') {
+    context.skip('POSIX directory identity fixture');
+    return;
+  }
+  const directory = temporaryDirectory(context);
+  const external = temporaryDirectory(context);
+  const github = path.join(directory, '.github');
+  const target = path.join(github, 'pull_request_template.md');
+  fs.symlinkSync(external, github);
+  assert.throws(
+    () => setupFiles.planSetupFile({
+      path: target,
+      root: directory,
+      createParent: true,
+      kind: 'agent-document',
+      transform: (contents) => setupFiles.transformManagedDocument(contents, '## Summary'),
+    }),
+    /parent directories must be real directories/i,
+  );
+
+  fs.unlinkSync(github);
+  fs.mkdirSync(github);
+  const plan = setupFiles.planSetupFile({
+    path: target,
+    root: directory,
+    createParent: true,
+    kind: 'agent-document',
+    transform: (contents) => setupFiles.transformManagedDocument(contents, '## Summary'),
+  });
+  fs.renameSync(github, `${github}-original`);
+  fs.mkdirSync(github);
+
+  assert.throws(
+    () => setupFiles.applySetupFile(plan),
+    /parent directory changed/i,
+  );
+  assert.equal(fs.existsSync(target), false);
 });

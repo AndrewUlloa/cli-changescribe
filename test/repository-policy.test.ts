@@ -19,7 +19,7 @@ interface RepositoryPolicyModule {
     };
   }): {
     policy: {
-      version: 1;
+      version: 1 | 2;
       title: {
         allowedTypes: readonly string[];
         scopeMode: 'optional' | 'required' | 'forbidden';
@@ -36,6 +36,14 @@ interface RepositoryPolicyModule {
           terms: readonly string[];
         }[];
       };
+      pullRequest?: {
+        issueContext: 'optional' | 'recommended' | 'required';
+        template: 'create' | 'preserve';
+      };
+      merge?: {
+        strategy: 'squash' | 'platform';
+        deleteBranch: boolean;
+      };
     };
     source: {
       kind: 'defaults' | 'repository';
@@ -43,6 +51,12 @@ interface RepositoryPolicyModule {
       path: '.diffwrightrc.json';
       digest: string;
     };
+  };
+  protectRepositoryPolicyEvidence(bundle: unknown): {
+    items: readonly {
+      source: { kind: string; locator: string };
+      payload: { path: string; patch: string | null };
+    }[];
   };
 }
 
@@ -99,11 +113,159 @@ test('a missing tracked policy resolves deeply frozen defaults at pinned HEAD', 
   assert.match(result.source.revisionSha, /^[0-9a-f]{40,64}$/u);
   assert.match(result.source.digest, /^sha256:[0-9a-f]{64}$/u);
   assert.deepEqual(result.policy, repositoryPolicy.DEFAULT_REPOSITORY_POLICY);
+  assert.deepEqual(Object.keys(result.policy), ['version', 'title', 'editorial']);
+  assert.equal(
+    result.source.digest,
+    'sha256:aef83bfefd108b7dcb065cf8b5b40f7f5b708b84d1bf1112c7cf967e82c311c3',
+  );
   assert.equal(Object.isFrozen(result), true);
   assert.equal(Object.isFrozen(result.source), true);
   assert.equal(Object.isFrozen(result.policy), true);
   assert.equal(Object.isFrozen(result.policy.title.allowedTypes), true);
   assert.equal(Object.isFrozen(result.policy.editorial.vagueAbsolutes), true);
+});
+
+test('loads bounded version-2 workflow preferences with safe defaults', (context) => {
+  const configuredDirectory = createRepository(context);
+  commitPolicy(
+    configuredDirectory,
+    `${JSON.stringify({
+      version: 2,
+      title: {
+        scopeMode: 'optional',
+        allowedScopes: ['cli', 'release'],
+      },
+      pullRequest: {
+        issueContext: 'required',
+        template: 'preserve',
+      },
+      merge: {
+        strategy: 'squash',
+        deleteBranch: true,
+      },
+    }, null, 2)}\n`,
+  );
+
+  const configured = repositoryPolicy.loadRepositoryPolicy({
+    cwd: configuredDirectory,
+  });
+
+  assert.equal(configured.policy.version, 2);
+  assert.deepEqual(configured.policy.pullRequest, {
+    issueContext: 'required',
+    template: 'preserve',
+  });
+  assert.deepEqual(configured.policy.merge, {
+    strategy: 'squash',
+    deleteBranch: true,
+  });
+  assert.equal(Object.isFrozen(configured.policy.pullRequest), true);
+  assert.equal(Object.isFrozen(configured.policy.merge), true);
+
+  const defaultedDirectory = createRepository(context);
+  commitPolicy(defaultedDirectory, '{"version":2}');
+  const defaulted = repositoryPolicy.loadRepositoryPolicy({
+    cwd: defaultedDirectory,
+  });
+
+  assert.deepEqual(defaulted.policy.pullRequest, {
+    issueContext: 'recommended',
+    template: 'create',
+  });
+  assert.deepEqual(defaulted.policy.merge, {
+    strategy: 'squash',
+    deleteBranch: false,
+  });
+});
+
+test('version 2 rejects unsafe workflow preferences and safety-disabling fields', (context) => {
+  const invalidDocuments: ReadonlyArray<{
+    readonly document: Record<string, unknown>;
+    readonly expected: RegExp;
+  }> = [
+    {
+      document: { version: 2, pullRequest: { issueContext: 'off' } },
+      expected: /pullRequest\.issueContext is invalid/u,
+    },
+    {
+      document: { version: 2, pullRequest: { template: 'overwrite' } },
+      expected: /pullRequest\.template is invalid/u,
+    },
+    {
+      document: { version: 2, merge: { strategy: 'rebase' } },
+      expected: /merge\.strategy is invalid/u,
+    },
+    {
+      document: {
+        version: 2,
+        merge: { strategy: 'platform', deleteBranch: true },
+      },
+      expected: /cannot delete branches with platform-managed merges/u,
+    },
+    {
+      document: { version: 2, merge: { deleteBranch: 'yes' } },
+      expected: /merge\.deleteBranch must be a boolean/u,
+    },
+    {
+      document: { version: 2, grounding: false },
+      expected: /contains an unknown field/u,
+    },
+    {
+      document: { version: 2, critic: false },
+      expected: /contains an unknown field/u,
+    },
+    {
+      document: { version: 2, coverage: 'off' },
+      expected: /contains an unknown field/u,
+    },
+    {
+      document: { version: 2, minimumClaims: 0 },
+      expected: /contains an unknown field/u,
+    },
+  ];
+
+  for (const [index, { document, expected }] of invalidDocuments.entries()) {
+    const directory = createRepository(context);
+    commitPolicy(
+      directory,
+      `${JSON.stringify(document)}\n`,
+      `chore: add invalid version-2 policy ${index}`,
+    );
+    assert.throws(
+      () => repositoryPolicy.loadRepositoryPolicy({ cwd: directory }),
+      expected,
+    );
+  }
+});
+
+test('policy evidence protection removes version-2 workflow values before provider use', () => {
+  const sentinel = 'gsk_version_2_policy_sentinel';
+  const protectedBundle = repositoryPolicy.protectRepositoryPolicyEvidence({
+    schemaVersion: 1,
+    snapshot: { headSha: 'a'.repeat(40) },
+    items: [
+      {
+        id: 'change-policy',
+        kind: 'change',
+        basis: 'observed',
+        source: { kind: 'git-diff', locator: '.diffwrightrc.json' },
+        payload: {
+          status: 'modified',
+          path: '.diffwrightrc.json',
+          additions: 1,
+          deletions: 1,
+          binary: false,
+          patch: `+{"version":2,"pullRequest":{"issueContext":"${sentinel}"}}`,
+        },
+      },
+    ],
+    receipts: [],
+    coverage: { complete: true, gaps: [] },
+  });
+
+  assert.equal(protectedBundle.items[0]?.source.kind, 'git-policy-metadata');
+  assert.equal(protectedBundle.items[0]?.payload.patch, null);
+  assert.doesNotMatch(JSON.stringify(protectedBundle), new RegExp(sentinel, 'u'));
 });
 
 test('loads all bounded data-only fields and replaces configured arrays', (context) => {

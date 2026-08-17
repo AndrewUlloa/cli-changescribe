@@ -34,6 +34,10 @@ test('package defines a compiled TypeScript lifecycle', () => {
   );
   assert.equal(pkg.scripts.prepack, 'npm run build');
   assert.match(pkg.scripts.test, /npm run build/);
+  assert.equal(
+    pkg.scripts['pr:merge'],
+    'npm run build && node ./bin/diffwright.js merge',
+  );
   assert.deepEqual(pkg.files, [
     'bin',
     'dist',
@@ -49,6 +53,40 @@ test('package defines a compiled TypeScript lifecycle', () => {
   assert.equal(pkg.license, 'Apache-2.0');
   assert.equal(typeof pkg.devDependencies.typescript, 'string');
   assert.equal(typeof pkg.devDependencies['@types/node'], 'string');
+});
+
+test('repository governance dogfoods policy, template, and guarded merge', () => {
+  const policy = readJson<{
+    version: number;
+    title: { scopeMode: string; allowedScopes: string[] };
+    pullRequest: { issueContext: string; template: string };
+    merge: { strategy: string; deleteBranch: boolean };
+  }>('.diffwrightrc.json');
+  const template = fs.readFileSync(
+    path.join(repoRoot, '.github', 'pull_request_template.md'),
+    'utf8',
+  );
+  const agents = fs.readFileSync(path.join(repoRoot, 'AGENTS.md'), 'utf8');
+
+  assert.equal(policy.version, 2);
+  assert.equal(policy.title.scopeMode, 'optional');
+  assert.deepEqual(policy.title.allowedScopes, [
+    'cli', 'commit', 'evidence', 'init', 'merge', 'policy', 'pr',
+    'provider', 'release', 'setup',
+  ]);
+  assert.deepEqual(policy.pullRequest, {
+    issueContext: 'recommended',
+    template: 'create',
+  });
+  assert.deepEqual(policy.merge, {
+    strategy: 'squash',
+    deleteBranch: false,
+  });
+  assert.match(template, /## Summary/);
+  assert.match(template, /## Validation/);
+  assert.match(template, /## Context/);
+  assert.match(agents, /npm run pr:merge/);
+  assert.match(agents, /every substantive final-diff area/);
 });
 
 test('Diffwright ships the complete Apache 2.0 license and attribution notice', () => {
@@ -88,8 +126,10 @@ test('all application sources are TypeScript and compiled output exists', () => 
     'arguments',
     'artifact-draft',
     'artifact-critic',
+    'artifact-completeness',
     'artifact-renderer',
     'change-evidence',
+    'change-map',
     'cli',
     'commit',
     'context-evidence',
@@ -97,7 +137,11 @@ test('all application sources are TypeScript and compiled output exists', () => 
     'editorial-policy',
     'gate-receipts',
     'git-evidence',
+    'github-repository',
     'init',
+    'merge',
+    'model-evidence',
+    'operation-timings',
     'package-manager',
     'project-setup',
     'prompts',
@@ -113,6 +157,8 @@ test('all application sources are TypeScript and compiled output exists', () => 
     'subprocess',
     'setup-files',
     'staged-evidence',
+    'title-semantics',
+    'title-check',
   ];
   const sourceFiles = fs.readdirSync(path.join(repoRoot, 'src')).sort();
 

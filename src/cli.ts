@@ -5,21 +5,27 @@ import { runDoctor } from './doctor';
 import { CliArgumentError, validateCommandArguments } from './arguments';
 import { formatSafeError } from './errors';
 import { runInit } from './init';
+import { runMerge } from './merge';
 import { runPrSummary } from './pr-summary';
 import { knownSecretValues, loadRuntimeConfig } from './runtime-config';
+import { runTitleCheck } from './title-check';
 
 interface CliRunners {
   runCommit(args: string[]): Promise<void>;
   runDoctor(args: string[]): Promise<void>;
   runInit(args: string[]): void | Promise<void>;
+  runMerge(args: string[]): Promise<void>;
   runPrSummary(args: string[]): Promise<void>;
+  runTitleCheck(args: string[]): void | Promise<void>;
 }
 
 const defaultRunners: CliRunners = {
   runCommit,
   runDoctor,
   runInit,
+  runMerge,
   runPrSummary,
+  runTitleCheck,
 };
 
 const CLI_REFERENCE =
@@ -46,6 +52,8 @@ Commands:
   pr            Generate a PR summary (optionally create/update PR)
   doctor        Validate provider configuration (add --live for one request)
   init          Interactively configure Diffwright in the current repo
+  merge         Validate and squash-merge the current pull request
+  title-check   Validate a pull-request event title against base policy
   pr:summary    Alias for pr
   feature:pr    Alias for: pr --base staging --create-pr --mode feature
   staging:pr    Alias for: pr --base main --create-pr --mode release
@@ -59,6 +67,8 @@ Examples:
   diffwright doctor --live
   diffwright commit --all --dry-run
   diffwright pr --base main --mode release
+  diffwright merge --dry-run
+  diffwright title-check --event-file "$GITHUB_EVENT_PATH"
   diffwright feature:pr
   diffwright staging:pr
 
@@ -67,13 +77,14 @@ Complete reference: ${CLI_REFERENCE}
 }
 
 function printCommitHelp(): void {
-  console.log(`Usage: diffwright commit [--dry-run] [--all] [--context-file <path>]
+  console.log(`Usage: diffwright commit [--dry-run] [--all] [--timings] [--context-file <path>]
 
 Generate a Conventional Commit message from the staged diff.
 
 Options:
   --dry-run   Generate and print the message without committing or pushing.
   --all       Stage every tracked and untracked working-tree change first.
+  --timings   Print privacy-safe phase durations after the command finishes.
   --context-file <path>
               Add bounded source-agnostic intent from a regular project file.
 
@@ -102,10 +113,12 @@ Options:
   --yes               Approve GitHub mutation noninteractively after validation
   --skip-format       Skip the optional package-manager format script
   --no-format         Alias for --skip-format
+  --timings           Print privacy-safe phase durations after the command finishes
 
 Dry runs may fetch the base branch. Normal runs use a structured draft request
-and one terminal critic request. One deterministic draft repair can raise the
-maximum to three requests. They write detailed and PR-ready summary files.
+and one terminal critic request. Deterministic validation, primary replacement,
+and substantive-coverage repair are bounded; the combined maximum is five
+requests. Successful runs write detailed and PR-ready summary files.
 
 Complete reference: ${CLI_REFERENCE}
 `);
@@ -141,13 +154,53 @@ Options:
   --base <branch>                Pull-request base branch
   --agents <selection>           claude, codex, claude,codex, codex,claude, or none
   --credential-source <source>   existing or file; never a credential value
+  --scope-mode <mode>            optional or forbidden
+  --scope <token>                Confirm an allowed scope; repeatable
+  --issue-context <expectation>  optional, recommended, or required
+  --merge-strategy <strategy>    squash or platform
+  --delete-branch                Delete the branch after a confirmed squash merge
+  --pr-template <preference>     create or preserve
   --live                         Make one provider request after the offline doctor check
 
 After guided confirmation or deterministic invocation, init may install the exact Diffwright
 version and write package.json, .env.local, .gitignore,
-CLAUDE.md, or AGENTS.md. Existing custom package scripts
+CLAUDE.md, AGENTS.md, or .diffwrightrc.json. Existing custom package scripts
 and file content are preserved. The offline doctor check runs after setup;
 --live opts into one additional provider request.
+
+Complete reference: ${CLI_REFERENCE}
+`);
+}
+
+function printMergeHelp(): void {
+  console.log(`Usage: diffwright merge [--dry-run] [--yes]
+
+Validate the current pull request and merge its exact reviewed head as one
+squash commit using its Conventional Commit title. No provider calls are made.
+
+Options:
+  --dry-run        Validate and preview without merging
+  --yes            Approve the merge noninteractively after validation
+
+Diffwright pins the origin repository, local and remote head, base revision,
+title policy, merge preference, review decision, and check results before
+invoking GitHub CLI. A platform-managed policy stops before mutation. When the
+pinned policy requests branch deletion, Diffwright deletes only the unchanged
+reviewed ref after GitHub confirms the exact squash commit.
+
+Complete reference: ${CLI_REFERENCE}
+`);
+}
+
+function printTitleCheckHelp(): void {
+  console.log(`Usage: diffwright title-check --event-file <path>
+
+Read one bounded pull-request event and validate its title against canonical
+Conventional Commit grammar and the repository policy pinned to the event's
+base revision. This command makes no provider, network, or GitHub mutation.
+
+Options:
+  --event-file <path>   GitHub pull_request event JSON file
 
 Complete reference: ${CLI_REFERENCE}
 `);
@@ -160,6 +213,10 @@ function printCommandHelp(command: string): void {
     printDoctorHelp();
   } else if (command === 'init') {
     printInitHelp();
+  } else if (command === 'merge') {
+    printMergeHelp();
+  } else if (command === 'title-check') {
+    printTitleCheckHelp();
   } else {
     printPrHelp();
   }
@@ -188,12 +245,14 @@ export async function runCli(
     (validatedCommand === 'commit' ||
       validatedCommand === 'doctor' ||
       validatedCommand === 'init' ||
+      validatedCommand === 'merge' ||
+      validatedCommand === 'title-check' ||
       validatedCommand === 'pr')
   ) {
     printCommandHelp(validatedCommand);
     return 0;
   }
-  if (validatedCommand === 'commit' || validatedCommand === 'doctor' || validatedCommand === 'init' || validatedCommand === 'pr') {
+  if (validatedCommand === 'commit' || validatedCommand === 'doctor' || validatedCommand === 'init' || validatedCommand === 'merge' || validatedCommand === 'title-check' || validatedCommand === 'pr') {
     try {
       validateCommandArguments(validatedCommand, rest);
     } catch (error) {
@@ -219,6 +278,16 @@ export async function runCli(
 
   if (command === 'init') {
     await runners.runInit(rest);
+    return 0;
+  }
+
+  if (command === 'merge') {
+    await runners.runMerge(rest);
+    return 0;
+  }
+
+  if (command === 'title-check') {
+    await runners.runTitleCheck(rest);
     return 0;
   }
 

@@ -130,7 +130,7 @@ test('PR dry-run inspects a valid range without API calls or output writes', (co
 
   const result = spawnSync(
     bin,
-    ['pr', '--dry-run', '--base', 'main', '--out', output],
+    ['pr', '--dry-run', '--timings', '--base', 'main', '--out', output],
     {
       cwd: directory,
       encoding: 'utf8',
@@ -142,6 +142,9 @@ test('PR dry-run inspects a valid range without API calls or output writes', (co
   assert.match(result.stdout, /Dry run \(no API calls\)/);
   assert.match(result.stdout, /Provider: cerebras/);
   assert.match(result.stdout, /Model: gpt-oss-120b/);
+  assert.match(result.stdout, /Diffwright timings \(milliseconds\)/);
+  assert.match(result.stdout, /git-evidence: \d+\.\d{3}/);
+  assert.match(result.stdout, /total: \d+\.\d{3}/);
   assert.equal(fs.existsSync(output), false);
   assert.equal(git(directory, ['rev-parse', 'HEAD']).trim(), headBefore);
 });
@@ -204,14 +207,26 @@ test('commit dry-run treats staged filenames as data and never commits', async (
     completeChat: async (_resolved, input) => {
       completionCalls += 1;
       if (JSON.stringify(input.messages).includes('independently audit')) {
+        const prompt = input.messages
+          .map((message) =>
+            typeof message.content === 'string' ? message.content : '',
+          )
+          .join('\n');
+        const match = /Model-authored candidates:\n(\[[\s\S]+\])$/u.exec(prompt);
+        const candidates = match?.[1] === undefined
+          ? []
+          : (JSON.parse(match[1]) as Array<{
+              candidateId: string;
+              evidenceIds: string[];
+            }>).map((candidate) => ({
+              candidateId: candidate.candidateId,
+              evidenceIds: candidate.evidenceIds,
+              supported: true,
+            }));
         return {
           content: JSON.stringify({
             schemaVersion: 1,
-            candidates: [{
-              candidateId: 'claim:claim-change',
-              evidenceIds: ['change-1'],
-              supported: true,
-            }],
+            candidates,
           }),
           reasoning: '',
           finishReason: 'stop',
@@ -221,7 +236,7 @@ test('commit dry-run treats staged filenames as data and never commits', async (
         content: JSON.stringify({
           schemaVersion: 1,
           title: {
-            type: 'fix',
+            type: 'chore',
             breaking: false,
             subject: 'treat staged filenames as data',
             claimId: 'claim-change',

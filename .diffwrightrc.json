@@ -1,0 +1,27 @@
+{
+  "$schema": "https://raw.githubusercontent.com/AndrewUlloa/diffwright/main/documentation/diffwrightrc.schema.json",
+  "version": 2,
+  "title": {
+    "scopeMode": "optional",
+    "allowedScopes": [
+      "cli",
+      "commit",
+      "evidence",
+      "init",
+      "merge",
+      "policy",
+      "pr",
+      "provider",
+      "release",
+      "setup"
+    ]
+  },
+  "pullRequest": {
+    "issueContext": "recommended",
+    "template": "create"
+  },
+  "merge": {
+    "strategy": "squash",
+    "deleteBranch": false
+  }
+}

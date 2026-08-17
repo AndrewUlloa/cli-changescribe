@@ -9,10 +9,13 @@ export type EvidenceKind =
 
 export type ClaimKind =
   | 'change'
+  | 'problem'
   | 'rationale'
   | 'verification'
+  | 'compatibility'
   | 'risk'
   | 'review-focus'
+  | 'non-goal'
   | 'follow-up';
 
 export type ChangeStatus =
@@ -121,6 +124,17 @@ export interface VerificationReceipt {
   exitCode: number | null;
   durationMs: number;
   source: 'diffwright' | 'external';
+  result?: Readonly<{
+    type: 'test-summary';
+    tests: number;
+    passed: number;
+    failed: number;
+    skipped: number;
+    cancelled: number;
+    todo: number;
+  }>;
+  limitation?: 'output-unrecognized';
+  skipReason?: 'not-configured' | 'user-requested';
 }
 
 export interface EvidenceBundleInput {
@@ -348,6 +362,28 @@ function validateEvidenceItem(
 }
 
 function validateReceipt(receipt: VerificationReceipt): void {
+  const allowedReceiptKeys = new Set([
+    'id',
+    'command',
+    'status',
+    'exitCode',
+    'durationMs',
+    'source',
+    'result',
+    'limitation',
+    'skipReason',
+  ]);
+  if (Object.keys(receipt).some((key) => !allowedReceiptKeys.has(key))) {
+    throw new Error('Receipt contains unsupported fields.');
+  }
+  if (
+    Object.keys(receipt.command).length !== 3 ||
+    !['file', 'args', 'display'].every((key) =>
+      Object.hasOwn(receipt.command, key)
+    )
+  ) {
+    throw new Error('Receipt command has an invalid shape.');
+  }
   validateId(receipt.id, 'receipt');
   validateText(receipt.command.file, 'Receipt executable', MAX_LOCATOR_CHARS);
   validateText(receipt.command.display, 'Receipt display', MAX_LOCATOR_CHARS);
@@ -356,6 +392,12 @@ function validateReceipt(receipt: VerificationReceipt): void {
   }
   if (!Number.isFinite(receipt.durationMs) || receipt.durationMs < 0) {
     throw new Error('Receipt duration must be a nonnegative finite number.');
+  }
+  if (!['passed', 'failed', 'skipped'].includes(receipt.status)) {
+    throw new Error('Receipt status is invalid.');
+  }
+  if (receipt.source !== 'diffwright' && receipt.source !== 'external') {
+    throw new Error('Receipt source is invalid.');
   }
   if (receipt.status === 'passed' && receipt.exitCode !== 0) {
     throw new Error('Passed receipt must have exit code 0.');
@@ -368,6 +410,70 @@ function validateReceipt(receipt: VerificationReceipt): void {
   }
   if (receipt.status === 'skipped' && receipt.exitCode !== null) {
     throw new Error('Skipped receipt must not have an exit code.');
+  }
+  if (
+    receipt.status === 'skipped' &&
+    receipt.skipReason !== 'not-configured' &&
+    receipt.skipReason !== 'user-requested'
+  ) {
+    throw new Error('Skipped receipt requires a typed reason.');
+  }
+  if (receipt.status !== 'skipped' && receipt.skipReason !== undefined) {
+    throw new Error('Only skipped receipts may include a skip reason.');
+  }
+  if (receipt.result !== undefined) {
+    const result = receipt.result;
+    if (
+      Object.keys(result).length !== 7 ||
+      ![
+        'type',
+        'tests',
+        'passed',
+        'failed',
+        'skipped',
+        'cancelled',
+        'todo',
+      ].every((key) => Object.hasOwn(result, key))
+    ) {
+      throw new Error('Receipt test summary has an invalid shape.');
+    }
+    const counts = [
+      result.tests,
+      result.passed,
+      result.failed,
+      result.skipped,
+      result.cancelled,
+      result.todo,
+    ];
+    if (
+      result.type !== 'test-summary' ||
+      counts.some((count) => !Number.isSafeInteger(count) || count < 0) ||
+      result.tests !==
+        result.passed + result.failed + result.skipped + result.cancelled + result.todo
+    ) {
+      throw new Error('Receipt test summary is invalid.');
+    }
+    if (
+      receipt.status === 'passed' &&
+      (result.failed > 0 || result.cancelled > 0)
+    ) {
+      throw new Error('Passed receipt cannot report failed or cancelled tests.');
+    }
+  }
+  if (
+    receipt.limitation !== undefined &&
+    receipt.limitation !== 'output-unrecognized'
+  ) {
+    throw new Error('Receipt limitation is invalid.');
+  }
+  if (receipt.result !== undefined && receipt.limitation !== undefined) {
+    throw new Error('Receipt cannot contain both a result and a limitation.');
+  }
+  if (
+    receipt.status === 'skipped' &&
+    (receipt.result !== undefined || receipt.limitation !== undefined)
+  ) {
+    throw new Error('Skipped receipt cannot contain a result or limitation.');
   }
 }
 
@@ -401,11 +507,49 @@ function validateClaimKind(
     throw new Error(`Change claim ${claim.id} requires change evidence.`);
   }
   if (
+    claim.kind === 'problem' &&
+    (claim.basis !== 'provided' ||
+      !cited.some((evidence) => evidence.kind === 'intent'))
+  ) {
+    throw new Error(
+      `Problem claim ${claim.id} requires provided intent evidence.`,
+    );
+  }
+  if (
     claim.kind === 'rationale' &&
     !cited.some((evidence) => evidence.kind === 'intent')
   ) {
     throw new Error(
       `Rationale claim ${claim.id} requires provided intent evidence.`,
+    );
+  }
+  if (
+    claim.kind === 'compatibility' &&
+    (claim.basis !== 'provided' ||
+      !cited.some(
+        (evidence) =>
+          evidence.kind === 'intent' ||
+          (evidence.kind === 'constraint' &&
+            (evidence.payload.name === 'compatibility' ||
+              evidence.payload.name === 'preserved-behavior')),
+      ))
+  ) {
+    throw new Error(
+      `Compatibility claim ${claim.id} requires provided intent or compatibility constraint evidence.`,
+    );
+  }
+  if (
+    claim.kind === 'non-goal' &&
+    (claim.basis !== 'provided' ||
+      !cited.some(
+        (evidence) =>
+          evidence.kind === 'intent' ||
+          (evidence.kind === 'constraint' &&
+            evidence.payload.name === 'non-goal'),
+      ))
+  ) {
+    throw new Error(
+      `Non-goal claim ${claim.id} requires provided intent or non-goal constraint evidence.`,
     );
   }
   if (claim.kind === 'verification') {

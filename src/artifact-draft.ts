@@ -9,8 +9,10 @@ export type ArtifactSectionKind =
   | 'changes'
   | 'rationale'
   | 'verification'
+  | 'compatibility'
   | 'review-focus'
   | 'risks'
+  | 'non-goals'
   | 'follow-ups';
 
 export interface ConventionalTitleDraft {
@@ -50,6 +52,161 @@ export interface ArtifactDraft {
   readonly trailers: readonly ArtifactTrailerDraft[];
 }
 
+export interface ArtifactDraftResponseFormat {
+  readonly type: 'json-schema';
+  readonly name: 'diffwright_artifact_draft';
+  readonly schema: Readonly<Record<string, unknown>>;
+}
+
+export const ARTIFACT_DRAFT_RESPONSE_FORMAT: ArtifactDraftResponseFormat =
+  deepFreeze({
+    type: 'json-schema',
+    name: 'diffwright_artifact_draft',
+    schema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['schemaVersion', 'title', 'claims', 'sections', 'trailers'],
+      properties: {
+        schemaVersion: { type: 'integer', const: 1 },
+        title: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['type', 'scope', 'breaking', 'subject', 'claimId'],
+          properties: {
+            type: { type: 'string' },
+            scope: { type: ['string', 'null'] },
+            breaking: { type: 'boolean' },
+            subject: { type: 'string' },
+            claimId: { type: 'string' },
+          },
+        },
+        claims: {
+          type: 'array',
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: [
+              'id',
+              'kind',
+              'text',
+              'evidenceIds',
+              'basis',
+              'significance',
+            ],
+            properties: {
+              id: { type: 'string' },
+              kind: {
+                type: 'string',
+                enum: [
+                  'change',
+                  'problem',
+                  'rationale',
+                  'verification',
+                  'compatibility',
+                  'risk',
+                  'review-focus',
+                  'non-goal',
+                  'follow-up',
+                ],
+              },
+              text: { type: 'string' },
+              evidenceIds: {
+                type: 'array',
+                items: { type: 'string' },
+              },
+              basis: {
+                type: 'string',
+                enum: ['observed', 'provided', 'inferred'],
+              },
+              significance: {
+                type: 'string',
+                enum: ['primary', 'supporting', 'incidental'],
+              },
+            },
+          },
+        },
+        sections: {
+          type: 'array',
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['kind', 'claimIds'],
+            properties: {
+              kind: {
+                type: 'string',
+                enum: [
+                  'summary',
+                  'changes',
+                  'rationale',
+                  'verification',
+                  'compatibility',
+                  'review-focus',
+                  'risks',
+                  'non-goals',
+                  'follow-ups',
+                ],
+              },
+              claimIds: {
+                type: 'array',
+                items: { type: 'string' },
+              },
+            },
+          },
+        },
+        trailers: {
+          type: 'array',
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['token', 'value', 'evidenceIds'],
+            properties: {
+              token: { type: 'string' },
+              value: { type: 'string' },
+              evidenceIds: {
+                type: 'array',
+                items: { type: 'string' },
+              },
+            },
+          },
+        },
+      },
+    },
+  });
+
+export const PRIMARY_GROUNDING_REPAIR_INSTRUCTION =
+  'Repair category: primary-grounding. Replace the title and primary claim with the smallest conservative factual summary that represents every required substantive change evidence ID. Cite those evidence IDs on the primary claim. Omit optional claims and trailers.';
+
+export const MINIMAL_ARTIFACT_REPAIR_INSTRUCTION =
+  'For this repair, return only a title, one observed primary change claim, one Summary section containing that claim, and an empty trailers array. Preserve any explicitly required valid title type, scope, and breaking value. Omit every optional claim.';
+
+export function artifactRepairCategory(instruction: string): string {
+  return /^Repair category: ([a-z-]+)\./u.exec(instruction)?.[1] ??
+    'artifact-structure';
+}
+
+export function artifactRepairInstruction(error: unknown): string {
+  const message = error instanceof Error ? error.message : '';
+  if (
+    /JSON|schema version|must be an object|bounded array|missing or unknown fields/iu
+      .test(message)
+  ) {
+    return 'Repair category: json-shape. Return one complete JSON object with exactly the required fields and value types.';
+  }
+  if (/title|Conventional Commit|breaking-change/iu.test(message)) {
+    return 'Repair category: title-policy. Correct the title grammar, title-to-primary-claim match, type, scope, breaking marker, and 72-character hard limit.';
+  }
+  if (/evidence|observed|provided|substantive|supporting/iu.test(message)) {
+    return 'Repair category: evidence-grounding. Remove unsupported claims or cite only evidence IDs that directly support each remaining claim.';
+  }
+  if (/section|claim|primary|summary/iu.test(message)) {
+    return 'Repair category: claim-structure. Use one observed primary change in the sole summary and assign every other claim to exactly one compatible section.';
+  }
+  if (/trailer/iu.test(message)) {
+    return 'Repair category: trailer-structure. Remove unsupported trailers and keep only trailers backed by provided evidence.';
+  }
+  return 'Repair category: artifact-structure. Return the smallest valid draft that follows the exact required shape and omits optional unsupported content.';
+}
+
 const MAX_DRAFT_CHARS = 256 * 1024;
 const MAX_CLAIMS = 128;
 const MAX_CLAIM_TEXT_CHARS = 8_192;
@@ -67,16 +224,21 @@ const SECTION_KINDS = new Set<ArtifactSectionKind>([
   'changes',
   'rationale',
   'verification',
+  'compatibility',
   'review-focus',
   'risks',
+  'non-goals',
   'follow-ups',
 ]);
 const CLAIM_KINDS = new Set<DraftClaim['kind']>([
   'change',
+  'problem',
   'rationale',
   'verification',
+  'compatibility',
   'risk',
   'review-focus',
+  'non-goal',
   'follow-up',
 ]);
 const CLAIM_BASES = new Set<DraftClaim['basis']>([
@@ -90,12 +252,14 @@ const CLAIM_SIGNIFICANCE = new Set<DraftClaim['significance']>([
   'incidental',
 ]);
 const SECTION_CLAIM_KINDS: Readonly<Record<ArtifactSectionKind, ReadonlySet<DraftClaim['kind']>>> = {
-  summary: new Set(['change']),
+  summary: new Set(['change', 'problem']),
   changes: new Set(['change']),
   rationale: new Set(['rationale']),
   verification: new Set(['verification']),
+  compatibility: new Set(['compatibility']),
   'review-focus': new Set(['review-focus']),
   risks: new Set(['risk']),
+  'non-goals': new Set(['non-goal']),
   'follow-ups': new Set(['follow-up']),
 };
 const DEFAULT_SUPPORTING_PATHS = Object.freeze([
@@ -201,7 +365,7 @@ export function parseArtifactDraft(
       'A breaking title requires an explicit breaking-change constraint.',
     );
   }
-  const rawSections = boundedArray(root.sections, 'Artifact sections', 7);
+  const rawSections = boundedArray(root.sections, 'Artifact sections', 9);
   const claimKinds = new Map(claims.map((claim) => [claim.id, claim.kind]));
   const sections = rawSections.map((value) =>
     parseSection(value, claimIds, claimKinds),
@@ -252,7 +416,7 @@ function parseTitle(value: unknown): ArtifactTitleDraft {
   if (!TYPE_RE.test(type)) {
     throw new Error('Artifact title type is invalid.');
   }
-  const scope = title.scope === undefined
+  const scope = title.scope === undefined || title.scope === null
     ? undefined
     : boundedString(title.scope, 'Artifact title scope', 64);
   if (scope !== undefined && !SCOPE_RE.test(scope)) {
@@ -300,13 +464,21 @@ function assertPrimarySelection(
   }
   const primary = primaryClaims[0];
   const summarySections = sections.filter((section) => section.kind === 'summary');
+  const summaryClaimIds = summarySections[0]?.claimIds ?? [];
+  const summaryProblemClaims = summaryClaimIds
+    .slice(1)
+    .map((claimId) => claims.find((claim) => claim.id === claimId));
   if (
     summarySections.length !== 1 ||
-    summarySections[0]?.claimIds.length !== 1 ||
-    summarySections[0].claimIds[0] !== primary.id
+    summaryClaimIds.length < 1 ||
+    summaryClaimIds.length > 2 ||
+    summaryClaimIds[0] !== primary.id ||
+    summaryProblemClaims.some(
+      (claim) => claim?.kind !== 'problem' || claim.basis !== 'provided',
+    )
   ) {
     throw new Error(
-      'Artifact summary must contain only the observed primary change claim.',
+      'Artifact summary must contain the observed primary change and at most one provided problem claim.',
     );
   }
   if (title.claimId !== primary.id) {
@@ -365,6 +537,22 @@ export function classifyChangeEvidenceRole(
   policy: ArtifactSelectionPolicy = {},
 ): ChangeEvidenceRole {
   return isSupportingChange(item, policy) ? 'supporting' : 'substantive';
+}
+
+export function eligiblePrimaryChangeEvidenceIds(
+  evidence: EvidenceBundle,
+  policy: ArtifactSelectionPolicy = {},
+): readonly string[] {
+  const changes = evidence.items.filter(
+    (item): item is Extract<EvidenceBundle['items'][number], { kind: 'change' }> =>
+      item.kind === 'change',
+  );
+  const substantive = changes.filter(
+    (item) => classifyChangeEvidenceRole(item, policy) === 'substantive',
+  );
+  return Object.freeze(
+    (substantive.length > 0 ? substantive : changes).map((item) => item.id),
+  );
 }
 
 function isSupportingPath(

@@ -35,6 +35,9 @@ interface TransportModule {
     messages: Array<{ role: string; content: string }>,
     outputLimit?: number,
     intent?: 'workflow' | 'doctor',
+    responseFormat?:
+      | 'json-object'
+      | { type: 'json-schema'; name: string; schema: Record<string, unknown> },
   ): Record<string, unknown>;
   completeChat(
     resolved: ResolvedProvider,
@@ -42,10 +45,14 @@ interface TransportModule {
       messages: Array<{ role: string; content: string }>;
       outputLimit?: number;
       intent?: 'workflow' | 'doctor';
+      responseFormat?:
+        | 'json-object'
+        | { type: 'json-schema'; name: string; schema: Record<string, unknown> };
     },
     options?: { timeoutMs?: number },
   ): Promise<ParsedCompletion>;
   parseChatResponse(value: unknown): ParsedCompletion;
+  isStructuredOutputGenerationFailure(error: unknown): boolean;
 }
 
 interface ErrorsModule {
@@ -162,6 +169,78 @@ test('Groq reasoning effort is workflow-only for the retained default model', ()
       1024,
     ),
     false,
+  );
+});
+
+test('Groq JSON workflows request provider-enforced JSON without widening compatibility', () => {
+  const messages = [{ role: 'user', content: 'return JSON' }];
+  const groq = profile({
+    id: 'groq',
+    model: 'openai/gpt-oss-120b',
+    outputTokenField: 'max_completion_tokens',
+  });
+  assert.deepEqual(
+    transport.buildChatRequest(
+      groq,
+      messages,
+      1024,
+      'workflow',
+      'json-object',
+    ).response_format,
+    { type: 'json_object' },
+  );
+  assert.deepEqual(
+    transport.buildChatRequest(
+      { ...groq, model: 'openai/gpt-oss-20b' },
+      messages,
+      1024,
+      'workflow',
+      'json-object',
+    ).response_format,
+    { type: 'json_object' },
+  );
+  assert.equal(
+    'response_format' in transport.buildChatRequest(
+      { ...groq, model: 'unverified-model' },
+      messages,
+      1024,
+      'workflow',
+      'json-object',
+    ),
+    false,
+  );
+  assert.equal(
+    'response_format' in transport.buildChatRequest(
+      profile(),
+      messages,
+      1024,
+      'workflow',
+      'json-object',
+    ),
+    false,
+  );
+  const schema = {
+    type: 'object',
+    additionalProperties: false,
+    properties: { supported: { type: 'boolean' } },
+    required: ['supported'],
+  };
+  assert.deepEqual(
+    transport.buildChatRequest(
+      groq,
+      messages,
+      1024,
+      'workflow',
+      { type: 'json-schema', name: 'artifact_critique', schema },
+    ).response_format,
+    {
+      type: 'json_schema',
+      json_schema: {
+        name: 'artifact_critique',
+        strict: true,
+        schema,
+      },
+    },
   );
 });
 
@@ -335,5 +414,34 @@ test('diagnostics classify actionable HTTP and network failures', () => {
       profile(),
     ).category,
     'tls',
+  );
+});
+
+test('recognizes only Groq-style strict JSON generation failures for fallback', () => {
+  const failedGeneration = errors.classifyTransportError(
+    Object.assign(
+      new Error(
+        "400 Failed to validate JSON. See 'failed_generation' for details.",
+      ),
+      { status: 400 },
+    ),
+    profile(),
+  );
+  const unrelatedBadRequest = errors.classifyTransportError(
+    Object.assign(new Error('invalid model parameter'), { status: 400 }),
+    profile(),
+  );
+
+  assert.equal(
+    transport.isStructuredOutputGenerationFailure(failedGeneration),
+    true,
+  );
+  assert.equal(
+    transport.isStructuredOutputGenerationFailure(unrelatedBadRequest),
+    false,
+  );
+  assert.equal(
+    transport.isStructuredOutputGenerationFailure(new Error('failed_generation')),
+    false,
   );
 });

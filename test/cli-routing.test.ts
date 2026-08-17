@@ -1,13 +1,18 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-type CliCall = ['commit' | 'doctor' | 'init' | 'pr', string[]];
+type CliCall = [
+  'commit' | 'doctor' | 'init' | 'merge' | 'pr' | 'title-check',
+  string[],
+];
 
 interface CliRunners {
   runCommit(args: string[]): Promise<void>;
   runDoctor(args: string[]): Promise<void>;
   runInit(args: string[]): Promise<void>;
+  runMerge(args: string[]): Promise<void>;
   runPrSummary(args: string[]): Promise<void>;
+  runTitleCheck(args: string[]): Promise<void>;
 }
 
 type RunCli = (argv: string[], runners?: CliRunners) => Promise<number>;
@@ -28,8 +33,14 @@ function recordingRunners(): { calls: CliCall[]; runners: CliRunners } {
       runInit: async (args: string[]) => {
         calls.push(['init', args]);
       },
+      runMerge: async (args: string[]) => {
+        calls.push(['merge', args]);
+      },
       runPrSummary: async (args: string[]) => {
         calls.push(['pr', args]);
+      },
+      runTitleCheck: async (args: string[]) => {
+        calls.push(['title-check', args]);
       },
     },
   };
@@ -42,12 +53,19 @@ test('CLI routes primary commands and the PR alias', async () => {
   assert.equal(await runCli(['init'], runners), 0);
   assert.equal(await runCli(['pr', '--base', 'develop'], runners), 0);
   assert.equal(await runCli(['pr:summary', '--dry-run'], runners), 0);
+  assert.equal(await runCli(['merge', '--dry-run'], runners), 0);
+  assert.equal(
+    await runCli(['title-check', '--event-file', 'event.json'], runners),
+    0,
+  );
 
   assert.deepEqual(calls, [
     ['commit', ['--dry-run']],
     ['init', []],
     ['pr', ['--base', 'develop']],
     ['pr', ['--dry-run']],
+    ['merge', ['--dry-run']],
+    ['title-check', ['--event-file', 'event.json']],
   ]);
 });
 
@@ -104,12 +122,32 @@ test('help does not invoke a command runner', async () => {
 test('each command exposes focused help with its real options and side effects', async () => {
   const cases = [
     {
+      invocation: ['title-check', '--help'],
+      expected: [
+        /Usage: diffwright title-check/,
+        /--event-file <path>/,
+        /base revision/i,
+        /no provider, network, or GitHub mutation/i,
+      ],
+    },
+    {
+      invocation: ['merge', '--help'],
+      expected: [
+        /Usage: diffwright merge/,
+        /--dry-run/,
+        /--yes/,
+        /squash/i,
+        /Conventional Commit title/i,
+      ],
+    },
+    {
       invocation: ['commit', '--help'],
       expected: [
         /Usage: diffwright commit/,
         /--dry-run/,
         /--all/,
         /--context-file <path>/,
+        /--timings/,
         /only the existing staged diff/i,
       ],
     },
@@ -121,6 +159,7 @@ test('each command exposes focused help with its real options and side effects',
         /--yes/,
         /--issue <number>/,
         /--context-file <path>/,
+        /--timings/,
       ],
     },
     {
@@ -175,7 +214,7 @@ test('global help links to the complete CLI reference', async () => {
   );
 });
 
-test('unknown commit, doctor, and init options fail before invoking a runner', async () => {
+test('unknown command options fail before invoking a runner', async () => {
   const { calls, runners } = recordingRunners();
 
   assert.equal(await runCli(['commit', '--dry-rnu'], runners), 1);
@@ -184,6 +223,21 @@ test('unknown commit, doctor, and init options fail before invoking a runner', a
   assert.equal(await runCli(['pr', '--context-file'], runners), 1);
   assert.equal(await runCli(['doctor', '--network'], runners), 1);
   assert.equal(await runCli(['init', '--force'], runners), 1);
+  assert.equal(await runCli(['merge', '--delete-branch'], runners), 1);
+  assert.equal(await runCli(['merge', '--yes', '--dry-run'], runners), 1);
+  assert.equal(await runCli(['title-check'], runners), 1);
+  assert.equal(await runCli(['title-check', '--event-file'], runners), 1);
+  assert.equal(
+    await runCli(
+      ['title-check', '--event-file', 'one.json', '--event-file', 'two.json'],
+      runners,
+    ),
+    1,
+  );
+  assert.equal(
+    await runCli(['title-check', '--event-file', 'event.json', '--network'], runners),
+    1,
+  );
 
   assert.deepEqual(calls, []);
 });
@@ -238,6 +292,19 @@ test('valid init options reach the runner unchanged', async () => {
     'codex,claude',
     '--credential-source',
     'file',
+    '--scope-mode',
+    'optional',
+    '--scope',
+    'cli',
+    '--scope',
+    'release',
+    '--issue-context',
+    'required',
+    '--merge-strategy',
+    'squash',
+    '--delete-branch',
+    '--pr-template',
+    'create',
     '--live',
   ];
 
@@ -309,6 +376,18 @@ test('invalid init values fail before invoking the runner', async () => {
     ['init', '--base', 'main', '--base', 'staging'],
     ['init', '--agents', 'claude', '--agents', 'codex'],
     ['init', '--credential-source', 'existing', '--credential-source', 'file'],
+    ['init', '--scope-mode'],
+    ['init', '--scope-mode', 'required'],
+    ['init', '--scope'],
+    ['init', '--scope', 'Unsafe Scope'],
+    ['init', '--scope-mode', 'forbidden', '--scope', 'cli'],
+    ['init', '--issue-context'],
+    ['init', '--issue-context', 'off'],
+    ['init', '--merge-strategy'],
+    ['init', '--merge-strategy', 'rebase'],
+    ['init', '--merge-strategy', 'platform', '--delete-branch'],
+    ['init', '--pr-template'],
+    ['init', '--pr-template', 'overwrite'],
     ['init', '--live', '--dry-run'],
     ['init', '--dry-run', '--live'],
     ['init', '--wat'],

@@ -1,6 +1,13 @@
 import { createHash, randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import {
+  parseRepositoryPolicyContents,
+  type IssueContextExpectation,
+  type MergeStrategy,
+  type PullRequestTemplatePreference,
+  type ScopeMode,
+} from './repository-policy';
 
 export const MANAGED_BLOCK_START = '<!-- diffwright:workflow:start -->';
 export const MANAGED_BLOCK_END = '<!-- diffwright:workflow:end -->';
@@ -8,10 +15,12 @@ export const MANAGED_BLOCK_END = '<!-- diffwright:workflow:end -->';
 export type SetupFileKind =
   | 'package-json'
   | 'environment'
+  | 'repository-policy'
   | 'agent-document';
 export type SemanticMutationKind =
   | 'package-script'
   | 'environment'
+  | 'repository-policy'
   | 'managed-block';
 export type SemanticMutationAction = 'added' | 'updated' | 'removed';
 
@@ -33,11 +42,29 @@ export interface EnvSafetyChecks {
   isIgnored(absolutePath: string): boolean;
 }
 
+export interface RepositoryPolicyPreferences {
+  readonly scopeMode: ScopeMode;
+  readonly allowedScopes?: readonly string[];
+  readonly issueContext: IssueContextExpectation;
+  readonly template: PullRequestTemplatePreference;
+  readonly mergeStrategy: MergeStrategy;
+  readonly deleteBranch: boolean;
+}
+
 export interface PlanSetupFileOptions {
   readonly path: string;
   readonly kind: SetupFileKind;
   readonly transform: (contents: string) => TransformResult;
   readonly envSafety?: EnvSafetyChecks;
+  readonly root?: string;
+  readonly createParent?: boolean;
+}
+
+interface DirectorySnapshot {
+  readonly path: string;
+  readonly exists: boolean;
+  readonly device: number | null;
+  readonly inode: number | null;
 }
 
 export interface SetupFilePlan extends TransformResult {
@@ -46,6 +73,9 @@ export interface SetupFilePlan extends TransformResult {
   readonly expectedHash: string | null;
   readonly expectedMode: number | null;
   readonly mode: number;
+  readonly root: string | null;
+  readonly directories: readonly Readonly<DirectorySnapshot>[];
+  readonly createParent: boolean;
 }
 
 export interface ApplySetupFileOptions {
@@ -285,6 +315,88 @@ export function transformEnvLocal(
   return result(contents, transformed, mutations);
 }
 
+const REPOSITORY_POLICY_SCHEMA =
+  'https://raw.githubusercontent.com/AndrewUlloa/diffwright/main/documentation/diffwrightrc.schema.json';
+
+function sameStrings(
+  left: readonly string[] | undefined,
+  right: readonly string[] | undefined,
+): boolean {
+  if (left === undefined || right === undefined) {
+    return left === right;
+  }
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+export function transformRepositoryPolicy(
+  contents: string,
+  preferences: Readonly<RepositoryPolicyPreferences>,
+): TransformResult {
+  let raw: Record<string, unknown>;
+  let existingVersion: 1 | 2 | null = null;
+  if (contents.length === 0) {
+    raw = {
+      $schema: REPOSITORY_POLICY_SCHEMA,
+      version: 2,
+    };
+  } else {
+    const existing = parseRepositoryPolicyContents(contents);
+    existingVersion = existing.version;
+    if (
+      existing.version === 2 &&
+      existing.title.scopeMode === preferences.scopeMode &&
+      sameStrings(existing.title.allowedScopes, preferences.allowedScopes) &&
+      existing.pullRequest.issueContext === preferences.issueContext &&
+      existing.pullRequest.template === preferences.template &&
+      existing.merge.strategy === preferences.mergeStrategy &&
+      existing.merge.deleteBranch === preferences.deleteBranch
+    ) {
+      return result(contents, contents, []);
+    }
+    raw = JSON.parse(contents) as Record<string, unknown>;
+    raw.version = 2;
+  }
+
+  const title =
+    typeof raw.title === 'object' && raw.title !== null && !Array.isArray(raw.title)
+      ? { ...(raw.title as Record<string, unknown>) }
+      : {};
+  title.scopeMode = preferences.scopeMode;
+  if (preferences.allowedScopes === undefined) {
+    delete title.allowedScopes;
+  } else {
+    title.allowedScopes = [...preferences.allowedScopes];
+  }
+  raw.title = title;
+  raw.pullRequest = {
+    issueContext: preferences.issueContext,
+    template: preferences.template,
+  };
+  raw.merge = {
+    strategy: preferences.mergeStrategy,
+    deleteBranch: preferences.deleteBranch,
+  };
+
+  const newline = newlineFor(contents);
+  const indentationMatch = contents.match(/(?:^|\r\n|\n|\r)([ \t]+)"/u);
+  const indentation = indentationMatch?.[1] ?? '  ';
+  let serialized = JSON.stringify(raw, null, indentation);
+  if (newline !== '\n') {
+    serialized = serialized.replaceAll('\n', newline);
+  }
+  serialized += newline;
+  parseRepositoryPolicyContents(serialized);
+  return result(contents, serialized, [
+    {
+      kind: 'repository-policy',
+      action: existingVersion === null ? 'added' : 'updated',
+      name: existingVersion === 1
+        ? 'Diffwright repository policy v1 -> v2'
+        : 'Diffwright repository policy v2',
+    },
+  ]);
+}
+
 function occurrenceCount(contents: string, needle: string): number {
   let count = 0;
   let start = 0;
@@ -412,6 +524,93 @@ function readSnapshot(targetPath: string): FileSnapshot {
   };
 }
 
+function directoryChain(
+  rootPath: string,
+  targetPath: string,
+  allowMissing: boolean,
+): readonly Readonly<DirectorySnapshot>[] {
+  const root = path.resolve(rootPath);
+  const target = path.resolve(targetPath);
+  if (target === root || !target.startsWith(`${root}${path.sep}`)) {
+    throw new Error('Setup target must remain inside the selected project root.');
+  }
+  const parent = path.dirname(target);
+  const relativeParent = path.relative(root, parent);
+  if (relativeParent.startsWith('..') || path.isAbsolute(relativeParent)) {
+    throw new Error('Setup target parent must remain inside the project root.');
+  }
+  const components = relativeParent === '' ? [] : relativeParent.split(path.sep);
+  const directories = [root];
+  for (let index = 0; index < components.length; index += 1) {
+    directories.push(path.join(root, ...components.slice(0, index + 1)));
+  }
+
+  let missingSeen = false;
+  const snapshots: DirectorySnapshot[] = [];
+  for (const directory of directories) {
+    try {
+      const stats = fs.lstatSync(directory);
+      if (missingSeen) {
+        throw new Error('A setup parent appeared beneath a missing directory.');
+      }
+      if (stats.isSymbolicLink() || !stats.isDirectory()) {
+        throw new Error('Setup parent directories must be real directories.');
+      }
+      snapshots.push({
+        path: directory,
+        exists: true,
+        device: stats.dev,
+        inode: stats.ino,
+      });
+    } catch (error) {
+      if (errorCode(error) !== 'ENOENT') {
+        throw error;
+      }
+      if (!allowMissing || directory === root) {
+        throw new Error('Setup target parent directory does not exist.');
+      }
+      missingSeen = true;
+      snapshots.push({
+        path: directory,
+        exists: false,
+        device: null,
+        inode: null,
+      });
+    }
+  }
+  return Object.freeze(snapshots.map((snapshot) => Object.freeze(snapshot)));
+}
+
+function assertDirectoriesCurrent(
+  directories: readonly Readonly<DirectorySnapshot>[],
+): void {
+  for (const expected of directories) {
+    try {
+      const stats = fs.lstatSync(expected.path);
+      if (
+        !expected.exists ||
+        stats.isSymbolicLink() ||
+        !stats.isDirectory() ||
+        stats.dev !== expected.device ||
+        stats.ino !== expected.inode
+      ) {
+        throw new Error('Setup parent directory changed since it was planned.');
+      }
+    } catch (error) {
+      if (errorCode(error) === 'ENOENT' && !expected.exists) {
+        continue;
+      }
+      if (
+        error instanceof Error &&
+        error.message === 'Setup parent directory changed since it was planned.'
+      ) {
+        throw error;
+      }
+      throw new Error('Setup parent directory changed since it was planned.');
+    }
+  }
+}
+
 function assertEnvironmentSafe(
   targetPath: string,
   checks: EnvSafetyChecks | undefined,
@@ -433,6 +632,10 @@ function defaultMode(kind: SetupFileKind): number {
 
 export function planSetupFile(options: PlanSetupFileOptions): SetupFilePlan {
   const targetPath = path.resolve(options.path);
+  const root = options.root === undefined ? null : path.resolve(options.root);
+  const directories = root === null
+    ? Object.freeze([] as Readonly<DirectorySnapshot>[])
+    : directoryChain(root, targetPath, options.createParent === true);
   if (options.kind === 'environment') {
     assertEnvironmentSafe(targetPath, options.envSafety);
   }
@@ -445,6 +648,9 @@ export function planSetupFile(options: PlanSetupFileOptions): SetupFilePlan {
     expectedHash: snapshot.hash,
     expectedMode: snapshot.mode,
     mode,
+    root,
+    directories,
+    createParent: options.createParent === true,
     contents: transformed.contents,
     changed: transformed.contents !== snapshot.contents,
     mutations: freezeMutations(
@@ -473,8 +679,10 @@ export function applySetupFile(
   if (plan.kind === 'environment') {
     assertEnvironmentSafe(plan.path, options.envSafety);
   }
+  assertDirectoriesCurrent(plan.directories);
   assertPlanStillCurrent(plan);
 
+  const createdDirectories: string[] = [];
   const directory = path.dirname(plan.path);
   const temporaryPath = path.join(
     directory,
@@ -482,6 +690,19 @@ export function applySetupFile(
   );
   let descriptor: number | undefined;
   try {
+    if (plan.createParent) {
+      for (const directoryPath of plan.directories) {
+        if (directoryPath.exists) {
+          continue;
+        }
+        fs.mkdirSync(directoryPath.path, { mode: 0o755 });
+        const stats = fs.lstatSync(directoryPath.path);
+        if (stats.isSymbolicLink() || !stats.isDirectory()) {
+          throw new Error('Unable to create a safe setup parent directory.');
+        }
+        createdDirectories.push(directoryPath.path);
+      }
+    }
     descriptor = fs.openSync(temporaryPath, 'wx', plan.mode);
     fs.writeFileSync(descriptor, plan.contents, 'utf8');
     fs.fchmodSync(descriptor, plan.mode);
@@ -491,6 +712,18 @@ export function applySetupFile(
 
     if (plan.kind === 'environment') {
       assertEnvironmentSafe(plan.path, options.envSafety);
+    }
+    for (const expected of plan.directories) {
+      const stats = fs.lstatSync(expected.path);
+      const created = createdDirectories.includes(expected.path);
+      if (
+        stats.isSymbolicLink() ||
+        !stats.isDirectory() ||
+        (!created &&
+          (stats.dev !== expected.device || stats.ino !== expected.inode))
+      ) {
+        throw new Error('Setup parent directory changed during file application.');
+      }
     }
     assertPlanStillCurrent(plan);
     fs.renameSync(temporaryPath, plan.path);
@@ -507,6 +740,13 @@ export function applySetupFile(
     } catch (cleanupError) {
       if (errorCode(cleanupError) !== 'ENOENT') {
         // Preserve the original failure.
+      }
+    }
+    for (const directoryPath of [...createdDirectories].reverse()) {
+      try {
+        fs.rmdirSync(directoryPath);
+      } catch {
+        // Preserve the original failure and any non-empty directory.
       }
     }
     throw error;

@@ -132,7 +132,9 @@ test('published README states requirements and command side effects precisely', 
     /complete bounded evidence.*structured draft/is,
     /separate terminal critic/i,
     /same resolved provider\s+and model/is,
-    /2 normally; 3 when the draft needs one repair/i,
+    /2 normally; up to 5 across bounded draft and primary-claim repairs/i,
+    /--timings.*fixed phase names.*no repository paths.*credentials.*telemetry/is,
+    /removes critic-.*optional claims.*primary claim.*smaller replacement/is,
     /always runs.*npm test.*npm run build/is,
     /update requires the remote PR head to already equal it/i,
     /\.final\.md/,
@@ -187,6 +189,12 @@ test('CLI reference documents every supported option and exit behavior', () => {
     '--model',
     '--agents',
     '--credential-source',
+    '--scope-mode',
+    '--scope',
+    '--issue-context',
+    '--merge-strategy',
+    '--delete-branch',
+    '--pr-template',
     '--version',
   ]) {
     assert.ok(reference.includes(`\`${option}`), option);
@@ -195,7 +203,7 @@ test('CLI reference documents every supported option and exit behavior', () => {
   assert.match(reference, /Closes #/);
 });
 
-test('repository policy schema is shipped and matches the documented v1 surface', () => {
+test('repository policy schema is shipped and matches the documented v1/v2 surface', () => {
   const schemaPath = path.join(
     repoRoot,
     'documentation/diffwrightrc.schema.json',
@@ -212,6 +220,8 @@ test('repository policy schema is shipped and matches the documented v1 surface'
   assert.deepEqual(Object.keys(schema.properties ?? {}).sort(), [
     '$schema',
     'editorial',
+    'merge',
+    'pullRequest',
     'title',
     'version',
   ]);
@@ -236,11 +246,24 @@ test('repository policy schema is shipped and matches the documented v1 surface'
     'style',
     'test',
   ]);
+  assert.ok(schema.$defs?.pullRequestPolicy);
+  assert.ok(schema.$defs?.mergePolicy);
+  assert.deepEqual(
+    (schema.properties?.version as { enum?: number[] }).enum,
+    [1, 2],
+  );
   assert.match(readme, /diffwrightrc\.schema\.json/);
   assert.match(
     repositoryFile('documentation/cli-reference.md'),
     /diffwrightrc\.schema\.json/,
   );
+  assert.match(
+    repositoryFile('documentation/cli-reference.md'),
+    /version 2.*issueContext.*template.*strategy.*deleteBranch/is,
+  );
+  assert.match(readme, /version 2.*issue context.*PR-template.*branch deletion/is);
+  assert.match(readme, /Grounding, critic,/i);
+  assert.match(readme, /cannot be disabled/i);
   assert.match(
     repositoryFile('documentation/troubleshooting.md'),
     /diffwrightrc\.schema\.json/,

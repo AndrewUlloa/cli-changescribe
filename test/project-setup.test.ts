@@ -27,6 +27,7 @@ interface ScriptPlan {
     summary: string;
     featurePr: string;
     stagingPr: string | null;
+    merge: string | null;
   };
   changes: Array<{ name: string; action: string }>;
 }
@@ -36,6 +37,10 @@ interface CommandRunner {
 }
 
 interface ProjectSetupModule {
+  discoverScopeSuggestions(options: {
+    cwd: string;
+    runner: CommandRunner;
+  }): readonly string[];
   discoverProject(options: {
     cwd: string;
     runner: CommandRunner;
@@ -50,6 +55,7 @@ interface ProjectSetupModule {
     hasStaging: boolean;
     selectedGates: string[];
     selfHosted: boolean;
+    mergeStrategy?: 'squash' | 'platform';
   }): ScriptPlan;
 }
 
@@ -195,6 +201,46 @@ test('uses a remote-only origin main before the current feature branch', (contex
   );
 });
 
+test('suggests only bounded high-confidence workspace, component, and history scopes', (context) => {
+  const cwd = fixture(context, {
+    name: 'consumer',
+    scripts: {},
+    workspaces: ['packages/*', 'apps/*'],
+  } as ProjectManifest);
+  for (const directory of ['packages/cli', 'packages/provider', 'apps/web', 'src/parser']) {
+    fs.mkdirSync(path.join(cwd, directory), { recursive: true });
+  }
+  fs.mkdirSync(path.join(cwd, 'packages/.hidden'), { recursive: true });
+  fs.symlinkSync(
+    path.join(cwd, 'packages/cli'),
+    path.join(cwd, 'packages/linked'),
+  );
+  const runner = gitRunner({
+    'log -n 50 --format=%s':
+      'feat(release): publish artifacts\nfix(cli): validate input\ninvalid subject\n',
+  });
+
+  assert.deepEqual(
+    setup.discoverScopeSuggestions({ cwd, runner }),
+    ['cli', 'parser', 'provider', 'release', 'web'],
+  );
+});
+
+test('returns no scope suggestions for flat or unsafe project structure', (context) => {
+  const cwd = fixture(context, {
+    name: 'consumer',
+    scripts: {},
+    workspaces: ['../outside/*', '**/*', 'packages/nested/*'],
+  } as ProjectManifest);
+  fs.mkdirSync(path.join(cwd, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(cwd, 'src', 'flat.ts'), 'export {};\n');
+
+  assert.deepEqual(
+    setup.discoverScopeSuggestions({ cwd, runner: gitRunner({}) }),
+    [],
+  );
+});
+
 test('builds gate-aware scripts for a main-only external project', () => {
   const manifest: ProjectManifest = {
     scripts: {
@@ -233,6 +279,7 @@ test('builds explicit staging and self-hosted scripts', () => {
     hasStaging: true,
     selectedGates: ['build'],
     selfHosted: true,
+    mergeStrategy: 'squash',
   });
 
   assert.equal(
@@ -247,6 +294,35 @@ test('builds explicit staging and self-hosted scripts', () => {
     plan.scripts['staging:pr'],
     'pnpm run build && node ./bin/diffwright.js pr --base main --create-pr --mode release',
   );
+  assert.equal(
+    plan.scripts['pr:merge'],
+    'pnpm run build && node ./bin/diffwright.js merge',
+  );
+});
+
+test('preserves custom merge scripts and removes only managed merge scripts', () => {
+  const custom = setup.buildScriptPlan({
+    manifest: { scripts: { 'pr:merge': 'custom merge command' } },
+    manager: 'npm',
+    baseBranch: 'main',
+    hasStaging: false,
+    selectedGates: [],
+    selfHosted: false,
+    mergeStrategy: 'platform',
+  });
+  assert.equal(custom.scripts['pr:merge'], 'custom merge command');
+  assert.equal(custom.effective.merge, null);
+
+  const managed = setup.buildScriptPlan({
+    manifest: { scripts: { 'pr:merge': 'diffwright merge' } },
+    manager: 'npm',
+    baseBranch: 'main',
+    hasStaging: false,
+    selectedGates: [],
+    selfHosted: false,
+    mergeStrategy: 'platform',
+  });
+  assert.equal('pr:merge' in managed.scripts, false);
 });
 
 test('does not generate a release script when staging exists but is not selected', () => {
