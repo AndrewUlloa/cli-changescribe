@@ -12,6 +12,12 @@ For example, package version `0.5.0` is released with tag `v0.5.0`.
 Pre-releases are not published by this workflow so they cannot accidentally
 replace npm's `latest` tag.
 
+Diffwright intentionally does not use Changesets for this single-package
+workflow. The `[Unreleased]` section of `CHANGELOG.md` records release impact,
+and package versions change only in the dedicated release pull request. A
+third-party “No Changeset found” notice does not replace this repository's
+documented release contract.
+
 ## One-time npm setup
 
 Configure `diffwright` on npmjs.com with a GitHub Actions trusted publisher:

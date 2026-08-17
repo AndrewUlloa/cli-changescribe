@@ -7,16 +7,39 @@ and Diffwright uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+Release intent: the next minor version. Package manifests remain at `0.6.0`
+until a dedicated release pull request promotes this accumulated feature work.
+
 ### Added
 
 - Added opt-in, privacy-safe `--timings` reports for commit and pull-request
   workflows.
+- Added reviewer-complete pull-request output with deterministic change
+  accounting, substantive-evidence coverage, and exact validation receipts.
+- Added `diffwright merge`, which revalidates repository, branch, pull-request,
+  review, check, title, and merge-queue state before one pinned squash request.
+- Added `diffwright title-check` and a trusted-base pull-request workflow that
+  enforce canonical Conventional Commit titles without executing feature-branch
+  code.
 
 ### Changed
 
 - Improved provider recovery with bounded validation categories, conservative
   removal of unsupported optional artifact items, and one independently audited
   replacement when the primary claim fails evidence review.
+- Preserved critic-supported optional sections when a primary pull-request claim
+  needs replacement, instead of collapsing the artifact to a minimal summary.
+- Reported nested operation timings exclusively so parent totals do not count
+  measured child phases twice.
+
+### Security
+
+- Bound merge execution to one explicit GitHub repository and reviewed head SHA,
+  rejected merge queues and ambiguous outcomes, and kept configured secrets out
+  of titles, logs, and mutation arguments.
+- Loaded pull-request title policy from the exact trusted base revision and
+  bounded event-file reads against link, size, replacement, and Unicode-control
+  attacks.
 
 ## [0.6.0] - 2026-08-15
 
