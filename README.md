@@ -293,6 +293,7 @@ Generated consumer scripts keep this review enabled by default; automation can
 append `-- --yes` deliberately.
 
 `merge` operates on exactly one open same-repository PR for the current branch.
+It requires GitHub CLI 2.50.0 or newer.
 It requires a clean working tree, matching local and remote head SHA, a canonical
 Conventional Commit PR title under the pinned base policy, a clean merge state,
 no unresolved review changes, and at least one reported check with every check

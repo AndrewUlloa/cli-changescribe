@@ -1039,74 +1039,74 @@ async function main(argv: string[], timings: OperationTimings): Promise<void> {
   const receipts: VerificationReceipt[] = [];
   if (args.createPr) {
     timings.measureSync('project-gates', () => {
-    const projectPackage = readProjectPackage();
-    const manager = detectPackageManager(
-      process.cwd(),
-      projectPackage === null
-        ? undefined
-        : Reflect.get(projectPackage, 'packageManager'),
-    );
-    const formatCommand = projectGateCommand(manager, 'format');
-    if (args.skipFormat) {
-      warn('Skipping format step (flagged)');
-      receipts.push(
-        createSkippedGateReceipt(
-          'gate-format',
-          formatCommand,
-          'user-requested',
-        ),
+      const projectPackage = readProjectPackage();
+      const manager = detectPackageManager(
+        process.cwd(),
+        projectPackage === null
+          ? undefined
+          : Reflect.get(projectPackage, 'packageManager'),
       );
-    } else if (!hasPackageScript(projectPackage, 'format')) {
-      const scriptKind =
-        manager === 'npm' ? 'npm script' : 'package.json script';
-      warn(`Skipping format step (no ${scriptKind} named "format")`);
-      receipts.push(
-        createSkippedGateReceipt(
-          'gate-format',
-          formatCommand,
-          'not-configured',
-        ),
-      );
-    } else {
+      const formatCommand = projectGateCommand(manager, 'format');
+      if (args.skipFormat) {
+        warn('Skipping format step (flagged)');
+        receipts.push(
+          createSkippedGateReceipt(
+            'gate-format',
+            formatCommand,
+            'user-requested',
+          ),
+        );
+      } else if (!hasPackageScript(projectPackage, 'format')) {
+        const scriptKind =
+          manager === 'npm' ? 'npm script' : 'package.json script';
+        warn(`Skipping format step (no ${scriptKind} named "format")`);
+        receipts.push(
+          createSkippedGateReceipt(
+            'gate-format',
+            formatCommand,
+            'not-configured',
+          ),
+        );
+      } else {
+        receipts.push(
+          runProjectGate(
+            manager,
+            'format',
+            'fix formatting errors first.',
+            'gate-format',
+          ),
+        );
+      }
       receipts.push(
         runProjectGate(
           manager,
-          'format',
-          'fix formatting errors first.',
-          'gate-format',
+          'test',
+          'fix test failures first.',
+          'gate-test',
         ),
       );
-    }
-    receipts.push(
-      runProjectGate(
-        manager,
-        'test',
-        'fix test failures first.',
-        'gate-test',
-      ),
-    );
-    receipts.push(
-      runProjectGate(
-        manager,
-        'build',
-        'fix build errors first.',
-        'gate-build',
-      ),
-    );
-    if (checkUncommittedChanges()) {
-      throw new Error(
-        'You have uncommitted changes; commit them before creating a PR.',
+      receipts.push(
+        runProjectGate(
+          manager,
+          'build',
+          'fix build errors first.',
+          'gate-build',
+        ),
       );
-    }
-    const existingPr = checkExistingPr(
-      args.base,
-      branch,
-      initialEvidence.snapshot.headSha,
-      requireGitHubRepository(),
-    );
-    if (existingPr) {
-      warn(`Found existing PR #${existingPr.number}: ${existingPr.title}`);
-    }
+      if (checkUncommittedChanges()) {
+        throw new Error(
+          'You have uncommitted changes; commit them before creating a PR.',
+        );
+      }
+      const existingPr = checkExistingPr(
+        args.base,
+        branch,
+        initialEvidence.snapshot.headSha,
+        requireGitHubRepository(),
+      );
+      if (existingPr) {
+        warn(`Found existing PR #${existingPr.number}: ${existingPr.title}`);
+      }
     });
   }
 

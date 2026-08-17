@@ -12,6 +12,7 @@ export interface CommandOptions {
   readonly input?: string;
   readonly maxBuffer?: number;
   readonly stdio?: StdioOptions;
+  readonly timeout?: number;
 }
 
 export interface SpawnOptions {

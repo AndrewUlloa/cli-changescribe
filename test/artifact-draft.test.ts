@@ -83,9 +83,11 @@ test('classifies repair failures without echoing rejected artifact content', () 
     /Repair category: title-policy/,
   );
   const sensitive = 'gsk_sensitive_value';
-  assert.doesNotMatch(
-    artifactDraft.artifactRepairInstruction(new Error(sensitive)),
-    new RegExp(sensitive),
+  assert.equal(
+    artifactDraft
+      .artifactRepairInstruction(new Error(sensitive))
+      .includes(sensitive),
+    false,
   );
 });
 

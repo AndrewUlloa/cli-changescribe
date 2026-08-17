@@ -11,13 +11,19 @@ type Resolve = (runner: Runner) => {
   readonly ghRepo: string;
 };
 type Parse = (url: string) => string;
+type AssertCurrent = (
+  expected: ReturnType<Resolve>,
+  runner: Runner,
+) => void;
 
 const {
   parseGitHubRepository,
   resolveGitHubRepositoryIdentity,
+  assertGitHubRepositoryIdentityCurrent,
 }: {
   parseGitHubRepository: Parse;
   resolveGitHubRepositoryIdentity: Resolve;
+  assertGitHubRepositoryIdentityCurrent: AssertCurrent;
 } = require('../dist/github-repository.js');
 
 test('GitHub repository URLs resolve to one canonical repository identity', () => {
@@ -47,6 +53,46 @@ test('GitHub repository URLs resolve to one canonical repository identity', () =
     ['git', 'remote', 'get-url', '--all', 'origin'],
     ['git', 'remote', 'get-url', '--push', '--all', 'origin'],
   ]);
+});
+
+test('repository identity revalidation is pinned and fails closed', () => {
+  const expected = {
+    originUrl: 'https://github.com/owner/repo.git',
+    pushUrl: 'git@github.com:owner/repo.git',
+    ghRepo: 'github.com/owner/repo',
+  };
+  const unchanged: Runner = {
+    exec(_file, args) {
+      return args.includes('--push')
+        ? `${expected.pushUrl}\n`
+        : `${expected.originUrl}\n`;
+    },
+  };
+  assert.doesNotThrow(() =>
+    assertGitHubRepositoryIdentityCurrent(expected, unchanged),
+  );
+
+  const changed: Runner = {
+    exec(_file, args) {
+      return args.includes('--push')
+        ? 'git@github.com:owner/other.git\n'
+        : 'https://github.com/owner/other.git\n';
+    },
+  };
+  assert.throws(
+    () => assertGitHubRepositoryIdentityCurrent(expected, changed),
+    /changed during the operation/i,
+  );
+
+  const unavailable: Runner = {
+    exec() {
+      throw new Error('credential-bearing transport output');
+    },
+  };
+  assert.throws(
+    () => assertGitHubRepositoryIdentityCurrent(expected, unavailable),
+    /could not resolve the GitHub repository/i,
+  );
 });
 
 test('repository identity rejects ambiguous, mismatched, and credential-bearing remotes', () => {

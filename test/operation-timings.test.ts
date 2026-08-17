@@ -93,6 +93,70 @@ test('records failed operations without changing their errors', async () => {
   ]);
 });
 
+test('records nested phases exclusively so total is not double-counted', () => {
+  const timings = createOperationTimings(sequenceClock([0, 10, 20, 30]));
+
+  timings.measureSync('github-mutation', () => {
+    timings.measureSync('mutation-validation', () => undefined);
+  });
+
+  assert.deepEqual(timings.snapshot(), [
+    { phase: 'mutation-validation', durationMs: 10 },
+    { phase: 'github-mutation', durationMs: 20 },
+  ]);
+  assert.match(renderOperationTimings(timings.snapshot()), /total: 30\.000/u);
+});
+
+test('accounts with raw fractional durations before rounding records', () => {
+  const timings = createOperationTimings(
+    sequenceClock([0, 0.0001, 0.0007, 0.0007, 0.0013, 0.0013]),
+  );
+
+  assert.doesNotThrow(() => {
+    timings.measureSync('github-mutation', () => {
+      timings.measureSync('git-mutation', () => undefined);
+      timings.measureSync('mutation-validation', () => undefined);
+    });
+  });
+  assert.equal(timings.snapshot().length, 3);
+});
+
+test('keeps concurrent async root measurements independent in either completion order', async () => {
+  for (const firstToFinish of ['first', 'second'] as const) {
+    const timings = createOperationTimings(sequenceClock([0, 1, 2, 3]));
+    let finishFirst: (() => void) | undefined;
+    let finishSecond: (() => void) | undefined;
+    const first = timings.measure(
+      'provider-draft',
+      () => new Promise<string>((resolve) => {
+        finishFirst = () => resolve('first');
+      }),
+    );
+    const second = timings.measure(
+      'provider-critic',
+      () => new Promise<string>((resolve) => {
+        finishSecond = () => resolve('second');
+      }),
+    );
+
+    if (firstToFinish === 'first') {
+      finishFirst?.();
+      assert.equal(await first, 'first');
+      finishSecond?.();
+      assert.equal(await second, 'second');
+    } else {
+      finishSecond?.();
+      assert.equal(await second, 'second');
+      finishFirst?.();
+      assert.equal(await first, 'first');
+    }
+    assert.deepEqual(
+      new Set(timings.snapshot().map((record) => record.phase)),
+      new Set(['provider-draft', 'provider-critic']),
+    );
+  }
+});
+
 test('renders only fixed phase names and aggregates repeated phases', () => {
   const report = renderOperationTimings([
     { phase: 'provider-draft', durationMs: 2.5 },

@@ -24,6 +24,12 @@ const SAFE_TEXT_RE =
   /^[^\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]+$/u;
 const MAX_GIT_OUTPUT_BYTES = 64 * 1024;
 const MAX_GH_OUTPUT_BYTES = 256 * 1024;
+const COMMAND_TIMEOUT_MS = 60_000;
+const MINIMUM_GH_VERSION = Object.freeze([2, 50, 0] as const);
+
+class MergeValidationError extends Error {
+  override readonly name = 'MergeValidationError';
+}
 
 interface MergeCommandExecutor {
   exec(file: string, args: readonly string[], options?: CommandOptions): string;
@@ -80,6 +86,23 @@ function defaultRunner(): CommandRunner {
   });
 }
 
+function withCommandTimeout(
+  runner: MergeCommandExecutor,
+): MergeCommandExecutor {
+  return Object.freeze({
+    exec(
+      file: string,
+      args: readonly string[],
+      options: CommandOptions = {},
+    ): string {
+      return runner.exec(file, args, {
+        ...options,
+        timeout: COMMAND_TIMEOUT_MS,
+      });
+    },
+  });
+}
+
 function exec(
   runner: MergeCommandExecutor,
   file: string,
@@ -91,8 +114,52 @@ function exec(
     encoding: 'utf8',
     stdio: 'pipe',
     maxBuffer: maximum,
+    timeout: COMMAND_TIMEOUT_MS,
     ...(input === undefined ? {} : { input }),
   });
+}
+
+function asMergeValidation<T>(operation: () => T): T {
+  try {
+    return operation();
+  } catch (error) {
+    if (error instanceof MergeValidationError) {
+      throw error;
+    }
+    throw new MergeValidationError(
+      error instanceof Error
+        ? error.message
+        : 'GitHub returned invalid merge-validation data.',
+    );
+  }
+}
+
+function assertSupportedGitHubCli(runner: MergeCommandExecutor): void {
+  let output: string;
+  try {
+    output = exec(runner, 'gh', ['--version'], 4_096);
+  } catch {
+    throw new Error('Merge requires GitHub CLI 2.50.0 or newer.');
+  }
+  const match = /^gh version (\d+)\.(\d+)\.(\d+)(?:\s|$)/u.exec(output);
+  if (match === null) {
+    throw new Error('Merge requires GitHub CLI 2.50.0 or newer.');
+  }
+  const version = match.slice(1, 4).map(Number);
+  let comparison = 0;
+  for (let index = 0; index < MINIMUM_GH_VERSION.length; index += 1) {
+    if (version[index] > MINIMUM_GH_VERSION[index]) {
+      comparison = 1;
+      break;
+    }
+    if (version[index] < MINIMUM_GH_VERSION[index]) {
+      comparison = -1;
+      break;
+    }
+  }
+  if (comparison < 0) {
+    throw new Error('Merge requires GitHub CLI 2.50.0 or newer.');
+  }
 }
 
 function assertTitleContainsNoSecret(
@@ -191,16 +258,18 @@ function exactKeys(
 }
 
 function parsePullRequestNumberList(output: string): number {
-  const values = array(parseJson(output, 'pull-request lookup'), 'pull-request lookup');
-  if (values.length !== 1) {
-    throw new Error('Expected exactly one open pull request for the current branch.');
-  }
-  const entry = record(values[0], 'pull-request lookup');
-  exactKeys(entry, ['number'], 'pull-request lookup');
-  if (!Number.isSafeInteger(entry.number) || (entry.number as number) <= 0) {
-    throw new Error('GitHub returned an invalid pull-request number.');
-  }
-  return entry.number as number;
+  return asMergeValidation(() => {
+    const values = array(parseJson(output, 'pull-request lookup'), 'pull-request lookup');
+    if (values.length !== 1) {
+      throw new Error('Expected exactly one open pull request for the current branch.');
+    }
+    const entry = record(values[0], 'pull-request lookup');
+    exactKeys(entry, ['number'], 'pull-request lookup');
+    if (!Number.isSafeInteger(entry.number) || (entry.number as number) <= 0) {
+      throw new Error('GitHub returned an invalid pull-request number.');
+    }
+    return entry.number as number;
+  });
 }
 
 function parseReviewStates(value: unknown): readonly string[] {
@@ -213,6 +282,10 @@ function parseReviewStates(value: unknown): readonly string[] {
 }
 
 function parsePullRequestView(output: string): PullRequestView {
+  return asMergeValidation(() => parsePullRequestViewValue(output));
+}
+
+function parsePullRequestViewValue(output: string): PullRequestView {
   const value = record(parseJson(output, 'pull-request'), 'pull-request');
   const fields = [
     'number', 'title', 'url', 'state', 'isDraft', 'isCrossRepository',
@@ -266,6 +339,10 @@ function parsePullRequestView(output: string): PullRequestView {
 }
 
 function parseChecks(output: string): readonly PullRequestCheck[] {
+  return asMergeValidation(() => parseCheckValues(output));
+}
+
+function parseCheckValues(output: string): readonly PullRequestCheck[] {
   const values = array(parseJson(output, 'pull-request checks'), 'pull-request checks');
   if (values.length === 0) {
     throw new Error('The pull request has no reported checks.');
@@ -413,15 +490,23 @@ function collectSnapshot(
   } catch {
     throw new Error('Merge requires an attached, valid current branch.');
   }
-  if (
-    exec(runner, 'git', [
+  let status: string;
+  let headOutput: string;
+  try {
+    status = exec(runner, 'git', [
       'status', '--porcelain=v1', '-z', '--untracked-files=normal',
-    ]).length > 0
-  ) {
+    ]);
+    headOutput = exec(runner, 'git', [
+      'rev-parse', '--verify', 'HEAD^{commit}',
+    ]);
+  } catch {
+    throw new Error('Could not inspect the local working tree and head revision.');
+  }
+  if (status.length > 0) {
     throw new Error('Merge requires a clean working tree.');
   }
   const headSha = sha(
-    exec(runner, 'git', ['rev-parse', '--verify', 'HEAD^{commit}']).trim(),
+    headOutput.trim(),
     'local head revision',
   );
   const repository = dependencies.resolveRepository();
@@ -440,7 +525,7 @@ function collectSnapshot(
       ], MAX_GH_OUTPUT_BYTES),
     );
   } catch (error) {
-    if (error instanceof Error && error.message.startsWith('Expected exactly')) {
+    if (error instanceof MergeValidationError) {
       throw error;
     }
     throw new Error('Could not resolve the current pull request from GitHub.');
@@ -459,7 +544,7 @@ function collectSnapshot(
       ], MAX_GH_OUTPUT_BYTES),
     );
   } catch (error) {
-    if (error instanceof Error && error.message.startsWith('The pull request')) {
+    if (error instanceof MergeValidationError) {
       throw error;
     }
     throw new Error('Could not validate the current pull request on GitHub.');
@@ -500,7 +585,7 @@ function collectSnapshot(
       ], MAX_GH_OUTPUT_BYTES),
     );
   } catch (error) {
-    if (error instanceof Error && error.message.startsWith('The pull request')) {
+    if (error instanceof MergeValidationError) {
       throw error;
     }
     throw new Error('Could not validate the pull-request checks on GitHub.');
@@ -577,7 +662,7 @@ export async function runMerge(
   validateMergeArguments(argv);
   const dryRun = argv.includes('--dry-run');
   const yes = argv.includes('--yes');
-  const runner = dependencies.runner ?? defaultRunner();
+  const runner = withCommandTimeout(dependencies.runner ?? defaultRunner());
   const resolveRepository = dependencies.resolveRepository ??
     (() => resolveGitHubRepositoryIdentity(runner));
   const assertRepositoryCurrent = dependencies.assertRepositoryCurrent ??
@@ -598,6 +683,7 @@ export async function runMerge(
   }
   const mergeDependencies = { runner, resolveRepository, loadPolicy };
 
+  assertSupportedGitHubCli(runner);
   const initial = collectSnapshot(mergeDependencies);
   assertTitleContainsNoSecret(initial.pullRequest.title, knownSecrets);
   log(`Repository: ${initial.repository.ghRepo}`);

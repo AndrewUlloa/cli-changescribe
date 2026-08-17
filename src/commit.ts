@@ -446,18 +446,18 @@ async function requestArtifact(
     console.log(
       `⚠️  Critic removed ${String(filtered.removedCandidateIds.length)} unsupported optional ${filtered.removedCandidateIds.length === 1 ? 'item' : 'items'}.`,
     );
-    reviewedDraft = parseArtifactDraft(
-      JSON.stringify(filtered.draft),
-      evidence,
-    );
-    rendered = timings.measureSync('render', () =>
-      renderCommitArtifact(
+    rendered = timings.measureSync('render', () => {
+      reviewedDraft = parseArtifactDraft(
+        JSON.stringify(filtered.draft),
+        evidence,
+      );
+      return renderCommitArtifact(
         reviewedDraft,
         evidence,
         policy.title,
         policy.editorial,
-      ),
-    );
+      );
+    });
   }
   return rendered;
 }

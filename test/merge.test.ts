@@ -5,22 +5,23 @@ interface CommandCall {
   readonly file: string;
   readonly args: readonly string[];
   readonly input?: string;
+  readonly timeout?: number;
 }
 interface MergeDependencies {
   readonly runner: {
     exec(
       file: string,
       args: readonly string[],
-      options?: { readonly input?: string },
+      options?: { readonly input?: string; readonly timeout?: number },
     ): string;
   };
-  readonly resolveRepository: () => {
+  readonly resolveRepository?: () => {
     readonly originUrl: string;
     readonly pushUrl: string;
     readonly ghRepo: string;
   };
-  readonly assertRepositoryCurrent: () => void;
-  readonly loadPolicy: (revision: string) => unknown;
+  readonly assertRepositoryCurrent?: () => void;
+  readonly loadPolicy?: (revision: string) => unknown;
   readonly confirm?: (message: string) => Promise<boolean>;
   readonly isInteractive: () => boolean;
   readonly log: (message: string) => void;
@@ -82,6 +83,8 @@ interface FixtureOptions {
   readonly remoteHead?: string;
   readonly secondChecks?: readonly Record<string, unknown>[];
   readonly pullRequestList?: readonly Record<string, unknown>[];
+  readonly ghVersion?: string;
+  readonly localInspectionError?: boolean;
 }
 
 function fixture(options: FixtureOptions = {}) {
@@ -94,7 +97,10 @@ function fixture(options: FixtureOptions = {}) {
     exec(
       file: string,
       args: readonly string[],
-      commandOptions?: { readonly input?: string },
+      commandOptions?: {
+        readonly input?: string;
+        readonly timeout?: number;
+      },
     ): string {
       calls.push({
         file,
@@ -102,12 +108,33 @@ function fixture(options: FixtureOptions = {}) {
         ...(commandOptions?.input === undefined
           ? {}
           : { input: commandOptions.input }),
+        ...(commandOptions?.timeout === undefined
+          ? {}
+          : { timeout: commandOptions.timeout }),
       });
+      if (file === 'gh' && args[0] === '--version') {
+        return options.ghVersion ?? 'gh version 2.95.0 (2026-08-13)\n';
+      }
       if (file === 'git' && args[0] === 'symbolic-ref') return 'codex/merge\n';
       if (file === 'git' && args[0] === 'check-ref-format') return '';
-      if (file === 'git' && args[0] === 'status') return options.dirty ? ' M file\0' : '';
-      if (file === 'git' && args[0] === 'rev-parse' && args[2] === 'HEAD^{commit}') return `${HEAD}\n`;
+      if (file === 'git' && args[0] === 'remote') {
+        return args.includes('--push')
+          ? `${REPOSITORY.pushUrl}\n`
+          : `${REPOSITORY.originUrl}\n`;
+      }
+      if (file === 'git' && args[0] === 'status') {
+        if (options.localInspectionError) throw new Error('gsk_local_secret');
+        return options.dirty ? ' M file\0' : '';
+      }
+      if (file === 'git' && args[0] === 'rev-parse' && args[2] === 'HEAD^{commit}') {
+        if (options.localInspectionError) throw new Error('gsk_local_secret');
+        return `${HEAD}\n`;
+      }
+      if (file === 'git' && args[0] === 'rev-parse' && args[1] === '--show-toplevel') {
+        return `${process.cwd()}\n`;
+      }
       if (file === 'git' && args[0] === 'rev-parse') return `${BASE}\n`;
+      if (file === 'git' && args[0] === 'ls-tree') return '';
       if (file === 'git' && args[0] === 'cat-file') return '';
       if (file === 'git' && args[0] === 'ls-remote') {
         const reference = args.at(-1);
@@ -220,6 +247,7 @@ test('merge validates twice and performs one pinned squash mutation', async () =
         sha: HEAD,
         merge_method: 'squash',
       }),
+      timeout: 60_000,
     }],
   );
   assert.equal(
@@ -227,6 +255,59 @@ test('merge validates twice and performs one pinned squash mutation', async () =
     2,
   );
   assert.match(context.logs.at(-1) ?? '', new RegExp(`Merged PR #20 as ${MERGE}`));
+  assert.equal(
+    context.calls.every((call) => call.timeout === 60_000),
+    true,
+  );
+});
+
+test('production repository and policy helpers inherit the merge timeout', async () => {
+  const context = fixture();
+  await runMerge(['--yes'], {
+    ...context.dependencies,
+    resolveRepository: undefined,
+    assertRepositoryCurrent: undefined,
+    loadPolicy: undefined,
+  });
+  const helperCalls = context.calls.filter(
+    (call) =>
+      call.file === 'git' &&
+      (call.args[0] === 'remote' ||
+        call.args[0] === 'ls-tree' ||
+        (call.args[0] === 'rev-parse' && call.args[1] === '--show-toplevel')),
+  );
+  assert.equal(helperCalls.length > 0, true);
+  assert.equal(
+    helperCalls.every((call) => call.timeout === 60_000),
+    true,
+  );
+});
+
+test('merge requires a GitHub CLI version that supports structured check output', async () => {
+  for (const ghVersion of [
+    'gh version 2.49.9 (2024-10-01)\n',
+    'unexpected version output\n',
+  ]) {
+    const context = fixture({ ghVersion });
+    await assert.rejects(
+      () => runMerge(['--yes'], context.dependencies),
+      /GitHub CLI 2\.50\.0 or newer/u,
+    );
+    assert.equal(mutationCalls(context.calls).length, 0);
+  }
+});
+
+test('local inspection failures are generic and do not echo subprocess output', async () => {
+  const context = fixture({ localInspectionError: true });
+  let message = '';
+  try {
+    await runMerge(['--yes'], context.dependencies);
+  } catch (error) {
+    message = error instanceof Error ? error.message : String(error);
+  }
+  assert.match(message, /inspect the local working tree and head revision/i);
+  assert.equal(message.includes('gsk_local_secret'), false);
+  assert.equal(mutationCalls(context.calls).length, 0);
 });
 
 test('dry-run, cancellation, and headless invocation never mutate GitHub', async () => {
@@ -256,11 +337,15 @@ test('merge fails closed for dirty state, checks, reviews, and title policy', as
   const cases: readonly [FixtureOptions, RegExp][] = [
     [{ dirty: true }, /clean working tree/i],
     [{ checks: [] }, /no reported checks/i],
-    [{ checks: [{ bucket: 'fail', name: 'test', state: 'FAILURE', workflow: 'CI' }] }, /checks/i],
+    [{ checks: [{ bucket: 'fail', name: 'test', state: 'FAILURE', workflow: 'CI' }] }, /checks that are not complete and successful/i],
     [{ firstPr: validPr({ reviewRequests: [{ login: 'reviewer' }] }) }, /pending or requested review changes/i],
     [{ firstPr: validPr({ latestReviews: [{ state: 'CHANGES_REQUESTED' }] }) }, /pending or requested review changes/i],
     [{ firstPr: validPr({ reviewDecision: 'CHANGES_REQUESTED' }) }, /review decision/i],
     [{ firstPr: validPr({ mergeStateStatus: 'BLOCKED' }) }, /clean and mergeable/i],
+    [{ firstPr: validPr({ state: 'CLOSED' }) }, /open, ready, and from this repository/i],
+    [{ firstPr: validPr({ isDraft: true }) }, /open, ready, and from this repository/i],
+    [{ firstPr: validPr({ isCrossRepository: true }) }, /open, ready, and from this repository/i],
+    [{ firstPr: validPr({ autoMergeRequest: { enabledAt: 'now' } }) }, /automatic merge request/i],
     [{ remoteHead: 'd'.repeat(40) }, /local and remote feature branch/i],
     [{ pullRequestList: [] }, /exactly one open pull request/i],
     [{ pullRequestList: [{ number: 20 }, { number: 21 }] }, /exactly one open pull request/i],
@@ -274,16 +359,26 @@ test('merge fails closed for dirty state, checks, reviews, and title policy', as
 });
 
 test('reviewed state or repository drift after preview blocks mutation', async () => {
-  for (const options of [
-    { secondPr: validPr({ title: 'feat(cli): validate merge state again' }) },
-    { secondPr: validPr({ baseRefOid: 'd'.repeat(40) }) },
-    { secondChecks: [{ bucket: 'fail', name: 'test', state: 'FAILURE', workflow: 'CI' }] },
-    { repositoryError: true },
-  ]) {
+  const cases: readonly [FixtureOptions, RegExp][] = [
+    [
+      { secondPr: validPr({ title: 'feat(cli): validate merge state again' }) },
+      /pull-request state changed after the merge preview/i,
+    ],
+    [
+      { secondPr: validPr({ baseRefOid: 'd'.repeat(40) }) },
+      /remote base branch changed during merge validation/i,
+    ],
+    [
+      { secondChecks: [{ bucket: 'fail', name: 'test', state: 'FAILURE', workflow: 'CI' }] },
+      /checks that are not complete and successful/i,
+    ],
+    [{ repositoryError: true }, /changed origin/i],
+  ];
+  for (const [options, expected] of cases) {
     const context = fixture(options);
     await assert.rejects(
       () => runMerge(['--yes'], context.dependencies),
-      /state changed|changed origin|checks that are not complete|remote base branch changed/i,
+      expected,
     );
     assert.equal(mutationCalls(context.calls).length, 0);
   }

@@ -244,7 +244,8 @@ diffwright merge [--dry-run] [--yes]
 ```
 
 `merge` resolves exactly one open same-repository pull request for the attached
-current branch. It makes no provider request. Before showing a plan it requires:
+current branch. It requires GitHub CLI 2.50.0 or newer and makes no provider
+request. Before showing a plan it requires:
 
 - a clean working tree and matching local/origin feature-head SHA;
 - an unchanged origin fetch/push repository identity;
