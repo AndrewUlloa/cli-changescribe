@@ -112,7 +112,7 @@ the regenerated PR artifact, hosted CI, and CodeRabbit review at the final head.
 
 ## Verification evidence before hosted review
 
-- Full repository gate — typecheck, all 434 tests, and build passed after the
+- Full repository gate — typecheck, all 439 tests, and build passed after the
   final issue-context and merge-policy corrections.
 - `npm run commit` — passed the preceding 430-test checkpoint, Groq generation,
   local commit integrity checks, and immutable-SHA push for the corpus checkpoint.

@@ -1071,6 +1071,7 @@ async function main(argv: string[], timings: OperationTimings): Promise<void> {
       );
     }
   }
+  // Fail fast on an oversized provider view before gates or provider work.
   modelEvidenceProjection(
     withWorkflowEvidence(
       initialEvidence,

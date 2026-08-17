@@ -60,7 +60,10 @@ and 22.
 Small coherent checkpoint commits are welcome on a feature branch. After review
 and green checks, maintainers use `npm run pr:merge` to revalidate the live PR
 and create one squash commit whose subject is the reviewed Conventional Commit
-PR title. Do not bypass that path with raw `gh pr merge`.
+PR title. Start each feature branch from an up-to-date `main`. Use
+`npm run commit` for every shipping commit and push, and use
+`npm run feature:pr` to create or update the pull request. Do not bypass these
+paths with raw Git mutation, raw PR creation or editing, or `gh pr merge`.
 
 Unless you explicitly state otherwise, intentionally submitted contributions
 are provided under the Apache License 2.0 used by this repository, without

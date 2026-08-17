@@ -82,7 +82,7 @@
 
 ## Local release evidence
 
-- Full repository gate: 434/434 tests passed.
+- Full repository gate: 439/439 tests passed.
 - Packed install and focused governance/evaluation: 31/31 passed.
 - Package dry run: 84 entries, executable bin and all compiled modules present.
 - Dependency audit: 0 vulnerabilities.

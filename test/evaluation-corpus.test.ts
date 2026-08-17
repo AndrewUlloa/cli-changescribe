@@ -270,6 +270,8 @@ test('PR corpus executes change maps, substantive coverage, domains, and title s
       fixture.id,
     );
 
+    // These oracle assertions validate corpus consistency. Production behavior
+    // is exercised above through the completeness and title-semantics modules.
     const representedDomains = new Set(
       fixture.claims
         .filter((claim) => claim.evidenceIds.length > 0)

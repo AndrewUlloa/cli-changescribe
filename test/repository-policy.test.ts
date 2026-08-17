@@ -179,19 +179,52 @@ test('loads bounded version-2 workflow preferences with safe defaults', (context
 });
 
 test('version 2 rejects unsafe workflow preferences and safety-disabling fields', (context) => {
-  const invalidDocuments = [
-    { version: 2, pullRequest: { issueContext: 'off' } },
-    { version: 2, pullRequest: { template: 'overwrite' } },
-    { version: 2, merge: { strategy: 'rebase' } },
-    { version: 2, merge: { strategy: 'platform', deleteBranch: true } },
-    { version: 2, merge: { deleteBranch: 'yes' } },
-    { version: 2, grounding: false },
-    { version: 2, critic: false },
-    { version: 2, coverage: 'off' },
-    { version: 2, minimumClaims: 0 },
+  const invalidDocuments: ReadonlyArray<{
+    readonly document: Record<string, unknown>;
+    readonly expected: RegExp;
+  }> = [
+    {
+      document: { version: 2, pullRequest: { issueContext: 'off' } },
+      expected: /pullRequest\.issueContext is invalid/u,
+    },
+    {
+      document: { version: 2, pullRequest: { template: 'overwrite' } },
+      expected: /pullRequest\.template is invalid/u,
+    },
+    {
+      document: { version: 2, merge: { strategy: 'rebase' } },
+      expected: /merge\.strategy is invalid/u,
+    },
+    {
+      document: {
+        version: 2,
+        merge: { strategy: 'platform', deleteBranch: true },
+      },
+      expected: /cannot delete branches with platform-managed merges/u,
+    },
+    {
+      document: { version: 2, merge: { deleteBranch: 'yes' } },
+      expected: /merge\.deleteBranch must be a boolean/u,
+    },
+    {
+      document: { version: 2, grounding: false },
+      expected: /contains an unknown field/u,
+    },
+    {
+      document: { version: 2, critic: false },
+      expected: /contains an unknown field/u,
+    },
+    {
+      document: { version: 2, coverage: 'off' },
+      expected: /contains an unknown field/u,
+    },
+    {
+      document: { version: 2, minimumClaims: 0 },
+      expected: /contains an unknown field/u,
+    },
   ];
 
-  for (const [index, document] of invalidDocuments.entries()) {
+  for (const [index, { document, expected }] of invalidDocuments.entries()) {
     const directory = createRepository(context);
     commitPolicy(
       directory,
@@ -200,7 +233,7 @@ test('version 2 rejects unsafe workflow preferences and safety-disabling fields'
     );
     assert.throws(
       () => repositoryPolicy.loadRepositoryPolicy({ cwd: directory }),
-      /Repository policy/i,
+      expected,
     );
   }
 });
