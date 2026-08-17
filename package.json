@@ -17,7 +17,8 @@
     "prepublishOnly": "npm run typecheck && npm test",
     "commit": "npm run typecheck && npm run test && npm run build && node ./bin/diffwright.js commit --all",
     "pr:summary": "npm run build && node ./bin/diffwright.js pr",
-    "feature:pr": "npm run build && node ./bin/diffwright.js pr --base main --create-pr --yes --mode feature"
+    "feature:pr": "npm run build && node ./bin/diffwright.js pr --base main --create-pr --yes --mode feature",
+    "pr:merge": "npm run build && node ./bin/diffwright.js merge"
   },
   "type": "commonjs",
   "files": [

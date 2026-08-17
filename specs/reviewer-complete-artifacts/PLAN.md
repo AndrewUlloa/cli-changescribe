@@ -219,19 +219,19 @@ Non-decisions:
 
 ### Checkpoint: Setup DX
 
-- [ ] TTY/headless/dry-run/cancel paths pass
-- [ ] V1 migration and V2 idempotency pass
-- [ ] Managed docs/templates preserve user content
+- [x] TTY/headless/dry-run/cancel paths pass
+- [x] V1 migration and V2 idempotency pass
+- [x] Managed docs/templates preserve user content
 - [ ] Packed init works with npm, pnpm, Yarn, and Bun fixtures
 
 ### Phase 5: Repository Adoption and Release Evidence
 
-- [ ] **Task 13: Adopt the contract in Diffwright itself**
+- [x] **Task 13: Adopt the contract in Diffwright itself**
   - **Description:** Add the reviewed policy, PR template, CONTRIBUTING rules, package merge script, and agent workflow guidance without enabling DCO/signature/Changesets requirements.
   - **Acceptance:**
-    - [ ] Stable optional scopes are documented/configured.
-    - [ ] Branch checkpoint versus squash-main behavior is explicit.
-    - [ ] Documented gates match automated scripts or clearly list manual release gates.
+    - [x] Stable optional scopes are documented/configured.
+    - [x] Branch checkpoint versus squash-main behavior is explicit.
+    - [x] Documented gates match automated scripts or clearly list manual release gates.
   - **Verify:** docs/npm-page/project-setup tests and `git diff --check`
   - **Depends on:** Tasks 8–12
   - **Files:** `.diffwrightrc.json`, PR template, `CONTRIBUTING.md`, package/agent docs/tests
