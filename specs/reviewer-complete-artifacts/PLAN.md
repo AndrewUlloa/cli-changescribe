@@ -237,12 +237,12 @@ Non-decisions:
   - **Files:** `.diffwrightrc.json`, PR template, `CONTRIBUTING.md`, package/agent docs/tests
   - **Size:** M
 
-- [ ] **Task 14: Expand the executable evaluation corpus**
+- [x] **Task 14: Expand the executable evaluation corpus**
   - **Description:** Add PR domain oracles, type/scope fixtures, repair transcripts, change-map totals, request ceilings, and init configuration cases without exposing oracle labels to production.
   - **Acceptance:**
-    - [ ] 100% required-domain recall on approved fixtures.
-    - [ ] Structural/runtime and editorial/evaluation assertions remain separate.
-    - [ ] No exact free-form model prose snapshots.
+    - [x] 100% required-domain recall on approved fixtures.
+    - [x] Structural/runtime and editorial/evaluation assertions remain separate.
+    - [x] No exact free-form model prose snapshots.
   - **Verify:** compiled corpus and workflow tests
   - **Depends on:** Tasks 1–13
   - **Files:** corpus fixture/helper/test and targeted workflow fixtures
