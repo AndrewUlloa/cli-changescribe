@@ -222,7 +222,7 @@ Non-decisions:
 - [x] TTY/headless/dry-run/cancel paths pass
 - [x] V1 migration and V2 idempotency pass
 - [x] Managed docs/templates preserve user content
-- [ ] Packed init works with npm, pnpm, Yarn, and Bun fixtures
+- [x] Packed init and npm/pnpm/Yarn/Bun command-generation fixtures pass
 
 ### Phase 5: Repository Adoption and Release Evidence
 

@@ -75,6 +75,7 @@ interface MergeSnapshot {
   readonly pullRequest: PullRequestView;
   readonly title: ConventionalTitleDraft;
   readonly checks: readonly PullRequestCheck[];
+  readonly deleteBranch: boolean;
   readonly stableState: string;
 }
 
@@ -469,8 +470,16 @@ function stableState(
   headSha: string,
   pullRequest: PullRequestView,
   checks: readonly PullRequestCheck[],
+  deleteBranch: boolean,
 ): string {
-  return JSON.stringify({ repository, branchName, headSha, pullRequest, checks });
+  return JSON.stringify({
+    repository,
+    branchName,
+    headSha,
+    pullRequest,
+    checks,
+    deleteBranch,
+  });
 }
 
 function collectSnapshot(
@@ -574,6 +583,14 @@ function collectSnapshot(
     );
   }
   const loadedPolicy = dependencies.loadPolicy(pullRequest.baseRefOid);
+  const mergePolicy = loadedPolicy.policy.version === 2
+    ? loadedPolicy.policy.merge
+    : { strategy: 'squash' as const, deleteBranch: false };
+  if (mergePolicy.strategy === 'platform') {
+    throw new Error(
+      'Repository policy delegates merging to the hosting platform.',
+    );
+  }
   const title = parseConventionalTitle(pullRequest.title, loadedPolicy.policy.title);
 
   let checks: readonly PullRequestCheck[];
@@ -598,7 +615,15 @@ function collectSnapshot(
     pullRequest,
     title,
     checks,
-    stableState: stableState(repository, currentBranch, headSha, pullRequest, checks),
+    deleteBranch: mergePolicy.deleteBranch,
+    stableState: stableState(
+      repository,
+      currentBranch,
+      headSha,
+      pullRequest,
+      checks,
+      mergePolicy.deleteBranch,
+    ),
   });
 }
 
@@ -655,6 +680,31 @@ function apiTarget(repository: GitHubRepositoryIdentity, number: number): {
   });
 }
 
+function deleteReviewedBranch(
+  runner: MergeCommandExecutor,
+  repository: GitHubRepositoryIdentity,
+  branchName: string,
+  expectedHeadSha: string,
+): void {
+  try {
+    exec(
+      runner,
+      'git',
+      [
+        'push', '--porcelain',
+        `--force-with-lease=refs/heads/${branchName}:${expectedHeadSha}`,
+        repository.pushUrl,
+        `:refs/heads/${branchName}`,
+      ],
+      MAX_GIT_OUTPUT_BYTES,
+    );
+  } catch {
+    throw new Error(
+      'The reviewed feature branch changed or deletion was not confirmed.',
+    );
+  }
+}
+
 export async function runMerge(
   argv: string[] = [],
   dependencies: MergeDependencies = {},
@@ -691,6 +741,7 @@ export async function runMerge(
   log(`Title: ${initial.pullRequest.title}`);
   log(`Head: ${initial.headSha}`);
   log(`Checks: ${initial.checks.length} complete`);
+  log(`Feature branch: ${initial.deleteBranch ? 'delete after merge' : 'preserve'}`);
   if (dryRun) {
     log('Dry run complete. No merge was performed.');
     return;
@@ -714,6 +765,7 @@ export async function runMerge(
   }
   assertRepositoryCurrent(initial.repository);
 
+  let mergeSha: string;
   try {
     const target = apiTarget(initial.repository, initial.pullRequest.number);
     const mutationResponse = exec(
@@ -735,11 +787,30 @@ export async function runMerge(
       'pr', 'view', String(initial.pullRequest.number), '--json',
       'state,mergedAt,mergeCommit', '--repo', initial.repository.ghRepo,
     ], MAX_GH_OUTPUT_BYTES);
-    const mergeSha = parsePostcondition(postcondition, requestedMergeSha);
-    log(`Merged PR #${initial.pullRequest.number} as ${mergeSha}.`);
+    mergeSha = parsePostcondition(postcondition, requestedMergeSha);
   } catch {
     throw new Error(
       `Merge outcome for PR #${initial.pullRequest.number} could not be confirmed. Inspect it before retrying.`,
     );
   }
+  if (initial.deleteBranch) {
+    try {
+      assertRepositoryCurrent(initial.repository);
+      deleteReviewedBranch(
+        runner,
+        initial.repository,
+        initial.branch,
+        initial.headSha,
+      );
+    } catch {
+      throw new Error(
+        `Merged PR #${initial.pullRequest.number} as ${mergeSha}, but feature branch deletion could not be confirmed. Inspect the branch; do not retry the merge.`,
+      );
+    }
+  }
+  log(
+    `Merged PR #${initial.pullRequest.number} as ${mergeSha}.${
+      initial.deleteBranch ? ' Deleted the reviewed feature branch.' : ''
+    }`,
+  );
 }

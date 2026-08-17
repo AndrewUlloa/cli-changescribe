@@ -1021,6 +1021,19 @@ async function main(argv: string[], timings: OperationTimings): Promise<void> {
   const repositoryPolicy = timings.measureSync('policy', () =>
     loadRepositoryPolicy({ revision: basePolicySha }),
   );
+  if (repositoryPolicy.policy.version === 2 && args.issue.length === 0) {
+    const issueContext = repositoryPolicy.policy.pullRequest.issueContext;
+    if (issueContext === 'required') {
+      throw new Error(
+        'Repository policy requires --issue before pull-request generation.',
+      );
+    }
+    if (issueContext === 'recommended') {
+      warn(
+        'Repository policy recommends --issue for pull-request context.',
+      );
+    }
+  }
   if (args.createPr && !checkGhCli()) {
     throw new Error(
       'GitHub CLI (gh) is required for --create-pr. Install it from https://cli.github.com/ and run gh auth login.',

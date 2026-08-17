@@ -273,6 +273,23 @@ test('packed Diffwright and ChangeScribe install and execute end to end', (conte
     'node ./node_modules/diffwright/bin/diffwright.js pr --base main --create-pr --mode feature',
   );
   assert.equal(guidedManifest.scripts?.['staging:pr'], undefined);
+  assert.equal(
+    guidedManifest.scripts?.['pr:merge'],
+    'node ./node_modules/diffwright/bin/diffwright.js merge',
+  );
+  const guidedPolicy = JSON.parse(
+    fs.readFileSync(path.join(installRoot, '.diffwrightrc.json'), 'utf8'),
+  );
+  assert.equal(guidedPolicy.version, 2);
+  assert.equal(guidedPolicy.title.allowedScopes, undefined);
+  assert.equal(guidedPolicy.merge.strategy, 'squash');
+  assert.match(
+    fs.readFileSync(
+      path.join(installRoot, '.github', 'pull_request_template.md'),
+      'utf8',
+    ),
+    /## Summary[\s\S]*## Validation[\s\S]*## Context/u,
+  );
   const localScriptHelp = execFileSync(
     'npm',
     ['run', 'commit', '--', '--help'],

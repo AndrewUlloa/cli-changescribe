@@ -21,16 +21,24 @@ until a dedicated release pull request promotes this accumulated feature work.
 - Added `diffwright title-check` and a trusted-base pull-request workflow that
   enforce canonical Conventional Commit titles without executing feature-branch
   code.
+- Added repository-policy version 2, guided scope/context/merge/template
+  preferences, safe scope discovery, managed reviewer templates, and guarded
+  `pr:merge` project scripts.
+- Added an executable PR evaluation corpus for change-map totals, substantive
+  domain recall, semantic title/scope outcomes, request ceilings, and safe init
+  defaults.
 
 ### Changed
 
 - Improved provider recovery with bounded validation categories, conservative
-  removal of unsupported optional artifact items, and one independently audited
+  removal of unsupported optional artifact items, and one separately audited
   replacement when the primary claim fails evidence review.
 - Preserved critic-supported optional sections when a primary pull-request claim
   needs replacement, instead of collapsing the artifact to a minimal summary.
 - Reported nested operation timings exclusively so parent totals do not count
   measured child phases twice.
+- Updated generated Claude/Codex guidance and contributor policy to distinguish
+  fine-grained branch checkpoints from one reviewed squash commit on `main`.
 
 ### Security
 

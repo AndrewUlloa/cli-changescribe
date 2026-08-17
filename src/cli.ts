@@ -116,8 +116,9 @@ Options:
   --timings           Print privacy-safe phase durations after the command finishes
 
 Dry runs may fetch the base branch. Normal runs use a structured draft request
-and one terminal critic request. One deterministic draft repair can raise the
-maximum to three requests. They write detailed and PR-ready summary files.
+and one terminal critic request. Deterministic validation, primary replacement,
+and substantive-coverage repair are bounded; the combined maximum is five
+requests. Successful runs write detailed and PR-ready summary files.
 
 Complete reference: ${CLI_REFERENCE}
 `);
@@ -182,7 +183,10 @@ Options:
   --yes            Approve the merge noninteractively after validation
 
 Diffwright pins the origin repository, local and remote head, base revision,
-title policy, review decision, and check results before invoking GitHub CLI.
+title policy, merge preference, review decision, and check results before
+invoking GitHub CLI. A platform-managed policy stops before mutation. When the
+pinned policy requests branch deletion, Diffwright deletes only the unchanged
+reviewed ref after GitHub confirms the exact squash commit.
 
 Complete reference: ${CLI_REFERENCE}
 `);

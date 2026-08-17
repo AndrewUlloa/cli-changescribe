@@ -1414,6 +1414,100 @@ test('PR generation uses pinned base policy and redacts feature policy bytes', a
   assert.match(requests, /git-policy-metadata/);
 });
 
+test('PR generation enforces version-2 issue-context policy before provider or GitHub work', async (context) => {
+  const runPolicyCase = async (
+    issueContext: 'optional' | 'required',
+    issue?: string,
+  ): Promise<{
+    readonly result: Awaited<ReturnType<typeof run>>;
+    readonly requestCount: number;
+    readonly captureExists: boolean;
+  }> => {
+    const directory = createRepository(context);
+    fs.writeFileSync(
+      path.join(directory, 'package.json'),
+      JSON.stringify(
+        {
+          name: 'fixture',
+          private: true,
+          scripts: {
+            test: 'node -e "process.exit(0)"',
+            build: 'node -e "process.exit(0)"',
+          },
+        },
+        null,
+        2,
+      ),
+    );
+    fs.writeFileSync(
+      path.join(directory, '.diffwrightrc.json'),
+      `${JSON.stringify({
+        version: 2,
+        pullRequest: { issueContext },
+      })}\n`,
+    );
+    git(directory, ['add', 'package.json', '.diffwrightrc.json']);
+    git(directory, ['commit', '--quiet', '-m', 'chore: configure pull requests']);
+    const remote = fs.mkdtempSync(path.join(os.tmpdir(), 'diffwright-remote-'));
+    context.after(() => fs.rmSync(remote, { recursive: true, force: true }));
+    git(remote, ['init', '--quiet', '--bare']);
+    git(directory, ['remote', 'add', 'origin', remote]);
+    git(directory, ['push', '--quiet', '-u', 'origin', 'main']);
+    git(directory, ['switch', '--quiet', '-c', 'feature']);
+    fs.appendFileSync(path.join(directory, 'README.md'), 'issue policy fixture\n');
+    git(directory, ['add', 'README.md']);
+    git(directory, ['commit', '--quiet', '-m', 'feat: add issue policy fixture']);
+
+    const capture = path.join(directory, 'gh-capture.json');
+    const fakeBin = createFakeGh(context, capture);
+    const server = await createCompletionServer(context);
+    const env = customEnvironment(server.baseURL);
+    env.PATH = `${fakeBin}${path.delimiter}${env.PATH ?? ''}`;
+    env.GH_CAPTURE_PATH = capture;
+    const args = [
+      'pr',
+      '--base',
+      'main',
+      '--create-pr',
+      '--yes',
+      '--skip-format',
+    ];
+    if (issue !== undefined) {
+      args.push('--issue', issue);
+    }
+    const result = await run(directory, args, env);
+    return {
+      result,
+      requestCount: server.requests.length,
+      captureExists: fs.existsSync(capture),
+    };
+  };
+
+  const missingRequired = await runPolicyCase('required');
+  assert.equal(missingRequired.result.status, 1);
+  assert.match(missingRequired.result.stderr, /requires --issue/u);
+  assert.equal(missingRequired.requestCount, 0);
+  assert.equal(missingRequired.captureExists, false);
+
+  const linkedRequired = await runPolicyCase('required', '123');
+  assert.equal(
+    linkedRequired.result.status,
+    0,
+    linkedRequired.result.stderr || linkedRequired.result.stdout,
+  );
+  assert.equal(linkedRequired.requestCount > 0, true);
+  assert.equal(linkedRequired.captureExists, true);
+
+  const missingOptional = await runPolicyCase('optional');
+  assert.equal(
+    missingOptional.result.status,
+    0,
+    missingOptional.result.stderr || missingOptional.result.stdout,
+  );
+  assert.equal(missingOptional.requestCount > 0, true);
+  assert.equal(missingOptional.captureExists, true);
+});
+
 test('PR summary without GitHub mutation also redacts feature policy bytes', async (context) => {
   const directory = createRepository(context);
   fs.writeFileSync(

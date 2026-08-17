@@ -271,11 +271,11 @@ documents every flag, default, alias, side effect, and exit behavior.
 | `pr` | 2 normally; up to 5 across bounded draft and primary-claim repairs | overwrites the requested file, a sibling `.final.md`, and a temporary backup | attempts to fetch the base |
 | `pr --create-pr` | Same structured generation | may run format, always runs the detected package manager's test/build scripts (`npm test` and `npm run build` for npm), then reviews and writes the exact final artifact | pushes the reviewed SHA when creating; an update requires the remote PR head to already equal it |
 | `merge --dry-run` | 0 | none | reads the exact live PR, checks, reviews, title policy, and remote revisions; no merge |
-| `merge` | 0 | none | after confirmation and a second full validation, requests one pinned squash merge and confirms its postcondition |
+| `merge` | 0 | none | after confirmation and a second full validation, requests one pinned squash merge, confirms its postcondition, and optionally deletes the unchanged reviewed branch |
 | `title-check` | 0 | none | reads one bounded event file and the base revision's local policy; no network or GitHub mutation |
 | `init --dry-run` | 0 | none | previews the redacted setup plan; no install or live request |
 | no-argument non-TTY `init` | 0 | edits `package.json` only when generic scripts are added or migrated | none |
-| guided or `--yes` `init` | 0 by default; 1 only with explicit live consent | may update `package.json`, a lockfile, `.gitignore`, `.env.local`, `CLAUDE.md`, and `AGENTS.md` after interactive confirmation or deterministic `--yes` planning | may install the exact local package; runs offline doctor; live doctor is separately explicit |
+| guided or `--yes` `init` | 0 by default; 1 only with explicit live consent | may update `package.json`, a lockfile, `.diffwrightrc.json`, `.github/pull_request_template.md`, `.gitignore`, `.env.local`, `CLAUDE.md`, and `AGENTS.md` after interactive confirmation or deterministic `--yes` planning | may install the exact local package; runs offline doctor; live doctor is separately explicit |
 
 Commit and PR synthesis send complete bounded evidence for a structured draft,
 then send the same original evidence and every renderable model-authored claim
@@ -314,7 +314,12 @@ than bypassed, including for privileged callers. After confirmation, it repeats
 the validation and calls GitHub's direct pull-request merge API with the numeric
 PR, repository, reviewed
 head SHA, validated title, and squash method. It never uses admin, auto-merge, rebase, merge-commit, or
-branch-deletion fallbacks.
+branch-deletion fallbacks. A platform-managed policy stops before mutation. If
+the pinned policy requests deletion, Diffwright rechecks the reviewed remote
+repository and deletes the explicit remote ref with an atomic lease on the
+reviewed head SHA, only after the exact squash commit is confirmed. If the
+branch moved or deletion is uncertain, the merge remains complete and the
+command says not to retry it.
 
 The separate `PR title` workflow runs on opened, edited, synchronized,
 reopened, and ready-for-review pull requests. It uses `pull_request_target`

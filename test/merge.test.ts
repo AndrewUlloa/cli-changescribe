@@ -85,6 +85,28 @@ interface FixtureOptions {
   readonly pullRequestList?: readonly Record<string, unknown>[];
   readonly ghVersion?: string;
   readonly localInspectionError?: boolean;
+  readonly mergePolicy?: {
+    readonly strategy: 'platform' | 'squash';
+    readonly deleteBranch: boolean;
+  };
+  readonly branchLeaseRace?: boolean;
+  readonly branchDeletionError?: boolean;
+}
+
+function versionTwoPolicy(
+  merge: NonNullable<FixtureOptions['mergePolicy']>,
+): unknown {
+  const defaults = DEFAULT_REPOSITORY_POLICY as {
+    readonly title: unknown;
+    readonly editorial: unknown;
+  };
+  return {
+    version: 2,
+    title: defaults.title,
+    editorial: defaults.editorial,
+    pullRequest: { issueContext: 'recommended', template: 'create' },
+    merge,
+  };
 }
 
 function fixture(options: FixtureOptions = {}) {
@@ -136,6 +158,12 @@ function fixture(options: FixtureOptions = {}) {
       if (file === 'git' && args[0] === 'rev-parse') return `${BASE}\n`;
       if (file === 'git' && args[0] === 'ls-tree') return '';
       if (file === 'git' && args[0] === 'cat-file') return '';
+      if (file === 'git' && args[0] === 'push') {
+        if (options.branchLeaseRace || options.branchDeletionError) {
+          throw new Error('secret branch deletion failure');
+        }
+        return 'To github.com:acme/project.git\n-\t[deleted]\n';
+      }
       if (file === 'git' && args[0] === 'ls-remote') {
         const reference = args.at(-1);
         return `${
@@ -209,7 +237,9 @@ function fixture(options: FixtureOptions = {}) {
       if (options.repositoryError) throw new Error('changed origin');
     },
     loadPolicy: (revision: string) => ({
-      policy: DEFAULT_REPOSITORY_POLICY,
+      policy: options.mergePolicy === undefined
+        ? DEFAULT_REPOSITORY_POLICY
+        : versionTwoPolicy(options.mergePolicy),
       source: {
         kind: 'defaults',
         revisionSha: revision,
@@ -228,6 +258,14 @@ function fixture(options: FixtureOptions = {}) {
 function mutationCalls(calls: readonly CommandCall[]): readonly CommandCall[] {
   return calls.filter(
     (call) => call.file === 'gh' && call.args[0] === 'api' && call.args.includes('PUT'),
+  );
+}
+
+function deletionCalls(calls: readonly CommandCall[]): readonly CommandCall[] {
+  return calls.filter(
+    (call) =>
+      call.file === 'git' && call.args[0] === 'push' &&
+      call.args.some((argument) => argument.startsWith('--force-with-lease=')),
   );
 }
 
@@ -259,6 +297,80 @@ test('merge validates twice and performs one pinned squash mutation', async () =
     context.calls.every((call) => call.timeout === 60_000),
     true,
   );
+  assert.equal(deletionCalls(context.calls).length, 0);
+});
+
+test('merge policy delegates platform merges without any mutation', async () => {
+  const context = fixture({
+    mergePolicy: { strategy: 'platform', deleteBranch: false },
+  });
+  await assert.rejects(
+    () => runMerge(['--yes'], context.dependencies),
+    /delegates merging to the hosting platform/i,
+  );
+  assert.equal(mutationCalls(context.calls).length, 0);
+  assert.equal(deletionCalls(context.calls).length, 0);
+});
+
+test('configured branch deletion runs only after the reviewed squash is confirmed', async () => {
+  const context = fixture({
+    mergePolicy: { strategy: 'squash', deleteBranch: true },
+  });
+  await runMerge(['--yes'], context.dependencies);
+  assert.equal(mutationCalls(context.calls).length, 1);
+  assert.deepEqual(deletionCalls(context.calls), [{
+    file: 'git',
+    args: [
+      'push', '--porcelain',
+      `--force-with-lease=refs/heads/codex/merge:${HEAD}`,
+      'git@github.com:acme/project.git',
+      ':refs/heads/codex/merge',
+    ],
+    timeout: 60_000,
+  }]);
+  const postconditionIndex = context.calls.findIndex(
+    (call) => call.file === 'gh' && call.args.includes('state,mergedAt,mergeCommit'),
+  );
+  const deletionIndex = context.calls.findIndex(
+    (call) => deletionCalls([call]).length === 1,
+  );
+  assert.equal(postconditionIndex >= 0, true);
+  assert.equal(postconditionIndex < deletionIndex, true);
+  assert.match(context.logs.at(-1) ?? '', /Deleted the reviewed feature branch/u);
+});
+
+test('branch deletion fails safely when the reviewed ref moves or deletion is uncertain', async () => {
+  const changed = fixture({
+    mergePolicy: { strategy: 'squash', deleteBranch: true },
+    branchLeaseRace: true,
+  });
+  await assert.rejects(
+    () => runMerge(['--yes'], changed.dependencies),
+    /Merged PR #20.*branch deletion could not be confirmed.*do not retry/i,
+  );
+  assert.equal(mutationCalls(changed.calls).length, 1);
+  assert.equal(deletionCalls(changed.calls).length, 1);
+
+  const uncertain = fixture({
+    mergePolicy: { strategy: 'squash', deleteBranch: true },
+    branchDeletionError: true,
+  });
+  await assert.rejects(
+    () => runMerge(['--yes'], uncertain.dependencies),
+    /Merged PR #20.*branch deletion could not be confirmed.*do not retry/i,
+  );
+  assert.equal(mutationCalls(uncertain.calls).length, 1);
+  assert.equal(deletionCalls(uncertain.calls).length, 1);
+
+  const unconfirmedMerge = fixture({
+    mergePolicy: { strategy: 'squash', deleteBranch: true },
+    postcondition: { state: 'OPEN', mergedAt: null, mergeCommit: null },
+  });
+  await assert.rejects(
+    () => runMerge(['--yes'], unconfirmedMerge.dependencies),
+    /Merge outcome.*could not be confirmed/i,
+  );
+  assert.equal(deletionCalls(unconfirmedMerge.calls).length, 0);
 });
 
 test('production repository and policy helpers inherit the merge timeout', async () => {

@@ -288,10 +288,15 @@ squash request pinned to the numeric PR, explicit repository, reviewed head SHA,
 and validated PR title. It accepts only a mutation response that reports
 `merged: true`; merge-queue use and already-merged no-ops are rejected.
 Diffwright does not use admin, auto-merge, merge-commit, rebase, or
-branch-deletion fallbacks. It then reads the PR again and reports success only
+branch-deletion fallbacks. A version-2 policy with `merge.strategy` set to
+`platform` stops before mutation. It then reads the PR again and reports success only
 when GitHub returns `MERGED` with the same merge-commit OID. If the mutation or
 postcondition is ambiguous, inspect the PR before retrying; Diffwright never
-retries automatically.
+retries automatically. When `merge.deleteBranch` is `true`, Diffwright next
+revalidates the pinned repository, then deletes the explicit remote ref with an
+atomic lease that requires the reviewed head SHA. A moved branch or deletion
+failure is reported as a partial outcome: the merge is complete, the branch
+needs inspection, and the merge must not be retried.
 
 ## `title-check`
 
