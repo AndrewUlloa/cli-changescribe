@@ -8,6 +8,7 @@ import { runInit } from './init';
 import { runMerge } from './merge';
 import { runPrSummary } from './pr-summary';
 import { knownSecretValues, loadRuntimeConfig } from './runtime-config';
+import { runTitleCheck } from './title-check';
 
 interface CliRunners {
   runCommit(args: string[]): Promise<void>;
@@ -15,6 +16,7 @@ interface CliRunners {
   runInit(args: string[]): void | Promise<void>;
   runMerge(args: string[]): Promise<void>;
   runPrSummary(args: string[]): Promise<void>;
+  runTitleCheck(args: string[]): void | Promise<void>;
 }
 
 const defaultRunners: CliRunners = {
@@ -23,6 +25,7 @@ const defaultRunners: CliRunners = {
   runInit,
   runMerge,
   runPrSummary,
+  runTitleCheck,
 };
 
 const CLI_REFERENCE =
@@ -50,6 +53,7 @@ Commands:
   doctor        Validate provider configuration (add --live for one request)
   init          Interactively configure Diffwright in the current repo
   merge         Validate and squash-merge the current pull request
+  title-check   Validate a pull-request event title against base policy
   pr:summary    Alias for pr
   feature:pr    Alias for: pr --base staging --create-pr --mode feature
   staging:pr    Alias for: pr --base main --create-pr --mode release
@@ -64,6 +68,7 @@ Examples:
   diffwright commit --all --dry-run
   diffwright pr --base main --mode release
   diffwright merge --dry-run
+  diffwright title-check --event-file "$GITHUB_EVENT_PATH"
   diffwright feature:pr
   diffwright staging:pr
 
@@ -177,6 +182,20 @@ Complete reference: ${CLI_REFERENCE}
 `);
 }
 
+function printTitleCheckHelp(): void {
+  console.log(`Usage: diffwright title-check --event-file <path>
+
+Read one bounded pull-request event and validate its title against canonical
+Conventional Commit grammar and the repository policy pinned to the event's
+base revision. This command makes no provider, network, or GitHub mutation.
+
+Options:
+  --event-file <path>   GitHub pull_request event JSON file
+
+Complete reference: ${CLI_REFERENCE}
+`);
+}
+
 function printCommandHelp(command: string): void {
   if (command === 'commit') {
     printCommitHelp();
@@ -186,6 +205,8 @@ function printCommandHelp(command: string): void {
     printInitHelp();
   } else if (command === 'merge') {
     printMergeHelp();
+  } else if (command === 'title-check') {
+    printTitleCheckHelp();
   } else {
     printPrHelp();
   }
@@ -215,12 +236,13 @@ export async function runCli(
       validatedCommand === 'doctor' ||
       validatedCommand === 'init' ||
       validatedCommand === 'merge' ||
+      validatedCommand === 'title-check' ||
       validatedCommand === 'pr')
   ) {
     printCommandHelp(validatedCommand);
     return 0;
   }
-  if (validatedCommand === 'commit' || validatedCommand === 'doctor' || validatedCommand === 'init' || validatedCommand === 'merge' || validatedCommand === 'pr') {
+  if (validatedCommand === 'commit' || validatedCommand === 'doctor' || validatedCommand === 'init' || validatedCommand === 'merge' || validatedCommand === 'title-check' || validatedCommand === 'pr') {
     try {
       validateCommandArguments(validatedCommand, rest);
     } catch (error) {
@@ -251,6 +273,11 @@ export async function runCli(
 
   if (command === 'merge') {
     await runners.runMerge(rest);
+    return 0;
+  }
+
+  if (command === 'title-check') {
+    await runners.runTitleCheck(rest);
     return 0;
   }
 

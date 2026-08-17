@@ -120,6 +120,7 @@ function expectedDiffwrightFiles(): string[] {
     'setup-files',
     'staged-evidence',
     'title-semantics',
+    'title-check',
   ]) {
     files.push(`dist/${moduleName}.js`, `dist/${moduleName}.js.map`);
   }

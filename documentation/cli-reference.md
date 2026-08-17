@@ -271,6 +271,29 @@ when GitHub returns `MERGED` with the same merge-commit OID. If the mutation or
 postcondition is ambiguous, inspect the PR before retrying; Diffwright never
 retries automatically.
 
+## `title-check`
+
+```text
+diffwright title-check --event-file <path>
+```
+
+`title-check` reads one bounded, regular UTF-8 GitHub `pull_request` event file.
+It validates the selected repository, action, PR number, and full base/head
+revisions without trusting the title as a command-line value.
+The event repository must match the local `origin`, and the title must be a
+canonical Conventional Commit header allowed by the repository policy loaded
+from the event's exact base SHA. Policy changes on the feature branch therefore
+cannot weaken the check that reviews that same pull request.
+
+The command makes no provider request, network call, GitHub mutation, or file
+write. It accepts exactly one `--event-file`; there is no positional title or
+ambient fallback. The separate `PR title` workflow runs on
+`pull_request_target` only so it can execute the exact trusted base revision
+with read-only permissions and full Git history. It never checks out or runs
+pull-request code. The workflow passes `"$GITHUB_EVENT_PATH"` on opened,
+edited, synchronized, reopened, and ready-for-review events. It becomes active
+after the workflow and command land on the default branch.
+
 ## Aliases
 
 | Alias | Expansion |

@@ -202,6 +202,24 @@ export function validateMergeArguments(argv: string[]): void {
   }
 }
 
+export function validateTitleCheckArguments(argv: string[]): void {
+  let eventFileCount = 0;
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index];
+    if (argument !== '--event-file') {
+      rejectUnknown('title-check', argument ?? '');
+    }
+    requireValue(argv, index, argument);
+    eventFileCount += 1;
+    index += 1;
+  }
+  if (eventFileCount !== 1) {
+    throw new CliArgumentError(
+      'title-check requires exactly one --event-file value.',
+    );
+  }
+}
+
 export function validateCommandArguments(command: string, argv: string[]): void {
   if (command === 'commit') {
     validateCommitArguments(argv);
@@ -217,6 +235,10 @@ export function validateCommandArguments(command: string, argv: string[]): void 
   }
   if (command === 'merge') {
     validateMergeArguments(argv);
+    return;
+  }
+  if (command === 'title-check') {
+    validateTitleCheckArguments(argv);
     return;
   }
   validatePrArguments(argv);

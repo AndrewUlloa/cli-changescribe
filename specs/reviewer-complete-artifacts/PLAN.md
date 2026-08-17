@@ -164,21 +164,22 @@ Non-decisions:
   - **Files:** merge application service/test, `src/arguments.ts`, `src/cli.ts`, routing tests
   - **Size:** M
 
-- [ ] **Task 9: Add PR-title CI protection**
+- [x] **Task 9: Add PR-title CI protection**
   - **Description:** Validate titles on pull-request events with the same local parser/policy so hand edits cannot bypass generation.
   - **Acceptance:**
-    - [ ] Invalid type/scope/length/breaking syntax fails CI.
-    - [ ] Workflow uses fixed event data and no secrets.
+    - [x] Invalid type/scope/length/breaking syntax fails CI.
+    - [x] Workflow uses fixed event data and no secrets.
+    - [x] The dedicated workflow executes only the trusted base revision and never pull-request code.
   - **Verify:** workflow contract test and local title-check fixture
   - **Depends on:** Task 7
-  - **Files:** title-check CLI/test, `.github/workflows/ci.yml`, CI contract test
+  - **Files:** title-check CLI/test, `.github/workflows/pr-title.yml`, CI contract test
   - **Size:** M
 
 ### Checkpoint: Durable History
 
 - [x] Conventional title corpus passes
 - [x] Safe merge mutation tests pass
-- [ ] CI title validation passes locally
+- [x] CI title validation passes locally
 - [x] Full `npm test` and package dry run pass
 
 ### Phase 4: Policy and Guided Init

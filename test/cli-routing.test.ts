@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-type CliCall = ['commit' | 'doctor' | 'init' | 'merge' | 'pr', string[]];
+type CliCall = [
+  'commit' | 'doctor' | 'init' | 'merge' | 'pr' | 'title-check',
+  string[],
+];
 
 interface CliRunners {
   runCommit(args: string[]): Promise<void>;
@@ -9,6 +12,7 @@ interface CliRunners {
   runInit(args: string[]): Promise<void>;
   runMerge(args: string[]): Promise<void>;
   runPrSummary(args: string[]): Promise<void>;
+  runTitleCheck(args: string[]): Promise<void>;
 }
 
 type RunCli = (argv: string[], runners?: CliRunners) => Promise<number>;
@@ -35,6 +39,9 @@ function recordingRunners(): { calls: CliCall[]; runners: CliRunners } {
       runPrSummary: async (args: string[]) => {
         calls.push(['pr', args]);
       },
+      runTitleCheck: async (args: string[]) => {
+        calls.push(['title-check', args]);
+      },
     },
   };
 }
@@ -47,6 +54,10 @@ test('CLI routes primary commands and the PR alias', async () => {
   assert.equal(await runCli(['pr', '--base', 'develop'], runners), 0);
   assert.equal(await runCli(['pr:summary', '--dry-run'], runners), 0);
   assert.equal(await runCli(['merge', '--dry-run'], runners), 0);
+  assert.equal(
+    await runCli(['title-check', '--event-file', 'event.json'], runners),
+    0,
+  );
 
   assert.deepEqual(calls, [
     ['commit', ['--dry-run']],
@@ -54,6 +65,7 @@ test('CLI routes primary commands and the PR alias', async () => {
     ['pr', ['--base', 'develop']],
     ['pr', ['--dry-run']],
     ['merge', ['--dry-run']],
+    ['title-check', ['--event-file', 'event.json']],
   ]);
 });
 
@@ -109,6 +121,15 @@ test('help does not invoke a command runner', async () => {
 
 test('each command exposes focused help with its real options and side effects', async () => {
   const cases = [
+    {
+      invocation: ['title-check', '--help'],
+      expected: [
+        /Usage: diffwright title-check/,
+        /--event-file <path>/,
+        /base revision/i,
+        /no provider, network, or GitHub mutation/i,
+      ],
+    },
     {
       invocation: ['merge', '--help'],
       expected: [
@@ -204,6 +225,19 @@ test('unknown command options fail before invoking a runner', async () => {
   assert.equal(await runCli(['init', '--force'], runners), 1);
   assert.equal(await runCli(['merge', '--delete-branch'], runners), 1);
   assert.equal(await runCli(['merge', '--yes', '--dry-run'], runners), 1);
+  assert.equal(await runCli(['title-check'], runners), 1);
+  assert.equal(await runCli(['title-check', '--event-file'], runners), 1);
+  assert.equal(
+    await runCli(
+      ['title-check', '--event-file', 'one.json', '--event-file', 'two.json'],
+      runners,
+    ),
+    1,
+  );
+  assert.equal(
+    await runCli(['title-check', '--event-file', 'event.json', '--network'], runners),
+    1,
+  );
 
   assert.deepEqual(calls, []);
 });

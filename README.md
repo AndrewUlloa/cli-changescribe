@@ -237,6 +237,7 @@ Closes #123
 | `diffwright merge --dry-run` | Validate and preview the current PR's pinned squash merge; no mutation. |
 | `diffwright merge` | Validate twice, confirm interactively, and squash-merge the exact reviewed PR head. |
 | `diffwright merge --yes` | Explicitly approve the same pinned squash merge in noninteractive automation. |
+| `diffwright title-check --event-file "$GITHUB_EVENT_PATH"` | Validate a PR-event title against the policy pinned to its base revision. |
 | `diffwright init` | Guide an interactive TTY through project setup; preserve legacy script-only behavior in a no-argument non-TTY. |
 | `diffwright --version` | Print the exact installed Diffwright version. |
 
@@ -259,6 +260,7 @@ documents every flag, default, alias, side effect, and exit behavior.
 | `pr --create-pr` | Same structured generation | may run format, always runs the detected package manager's test/build scripts (`npm test` and `npm run build` for npm), then reviews and writes the exact final artifact | pushes the reviewed SHA when creating; an update requires the remote PR head to already equal it |
 | `merge --dry-run` | 0 | none | reads the exact live PR, checks, reviews, title policy, and remote revisions; no merge |
 | `merge` | 0 | none | after confirmation and a second full validation, requests one pinned squash merge and confirms its postcondition |
+| `title-check` | 0 | none | reads one bounded event file and the base revision's local policy; no network or GitHub mutation |
 | `init --dry-run` | 0 | none | previews the redacted setup plan; no install or live request |
 | no-argument non-TTY `init` | 0 | edits `package.json` only when generic scripts are added or migrated | none |
 | guided or `--yes` `init` | 0 by default; 1 only with explicit live consent | may update `package.json`, a lockfile, `.gitignore`, `.env.local`, `CLAUDE.md`, and `AGENTS.md` after interactive confirmation or deterministic `--yes` planning | may install the exact local package; runs offline doctor; live doctor is separately explicit |
@@ -300,6 +302,15 @@ the validation and calls GitHub's direct pull-request merge API with the numeric
 PR, repository, reviewed
 head SHA, validated title, and squash method. It never uses admin, auto-merge, rebase, merge-commit, or
 branch-deletion fallbacks.
+
+The separate `PR title` workflow runs on opened, edited, synchronized,
+reopened, and ready-for-review pull requests. It uses `pull_request_target`
+only to execute the exact trusted base revision with read-only permissions; it
+never checks out or runs pull-request code. The workflow passes only the fixed
+GitHub event-file path to `title-check`, which loads policy from the event's
+full base SHA. A feature branch therefore cannot replace the validator or
+loosen the policy that reviews its own PR, and editing the title retriggers the
+check. The workflow first becomes active after it lands on the default branch.
 
 ### Evidence contract
 

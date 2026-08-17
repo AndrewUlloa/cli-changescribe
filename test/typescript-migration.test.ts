@@ -119,6 +119,7 @@ test('all application sources are TypeScript and compiled output exists', () => 
     'setup-files',
     'staged-evidence',
     'title-semantics',
+    'title-check',
   ];
   const sourceFiles = fs.readdirSync(path.join(repoRoot, 'src')).sort();
 

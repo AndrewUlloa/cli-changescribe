@@ -198,6 +198,16 @@ export function parseConventionalTitle(
   if (match === null) {
     throw new Error('Pull-request title is not a valid Conventional Commit title.');
   }
+  if (match[2] !== undefined && policy.scopeMode === 'forbidden') {
+    throw new Error('Conventional Commit scope is forbidden by repository policy.');
+  }
+  if (
+    match[2] !== undefined &&
+    policy.allowedScopes !== undefined &&
+    !policy.allowedScopes.includes(match[2])
+  ) {
+    throw new Error('Conventional Commit scope is not allowed by repository policy.');
+  }
   const draft: ConventionalTitleDraft = {
     type: match[1],
     ...(match[2] === undefined ? {} : { scope: match[2] }),
