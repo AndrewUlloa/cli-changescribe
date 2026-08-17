@@ -137,6 +137,20 @@ test('accepts Git-valid Unicode and plus signs in branch references', (context) 
   );
 });
 
+test('accepts a deleted source fork while preserving base repository validation', (context) => {
+  const value = event();
+  const pullRequest = value.pull_request as Record<string, unknown>;
+  pullRequest.head = {
+    ...(pullRequest.head as Record<string, unknown>),
+    repo: null,
+  };
+  const eventPath = writeEvent(context, value);
+
+  assert.doesNotThrow(() =>
+    runTitleCheck(['--event-file', eventPath], dependencies()),
+  );
+});
+
 test('uses base policy even when a feature policy could allow another scope', (context) => {
   const allowed = writeEvent(context, event());
   const basePolicy: RepositoryTitlePolicy = {

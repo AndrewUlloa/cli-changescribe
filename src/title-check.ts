@@ -117,7 +117,9 @@ function parseSelectedEvent(contents: string): SelectedPullRequestEvent {
   const baseSha = revision(base.sha);
   revision(head.sha);
   const baseRepository = selectedRepository(base.repo);
-  selectedRepository(head.repo);
+  if (head.repo !== null && head.repo !== undefined) {
+    selectedRepository(head.repo);
+  }
   if (
     repository.toLocaleLowerCase('en-US') !==
     baseRepository.toLocaleLowerCase('en-US')
