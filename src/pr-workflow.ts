@@ -67,6 +67,7 @@ import {
   type PackageCommand,
   type PackageManagerName,
 } from './package-manager';
+import { projectEvidenceForModel } from './model-evidence';
 import {
   createOperationTimings,
   renderOperationTimings,
@@ -240,7 +241,7 @@ function buildArtifactMessages(
     `${budgetType}${budgetScope === undefined ? '' : `(${budgetScope})`}${budgetBreaking ? '!' : ''}: `.length;
   if (serialized.length > MAX_MODEL_EVIDENCE_CHARS) {
     throw new Error(
-      'Complete pull-request evidence exceeds the supported model request size. Split the change and retry.',
+      'Complete substantive pull-request evidence exceeds the supported model request size. Split the change and retry.',
     );
   }
   return [
@@ -285,6 +286,7 @@ function buildArtifactMessages(
         `Required substantive change evidence IDs: ${JSON.stringify(substantiveEvidenceIds)}`,
         'The title and primary Summary claim must conservatively represent the complete required substantive change evidence set, not an incidental implementation detail. Cite that complete set on the primary claim.',
         'When required substantive change evidence IDs are present, their complete union must be cited by observed change claims across Summary and Changes.',
+        'This model evidence projection retains every safe-to-egress changed line for each required substantive change while omitting unchanged diff context and supporting-file patches. Repository-policy contents remain metadata-only, configured secret values are redacted, and supporting files are accounted for by the deterministic Changes map. Omitted or protected patches cannot support model-authored prose.',
         'Use null for title.scope instead of omitting it or using an empty string.',
         'Allowed claim kinds: change, problem, rationale, verification, compatibility, risk, review-focus, non-goal, follow-up.',
         'Allowed section kinds: summary, changes, rationale, verification, compatibility, review-focus, risks, non-goals, follow-ups.',
@@ -303,6 +305,7 @@ function buildArtifactMessages(
 async function generateArtifactDraft(
   resolved: ResolvedProvider,
   evidence: EvidenceBundle,
+  modelEvidence: EvidenceBundle,
   branch: string,
   base: string,
   mode: string,
@@ -332,7 +335,7 @@ async function generateArtifactDraft(
           await createCompletionSafe(
             resolved,
             buildArtifactMessages(
-              evidence,
+              modelEvidence,
               branch,
               base,
               mode,
@@ -366,7 +369,7 @@ async function generateArtifactDraft(
             completion.content || completion.reasoning,
             knownSecrets,
           ).trim(),
-          evidence,
+          modelEvidence,
         );
         assertTitleSemantics(candidate.title, evidence, semanticOptions);
         renderPullRequestArtifact(
@@ -402,6 +405,7 @@ async function generateArtifactDraft(
 async function generatePrimaryReplacementDraft(
   resolved: ResolvedProvider,
   evidence: EvidenceBundle,
+  modelEvidence: EvidenceBundle,
   branch: string,
   base: string,
   mode: string,
@@ -420,7 +424,7 @@ async function generatePrimaryReplacementDraft(
     await createCompletionSafe(
       resolved,
       buildArtifactMessages(
-        evidence,
+        modelEvidence,
         branch,
         base,
         mode,
@@ -439,7 +443,7 @@ async function generatePrimaryReplacementDraft(
           completion.content || completion.reasoning,
           knownSecrets,
         ).trim(),
-        evidence,
+        modelEvidence,
       );
       assertTitleSemantics(candidate.title, evidence, semanticOptions);
       if (
@@ -551,6 +555,39 @@ function withWorkflowEvidence(
       gaps: [...gitEvidence.coverage.gaps],
     },
   });
+}
+
+function modelEvidenceProjection(evidence: EvidenceBundle): EvidenceBundle {
+  const projection = projectEvidenceForModel(
+    evidence,
+    eligiblePrimaryChangeEvidenceIds(evidence),
+  );
+  if (serializeEvidenceBundle(projection).length > MAX_MODEL_EVIDENCE_CHARS) {
+    throw new Error(
+      'Complete substantive pull-request evidence exceeds the supported model request size. Split the change and retry.',
+    );
+  }
+  return projection;
+}
+
+function assertArtifactUsesModelEvidence(
+  draft: ArtifactDraft,
+  modelEvidence: EvidenceBundle,
+): void {
+  const allowedEvidenceIds = new Set(
+    modelEvidence.items.map((item) => item.id),
+  );
+  const referencedEvidenceIds = [
+    ...draft.claims.flatMap((claim) => claim.evidenceIds),
+    ...draft.trailers.flatMap((trailer) => trailer.evidenceIds),
+  ];
+  if (
+    referencedEvidenceIds.some(
+      (evidenceId) => !allowedEvidenceIds.has(evidenceId),
+    )
+  ) {
+    throw new Error('Artifact references evidence unavailable to the model.');
+  }
 }
 
 function constraintItem(
@@ -1034,6 +1071,17 @@ async function main(argv: string[], timings: OperationTimings): Promise<void> {
       );
     }
   }
+  modelEvidenceProjection(
+    withWorkflowEvidence(
+      initialEvidence,
+      [],
+      branch,
+      args.base,
+      mode,
+      args.issue,
+      context,
+    ),
+  );
   if (args.createPr && !checkGhCli()) {
     throw new Error(
       'GitHub CLI (gh) is required for --create-pr. Install it from https://cli.github.com/ and run gh auth login.',
@@ -1149,10 +1197,12 @@ async function main(argv: string[], timings: OperationTimings): Promise<void> {
     args.issue,
     context,
   );
+  const modelEvidence = modelEvidenceProjection(evidence);
   step('Generating one structured draft from original evidence...');
   const initialGeneration = await generateArtifactDraft(
     resolved,
     evidence,
+    modelEvidence,
     branch,
     args.base,
     mode,
@@ -1183,7 +1233,11 @@ async function main(argv: string[], timings: OperationTimings): Promise<void> {
       providerRequestCount += 1;
       const critique = await createCompletionSafe(
         resolved,
-        buildArtifactCriticMessages(evidence, candidate, criticTitleOptions),
+        buildArtifactCriticMessages(
+          modelEvidence,
+          candidate,
+          criticTitleOptions,
+        ),
         8_192,
         knownSecrets,
         buildArtifactCriticResponseFormat(candidate, criticTitleOptions),
@@ -1208,6 +1262,7 @@ async function main(argv: string[], timings: OperationTimings): Promise<void> {
     const replacement = await generatePrimaryReplacementDraft(
       resolved,
       evidence,
+      modelEvidence,
       branch,
       args.base,
       mode,
@@ -1251,6 +1306,7 @@ async function main(argv: string[], timings: OperationTimings): Promise<void> {
     const coverageGeneration = await generateArtifactDraft(
       resolved,
       evidence,
+      modelEvidence,
       branch,
       args.base,
       mode,
@@ -1274,6 +1330,7 @@ async function main(argv: string[], timings: OperationTimings): Promise<void> {
       throw new IncompleteArtifactCoverageError();
     }
   }
+  assertArtifactUsesModelEvidence(filteredDraft, modelEvidence);
   if (removedCandidateIds.length > 0) {
     warn(
       `Critic removed ${String(removedCandidateIds.length)} unsupported optional ${removedCandidateIds.length === 1 ? 'item' : 'items'}.`,

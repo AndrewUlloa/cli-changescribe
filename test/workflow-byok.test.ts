@@ -112,6 +112,7 @@ async function createCompletionServer(
     replacementClaimId?: string;
     primaryRejectedCritiques?: number;
     titleSubjectRejectedCritiques?: number;
+    omittedSupportingResponses?: number;
   } = {},
 ): Promise<{
   baseURL: string;
@@ -259,6 +260,17 @@ async function createCompletionServer(
                               significance: 'supporting',
                             }]
                           : []),
+                        ...(artifactRequestCount <=
+                        (options.omittedSupportingResponses ?? 0)
+                          ? [{
+                              id: 'claim-omitted-supporting',
+                              kind: 'change',
+                              text: 'describe an omitted supporting patch.',
+                              evidenceIds: ['change-2'],
+                              basis: 'observed',
+                              significance: 'supporting',
+                            }]
+                          : []),
                       ],
                       sections: [
                         { kind: 'summary', claimIds: [responseClaimId] },
@@ -276,6 +288,13 @@ async function createCompletionServer(
                           ? [{
                               kind: 'changes',
                               claimIds: ['claim-coverage'],
+                            }]
+                          : []),
+                        ...(artifactRequestCount <=
+                        (options.omittedSupportingResponses ?? 0)
+                          ? [{
+                              kind: 'changes',
+                              claimIds: ['claim-omitted-supporting'],
                             }]
                           : []),
                       ],
@@ -852,6 +871,47 @@ test('headless GitHub mutation requires explicit --yes before provider work', as
   assert.equal(result.status, 1);
   assert.match(result.stderr, /interactive review or explicit --yes/i);
   assert.doesNotMatch(result.stdout, /Collecting|Generating|Running npm/);
+});
+
+test('PR workflow projects large supporting patches without losing substantive changed lines', async (context) => {
+  const directory = createRepository(context);
+  git(directory, ['switch', '--quiet', '-c', 'feature']);
+  fs.writeFileSync(
+    path.join(directory, 'app.ts'),
+    'export const route = "provider-neutral";\n',
+  );
+  fs.mkdirSync(path.join(directory, 'docs'));
+  const supportingSentinel = 'supporting-projection-sentinel';
+  fs.writeFileSync(
+    path.join(directory, 'docs', 'large.md'),
+    `${supportingSentinel}\n${'documentation context\n'.repeat(18_000)}`,
+  );
+  git(directory, ['add', 'app.ts', 'docs/large.md']);
+  git(directory, ['commit', '--quiet', '-m', 'feat: add projected evidence fixture']);
+  const output = path.join(directory, 'summary.md');
+  const server = await createCompletionServer(context, {
+    omittedSupportingResponses: 1,
+  });
+
+  const result = await run(
+    directory,
+    ['pr', '--base', 'main', '--out', output],
+    customEnvironment(server.baseURL),
+  );
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.equal(server.requests.length, 3);
+  assert.match(result.stdout, /requesting one repair/u);
+  const requests = JSON.stringify(server.requests.map((request) => request.body));
+  assert.match(requests, /provider-neutral/u);
+  assert.doesNotMatch(requests, new RegExp(supportingSentinel, 'u'));
+  assert.doesNotMatch(
+    fs.readFileSync(output, 'utf8'),
+    /omitted supporting patch/u,
+  );
+  const rendered = fs.readFileSync(output, 'utf8');
+  assert.match(rendered, /\*\*Implementation:\*\* 1 file/u);
+  assert.match(rendered, /\*\*Documentation:\*\* 1 file/u);
 });
 
 test('PR workflow repairs one invalid draft and never chains model summaries', async (context) => {

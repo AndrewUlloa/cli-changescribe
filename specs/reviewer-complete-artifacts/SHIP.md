@@ -20,6 +20,9 @@
   `pr:merge` dogfood path.
 - An executable evaluation corpus that keeps structural runtime gates separate
   from model-quality domain oracles.
+- A bounded large-PR projection that preserves every safe-to-egress substantive
+  changed line, keeps policy contents metadata-only, redacts configured secrets,
+  and relies on deterministic local accounting for supporting changes.
 
 ## Compatibility
 

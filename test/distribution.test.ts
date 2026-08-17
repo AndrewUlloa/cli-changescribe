@@ -103,6 +103,7 @@ function expectedDiffwrightFiles(): string[] {
     'github-repository',
     'init',
     'merge',
+    'model-evidence',
     'operation-timings',
     'package-manager',
     'project-setup',

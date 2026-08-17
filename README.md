@@ -284,8 +284,14 @@ and model as the draft and cannot rewrite prose. Diffwright removes critic-
 rejected optional claims and trailers before rendering. If the primary claim is
 rejected, Diffwright requests one smaller replacement from the original evidence
 and audits it again; a second rejection is terminal. One separate draft repair
-is possible when deterministic validation rejects a provider response. Oversized
-or incomplete evidence stops instead of being silently truncated.
+is possible when deterministic validation rejects a provider response.
+Oversized or incomplete authoritative evidence stops instead of being silently
+truncated. For mixed large pull requests, the model view retains every safe-to-
+egress changed line from every substantive file, removes only unchanged diff
+context, and omits supporting-file patches. Repository-policy contents remain
+metadata-only and configured secret values remain redacted. The local
+deterministic Changes map still accounts for every supporting file and line
+total, and omitted or protected patches cannot support model-authored prose.
 
 `--timings` is opt-in for `commit` and `pr`. It prints fixed phase names and
 millisecond durations after success or failure. Reports stay local and contain

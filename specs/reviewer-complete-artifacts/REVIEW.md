@@ -21,6 +21,11 @@ the regenerated PR artifact, hosted CI, and CodeRabbit review at the final head.
 - Every final change is classified once in the deterministic change map, and
   every substantive evidence ID must be cited by a critic-supported observed
   change claim before rendering.
+- Large mixed pull requests use a bounded model projection that retains every
+  safe-to-egress substantive changed line, omits unchanged context and
+  supporting-file patches, keeps policy contents metadata-only, redacts
+  configured secrets, and leaves complete supporting accounting to the
+  deterministic map.
 - A rejected primary claim no longer destroys supported optional detail. The
   replacement changes only the title, primary claim, and Summary anchor, is
   criticized separately, and is merged back under the five-request ceiling.
@@ -76,6 +81,9 @@ the regenerated PR artifact, hosted CI, and CodeRabbit review at the final head.
 - Normal synthesis remains two provider requests. Local deterministic map,
   completeness, title, and receipt checks add no provider calls; all repair
   combinations remain bounded at five.
+- Model-evidence size is preflighted before project gates. Supporting patches
+  cannot consume provider context or support generated prose, while substantive
+  changed lines remain complete.
 - The implementation keeps TypeScript orchestration and native Git traversal.
   It does not add a Rust sidecar or persistent search index without a measured
   repository-wide search bottleneck.

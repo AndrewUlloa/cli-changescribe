@@ -27,6 +27,10 @@ until a dedicated release pull request promotes this accumulated feature work.
 - Added an executable PR evaluation corpus for change-map totals, substantive
   domain recall, semantic title/scope outcomes, request ceilings, and safe init
   defaults.
+- Added a bounded large-PR model projection that retains every safe-to-egress
+  substantive changed line while deterministic local rendering accounts for
+  supporting files without sending their patches. Repository-policy contents
+  remain metadata-only and configured secrets remain redacted.
 
 ### Changed
 

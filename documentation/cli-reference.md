@@ -252,6 +252,16 @@ and remote head are rechecked before GitHub mutation. Issue linkage uses the
 body directive `Closes #NUMBER`; that exact suffix is included before review and
 in both the `.final.md` file and GitHub body.
 
+Before project gates, Diffwright preflights a bounded model-evidence projection.
+For mixed large pull requests it retains every safe-to-egress added/deleted line
+and diff header from each substantive change, removes only unchanged context,
+and keeps supporting-file patches out of model-authored claims. Repository-
+policy contents remain metadata-only and configured secret values remain
+redacted. The full local evidence still drives freshness, completeness, and the
+deterministic Changes map, which accounts for every supporting file and line
+total. If the complete substantive projection is still too large, generation
+fails before gates or provider work.
+
 Editing uses `DIFFWRIGHT_EDITOR`, then `EDITOR`, then `vi`. The setting must be
 one executable name without arguments. The edited title and body are
 revalidated, including Conventional Commit grammar, repository policy, UTF-8,

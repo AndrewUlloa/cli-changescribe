@@ -140,6 +140,7 @@ test('all application sources are TypeScript and compiled output exists', () => 
     'github-repository',
     'init',
     'merge',
+    'model-evidence',
     'operation-timings',
     'package-manager',
     'project-setup',
