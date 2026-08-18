@@ -5,6 +5,8 @@ import {
   type ChangeStatus,
   type CoverageGap,
   type EvidenceBundle,
+  type EvidenceItem,
+  type HistoryEvidenceItem,
 } from './change-evidence';
 import { defaultCommandRunner, type CommandRunner } from './subprocess';
 
@@ -12,6 +14,19 @@ const DEFAULT_MAX_PATCH_CHARS_PER_FILE = 1024 * 1024;
 const DEFAULT_MAX_TOTAL_PATCH_CHARS = 6 * 1024 * 1024;
 const MAX_SUPPORTED_PATCH_CHARS_PER_FILE = 2 * 1024 * 1024;
 const GIT_METADATA_BUFFER_BYTES = 10 * 1024 * 1024;
+const MAX_HISTORY_COMMITS = 10_000;
+const MAX_HISTORY_CHANGE_EDGES = 100_000;
+
+const HISTORY_ADJACENCY_ARGS = Object.freeze([
+  'diff-tree',
+  '--stdin',
+  '--always',
+  '--root',
+  '-r',
+  '--name-status',
+  '-z',
+  '--find-renames',
+] as const);
 
 export interface PullRequestEvidenceOptions {
   baseBranch: string;
@@ -19,6 +34,18 @@ export interface PullRequestEvidenceOptions {
   fetch?: boolean;
   maxPatchCharsPerFile?: number;
   maxTotalPatchChars?: number;
+  historyLimit?: number;
+}
+
+export interface HistoryChangeAdjacency {
+  readonly historyId: string;
+  readonly changeEvidenceIds: readonly string[];
+}
+
+export interface PullRequestEvidenceSnapshot {
+  readonly evidence: EvidenceBundle;
+  readonly historyAdjacency: readonly HistoryChangeAdjacency[];
+  readonly historyTruncated: boolean;
 }
 
 interface ChangedPath {
@@ -44,6 +71,13 @@ export function collectPullRequestEvidence(
   options: PullRequestEvidenceOptions,
   runner: CommandRunner = defaultCommandRunner,
 ): EvidenceBundle {
+  return collectPullRequestEvidenceSnapshot(options, runner).evidence;
+}
+
+export function collectPullRequestEvidenceSnapshot(
+  options: PullRequestEvidenceOptions,
+  runner: CommandRunner = defaultCommandRunner,
+): PullRequestEvidenceSnapshot {
   const cwd = options.cwd ?? process.cwd();
   const baseBranch = validateBaseBranch(options.baseBranch, cwd, runner);
   const maxPatchCharsPerFile = validateLimit(
@@ -56,6 +90,14 @@ export function collectPullRequestEvidence(
     'Total patch limit',
     DEFAULT_MAX_TOTAL_PATCH_CHARS,
   );
+  const historyLimit =
+    options.historyLimit === undefined
+      ? undefined
+      : validateLimit(
+          options.historyLimit,
+          'History limit',
+          MAX_HISTORY_COMMITS,
+        );
 
   if (options.fetch !== false) {
     tryFetchBase(baseBranch, cwd, runner);
@@ -105,7 +147,7 @@ export function collectPullRequestEvidence(
     ),
   );
 
-  const items: ChangeEvidenceItem[] = [];
+  const items: EvidenceItem[] = [];
   const gaps: CoverageGap[] = [];
   let collectedPatchChars = 0;
 
@@ -189,6 +231,27 @@ export function collectPullRequestEvidence(
     });
   }
 
+  const collectedHistory =
+    historyLimit === undefined
+      ? { items: [], truncated: false }
+      : collectHistory(
+          mergeBaseSha,
+          headSha,
+          historyLimit,
+          cwd,
+          runner,
+        );
+  items.push(...collectedHistory.items);
+
+  const historyAdjacency = collectHistoryAdjacency(
+    collectedHistory.items,
+    items.filter(
+      (item): item is ChangeEvidenceItem => item.kind === 'change',
+    ),
+    cwd,
+    runner,
+  );
+
   const currentHead = revParse('HEAD^{commit}', cwd, runner, 'HEAD');
   if (currentHead !== headSha) {
     throw new Error(
@@ -196,11 +259,238 @@ export function collectPullRequestEvidence(
     );
   }
 
-  return createEvidenceBundle({
+  const evidence = createEvidenceBundle({
     snapshot: { headSha, baseRef, baseSha, mergeBaseSha },
     items,
     receipts: [],
     coverage: { complete: gaps.length === 0, gaps },
+  });
+  return freezePullRequestEvidenceSnapshot({
+    evidence,
+    historyAdjacency,
+    historyTruncated: collectedHistory.truncated,
+  });
+}
+
+interface CollectedHistory {
+  readonly items: HistoryEvidenceItem[];
+  readonly truncated: boolean;
+}
+
+function collectHistory(
+  mergeBaseSha: string,
+  headSha: string,
+  limit: number,
+  cwd: string,
+  runner: CommandRunner,
+): CollectedHistory {
+  const output = runGit(
+    [
+      'log',
+      '--reverse',
+      `--max-count=${limit + 1}`,
+      '--format=%H%x00%s%x00%b',
+      '-z',
+      `${mergeBaseSha}..${headSha}`,
+      '--',
+    ],
+    cwd,
+    runner,
+    'Authored-history collection',
+  );
+  const fields = splitNullFields(output);
+  if (fields.length % 3 !== 0) {
+    throw new Error('Git returned malformed authored history.');
+  }
+  const records: Array<
+    Readonly<{
+      sha: string;
+      subject: string;
+      body: string;
+    }>
+  > = [];
+  for (let index = 0; index < fields.length; index += 3) {
+    const sha = fields[index];
+    const subject = fields[index + 1];
+    const body = fields[index + 2];
+    if (sha === undefined || subject === undefined || body === undefined) {
+      throw new Error('Git returned malformed authored history.');
+    }
+    records.push({ sha, subject, body });
+  }
+  const truncated = records.length > limit;
+  const retained = truncated ? records.slice(records.length - limit) : records;
+  const history = retained.map<HistoryEvidenceItem>((record, index) => ({
+    id: `history-${index + 1}`,
+    kind: 'history',
+    basis: 'provided',
+    source: { kind: 'git-history', locator: record.sha },
+    payload: record,
+  }));
+  return { items: history, truncated };
+}
+
+function collectHistoryAdjacency(
+  history: readonly HistoryEvidenceItem[],
+  changes: readonly ChangeEvidenceItem[],
+  cwd: string,
+  runner: CommandRunner,
+): HistoryChangeAdjacency[] {
+  if (history.length === 0) {
+    return [];
+  }
+  const requestedShas = history.map((item) => item.payload.sha);
+  if (
+    new Set(requestedShas).size !== requestedShas.length ||
+    requestedShas.some((sha) => !/^[0-9a-f]{40,64}$/u.test(sha))
+  ) {
+    throw new Error('Git returned malformed authored history.');
+  }
+
+  let output: string;
+  try {
+    output = runner.exec('git', HISTORY_ADJACENCY_ARGS, {
+      cwd,
+      encoding: 'utf8',
+      input: `${requestedShas.join('\n')}\n`,
+      stdio: 'pipe',
+      maxBuffer: GIT_METADATA_BUFFER_BYTES,
+    });
+  } catch {
+    throw new Error('History adjacency collection failed.');
+  }
+  if (Buffer.byteLength(output, 'utf8') > GIT_METADATA_BUFFER_BYTES) {
+    throw new Error('Git history adjacency exceeds the supported size limit.');
+  }
+  return parseHistoryAdjacency(output, history, changes);
+}
+
+function parseHistoryAdjacency(
+  output: string,
+  history: readonly HistoryEvidenceItem[],
+  changes: readonly ChangeEvidenceItem[],
+): HistoryChangeAdjacency[] {
+  if (!output.endsWith('\0')) {
+    throw new Error('Git returned malformed history adjacency.');
+  }
+  const fields = output.slice(0, -1).split('\0');
+  if (fields.some((field) => field.length === 0)) {
+    throw new Error('Git returned malformed history adjacency.');
+  }
+
+  const changeIdsByPath = new Map<string, string[]>();
+  const changeOrder = new Map<string, number>();
+  for (const [index, change] of changes.entries()) {
+    changeOrder.set(change.id, index);
+    addPathChange(changeIdsByPath, change.payload.path, change.id);
+    if (change.payload.oldPath !== undefined) {
+      addPathChange(changeIdsByPath, change.payload.oldPath, change.id);
+    }
+  }
+
+  const adjacency: HistoryChangeAdjacency[] = [];
+  const requestedShas = new Set(
+    history.map((item) => item.payload.sha),
+  );
+  let fieldIndex = 0;
+  let edgeCount = 0;
+  for (const historyItem of history) {
+    if (fields[fieldIndex] !== historyItem.payload.sha) {
+      throw new Error('Git returned malformed history adjacency.');
+    }
+    fieldIndex += 1;
+    const adjacentIds = new Set<string>();
+    const seenRecords = new Set<string>();
+
+    while (
+      fieldIndex < fields.length &&
+      !requestedShas.has(fields[fieldIndex] as string)
+    ) {
+      const status = fields[fieldIndex++];
+      if (status === undefined) {
+        throw new Error('Git returned malformed history adjacency.');
+      }
+      const pathCount = historyStatusPathCount(status);
+      if (pathCount === null) {
+        throw new Error('Git returned malformed history adjacency.');
+      }
+      const recordPaths: string[] = [];
+      for (let pathIndex = 0; pathIndex < pathCount; pathIndex += 1) {
+        const changedPath = fields[fieldIndex++];
+        if (changedPath === undefined) {
+          throw new Error('Git returned malformed history adjacency.');
+        }
+        recordPaths.push(changedPath);
+        for (const changeId of changeIdsByPath.get(changedPath) ?? []) {
+          adjacentIds.add(changeId);
+        }
+      }
+      const recordKey = JSON.stringify([status, ...recordPaths]);
+      if (seenRecords.has(recordKey)) {
+        throw new Error('Git returned malformed history adjacency.');
+      }
+      seenRecords.add(recordKey);
+    }
+
+    const changeEvidenceIds = [...adjacentIds].sort(
+      (left, right) =>
+        (changeOrder.get(left) ?? Number.MAX_SAFE_INTEGER) -
+        (changeOrder.get(right) ?? Number.MAX_SAFE_INTEGER),
+    );
+    edgeCount += changeEvidenceIds.length;
+    if (edgeCount > MAX_HISTORY_CHANGE_EDGES) {
+      throw new Error('Git history adjacency exceeds the supported size limit.');
+    }
+    adjacency.push({ historyId: historyItem.id, changeEvidenceIds });
+  }
+  if (fieldIndex !== fields.length) {
+    throw new Error('Git returned malformed history adjacency.');
+  }
+  return adjacency;
+}
+
+function historyStatusPathCount(status: string): 1 | 2 | null {
+  if (/^[AMDT]$/u.test(status)) {
+    return 1;
+  }
+  const renameOrCopy = /^[RC](?<score>\d{1,3})$/u.exec(status);
+  if (
+    renameOrCopy?.groups?.score !== undefined &&
+    Number(renameOrCopy.groups.score) <= 100
+  ) {
+    return 2;
+  }
+  return null;
+}
+
+function addPathChange(
+  changeIdsByPath: Map<string, string[]>,
+  changedPath: string,
+  changeId: string,
+): void {
+  const current = changeIdsByPath.get(changedPath);
+  if (current === undefined) {
+    changeIdsByPath.set(changedPath, [changeId]);
+    return;
+  }
+  if (!current.includes(changeId)) {
+    current.push(changeId);
+  }
+}
+
+function freezePullRequestEvidenceSnapshot(
+  snapshot: PullRequestEvidenceSnapshot,
+): PullRequestEvidenceSnapshot {
+  const historyAdjacency = snapshot.historyAdjacency.map((entry) =>
+    Object.freeze({
+      historyId: entry.historyId,
+      changeEvidenceIds: Object.freeze([...entry.changeEvidenceIds]),
+    }),
+  );
+  return Object.freeze({
+    evidence: snapshot.evidence,
+    historyAdjacency: Object.freeze(historyAdjacency),
+    historyTruncated: snapshot.historyTruncated,
   });
 }
 

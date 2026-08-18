@@ -157,7 +157,6 @@ function semanticChangeTypes(
 ): readonly SemanticCommitType[] {
   const explicit = explicitTypes(evidence.items);
   const intents = evidence.items.filter((item) => item.kind === 'intent');
-  const history = evidence.items.filter((item) => item.kind === 'history');
   const detected = new Set<SemanticCommitType>(explicit);
   for (const intent of intents) {
     for (const [type, pattern] of Object.entries(INTENT_PATTERNS) as Array<
@@ -167,13 +166,6 @@ function semanticChangeTypes(
         detected.add(type);
       }
     }
-  }
-  if (
-    history.some((item) =>
-      /^(?:revert\b|revert:)/iu.test(item.payload.subject.trim()),
-    )
-  ) {
-    detected.add('revert');
   }
   if (detected.has('perf') && !hasPerformanceEvidence(evidence)) {
     detected.delete('perf');

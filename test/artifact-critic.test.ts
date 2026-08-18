@@ -294,6 +294,8 @@ test('audits the representative primary title, type, and scope without another r
   assert.match(serialized, /title:type/);
   assert.match(serialized, /title:scope/);
   assert.match(serialized, /represent every cited substantive change/i);
+  assert.match(serialized, /history subjects.*authored labels/i);
+  assert.match(serialized, /nonempty history bodies.*authored intent/i);
   const responseFormat = critic.buildArtifactCriticResponseFormat(
     artifact,
     options,

@@ -103,7 +103,7 @@ Generate a pull-request summary for the current branch.
 Options:
   --base <branch>     Base branch (default: main)
   --out <path>        Detailed output file (default: .pr-summaries/PR_SUMMARY.md)
-  --limit <number>    Legacy history cap; never limits the final net diff
+  --limit <number>    Authored history cap; never limits the final net diff
   --issue <number>    Add issue context and append "Closes #<number>" to the PR body
   --mode <mode>       Summary mode: feature or release
   --context-file <path>

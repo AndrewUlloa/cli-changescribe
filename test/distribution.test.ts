@@ -114,6 +114,7 @@ function expectedDiffwrightFiles(): string[] {
     'pr-workflow',
     'provider',
     'repository-policy',
+    'reviewer-topics',
     'runtime-config',
     'errors',
     'transport',

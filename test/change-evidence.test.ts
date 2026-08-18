@@ -39,6 +39,13 @@ type EvidenceItem =
         name: string;
         value: string | number | boolean | null | readonly string[];
       };
+    }
+  | {
+      id: string;
+      kind: 'history';
+      basis: 'provided';
+      source: { kind: string; locator: string };
+      payload: { sha: string; subject: string; body: string };
     };
 
 interface VerificationReceipt {
@@ -190,6 +197,22 @@ function inputWithConstraint(
     basis: 'provided',
     source: { kind: 'workflow', locator: 'repository-policy' },
     payload: { name: 'allowed-values', value },
+  });
+  return input;
+}
+
+function inputWithHistory(body: string): EvidenceBundleInput {
+  const input = baseInput();
+  input.items.push({
+    id: 'history-1',
+    kind: 'history',
+    basis: 'provided',
+    source: { kind: 'git-history', locator: 'd'.repeat(40) },
+    payload: {
+      sha: 'd'.repeat(40),
+      subject: 'fix(parser): preserve empty tokens',
+      body,
+    },
   });
   return input;
 }
@@ -470,6 +493,94 @@ test('requires provided context for problem, compatibility, and non-goal claims'
       /requires provided intent|requires provided intent or/i,
     );
   }
+});
+
+test('does not treat unrelated history bodies as authored intent', () => {
+  const bundle = createEvidenceBundle(
+    inputWithHistory(
+      'Why: callers use empty tokens as placeholders.\n\nRisk: malformed input may still fail.',
+    ),
+  );
+  assert.doesNotThrow(() =>
+    assertSupportedClaims(bundle, [{
+      id: 'claim-change',
+      kind: 'change',
+      text: 'Preserve empty tokens in the parser.',
+      evidenceIds: ['change-1', 'history-1'],
+      basis: 'observed',
+      significance: 'primary',
+    }]),
+  );
+  for (const kind of ['problem', 'rationale', 'risk', 'follow-up'] as const) {
+    assert.throws(
+      () =>
+        assertSupportedClaims(bundle, [{
+          id: `claim-${kind}`,
+          kind,
+          text: 'Do not infer this authored context from commit history.',
+          evidenceIds: ['history-1'],
+          basis: 'provided',
+          significance: 'supporting',
+        }]),
+      /requires provided intent/i,
+    );
+  }
+});
+
+test('uses explicit context-file intent for authored context claims', () => {
+  const bundle = createEvidenceBundle(baseInput());
+  for (const kind of ['problem', 'rationale', 'risk', 'follow-up'] as const) {
+    assert.doesNotThrow(() =>
+      assertSupportedClaims(bundle, [{
+        id: `claim-${kind}`,
+        kind,
+        text: 'Handle empty tokens without throwing.',
+        evidenceIds: ['intent-1'],
+        basis: 'provided',
+        significance: 'supporting',
+      }]),
+    );
+  }
+});
+
+test('does not promote subject-only history into authored intent', () => {
+  const bundle = createEvidenceBundle(inputWithHistory(''));
+  for (const kind of ['problem', 'rationale', 'risk', 'follow-up'] as const) {
+    assert.throws(
+      () =>
+        assertSupportedClaims(bundle, [
+          {
+            id: `claim-${kind}`,
+            kind,
+            text: 'Do not infer this authored context from the subject.',
+            evidenceIds: ['history-1'],
+            basis: 'provided',
+            significance: 'supporting',
+          },
+        ]),
+      /requires provided intent/i,
+    );
+  }
+});
+
+test('does not let authored history replace observed change evidence', () => {
+  const bundle = createEvidenceBundle(
+    inputWithHistory('Why: callers use empty tokens as placeholders.'),
+  );
+  assert.throws(
+    () =>
+      assertSupportedClaims(bundle, [
+        {
+          id: 'claim-change',
+          kind: 'change',
+          text: 'Preserve empty tokens in the parser.',
+          evidenceIds: ['history-1'],
+          basis: 'observed',
+          significance: 'primary',
+        },
+      ]),
+    /has no observed evidence/i,
+  );
 });
 
 test('fails universal and identifier claims that exceed their cited evidence', () => {
