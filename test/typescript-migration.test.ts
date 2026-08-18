@@ -151,6 +151,7 @@ test('all application sources are TypeScript and compiled output exists', () => 
     'pr-workflow',
     'provider',
     'repository-policy',
+    'reviewer-topics',
     'runtime-config',
     'errors',
     'transport',

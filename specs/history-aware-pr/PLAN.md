@@ -101,14 +101,14 @@ Rejected:
   - **Files:** `src/git-evidence.ts`, `test/git-evidence.test.ts`.
   - **Size:** M.
 
-- [ ] **Task 3: Build the pure reviewer-topic planner**
+- [x] **Task 3: Build the pure reviewer-topic planner**
   - **Description:** Add frozen typed hint construction and post-critic topic
     assignment validation. Collapse identical adjacency sets, compute the
     bounded target, validate disjoint topic ownership, and derive map-only IDs.
   - **Acceptance:**
-    - [ ] Deterministic under input permutation and immutable after return.
-    - [ ] Every substantive ID occurs exactly once across topics/map-only.
-    - [ ] Unknown, duplicate, overlapping, supporting-only, zero-change, and
+    - [x] Deterministic under input permutation and immutable after return.
+    - [x] Every substantive ID occurs exactly once across topics/map-only.
+    - [x] Unknown, duplicate, overlapping, supporting-only, zero-change, and
       unlinked-history topic claims fail with bounded generic diagnostics.
   - **Verify:** `test/reviewer-topics.test.ts`, typecheck, build, full gates.
   - **Depends on:** Task 2 contract; implementation may start once types settle.
@@ -117,8 +117,8 @@ Rejected:
 
 ### Checkpoint: Local Planning
 
-- [ ] Git evidence and pure planner tests pass on Node 18-compatible APIs.
-- [ ] No provider request or rendered-output behavior changed yet.
+- [x] Git evidence and pure planner tests pass on Node 18-compatible APIs.
+- [x] No provider request or rendered-output behavior changed yet.
 - [ ] Tasks 2 and 3 each committed through `npm run commit`.
 
 ### Phase 3: Privacy and Workflow
