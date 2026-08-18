@@ -1,137 +1,239 @@
-# Plan: History-Aware, Proportionate PR Narratives
+# Plan: Final-Diff-Aware Reviewer Topics
 
 > Derived from: `specs/history-aware-pr/SPEC.md`
-> Status: approved by the 2026-08-17 user request
-> Last updated: 2026-08-17
+> Status: in progress
+> Last updated: 2026-08-18
+
+## Overview
+
+Replace the file-count breadth experiment with a local topic-planning contract.
+First preserve the PR #20 failure as an executable benchmark. Then add one
+batched history-to-final-change adjacency read, a pure hint/assignment planner,
+subject-only protected model projection, and workflow validation after every
+critic/repair path. Finish with corpus evaluation, PR #20 dogfood, five-axis
+review, and release evidence.
 
 ## Architecture Decisions
 
-- History is collected beside Git evidence but remains `provided`, supplemental,
-  and snapshot-bound.
-- Final-net-diff change IDs remain the only inputs to completeness accounting.
-- Narrative breadth is a pure post-critic invariant; prompts guide the model but
-  never replace enforcement.
-- The rule is proportional and capped at six detailed claims, preserving concise
-  output for small PRs.
-- Provider request and evidence-size ceilings do not change.
+- **Decision:** Final net diff remains the only authoritative change evidence.
+  **Rationale:** History can name checkpoints but can include reverted/stale work.
+- **Decision:** Adjacency is local non-evidentiary planning metadata.
+  **Rationale:** Path intersection is useful but does not prove semantic survival.
+- **Decision:** Topic planning stays inside the existing draft response.
+  **Rationale:** Preserve the two-request healthy path and avoid summaries of
+  summaries.
+- **Decision:** Accepted prose topics and map-only IDs form an exact partition.
+  **Rationale:** Complete accounting without one bullet per file.
+- **Decision:** Commit bodies remain local by default.
+  **Rationale:** Automatic provider egress is not equivalent to explicit context
+  consent and exact credential redaction is not a general privacy filter.
+- **Decision:** Corpus tests score flexible semantic oracles, never exact prose.
+  **Rationale:** Many wordings can be good while inventory prose must still fail.
+
+Rejected:
+
+- File-count `sqrt(n)` as the quality definition: it accepted six inventory
+  bullets and splits one-theme codemods artificially.
+- Per-commit model summaries: variable cost, stale intermediate state, and
+  summary-of-summary grounding loss.
+- A third normal-path topic-planning call: unnecessary cost and latency.
+- Repository-configurable weakening of grounding, topic assignment, or critic.
 
 ## Dependency Graph
 
 ```text
-[pinned history collector]
-          │
-          ├──────────────▶ [history claim semantics]
-          │                         │
-[pure breadth contract] ────────────┼──▶ [PR orchestration + repairs]
-                                    │               │
-                                    └───────────────┴──▶ [PR #20 evaluation]
+[contract + PR #20 baseline]
+              |
+              v
+[batched Git adjacency] ---> [protected model projection]
+              |                         |
+              v                         v
+       [pure topic planner] ------> [PR workflow + repairs]
+                                              |
+                                              v
+                                  [corpus + PR #20 dogfood]
+                                              |
+                                              v
+                                      [review + ship]
 ```
 
 ## Task List
 
-### Task 1: Specify and baseline PR #20
+### Phase 1: Contract and Baseline
 
-- [x] Record the current body and actual root cause.
-- [x] Define history provenance, proportional breadth, safety boundaries, and
-  measurable PR #20 acceptance.
-- **Verify:** `git diff --check`
-- **Files:** `specs/history-aware-pr/SPEC.md`, `PLAN.md`
-- **Size:** S
+- [x] **Task 1: Commit the failed experiment and replacement contract**
+  - **Description:** Preserve the exact PR #20 before/current-after output and
+    explain why six grounded inventory bullets are not the goal. Replace the
+    shipping contract with adjacency hints, exact topic/map partition, body
+    privacy, semantic quality metrics, and rollout boundaries.
+  - **Acceptance:**
+    - [x] Frozen PR #20 body, generated body, request sequence, timings, and
+      0/6 vs partial topic score are recorded.
+    - [x] Spec rejects file-count breadth as the final invariant.
+    - [x] No runtime behavior changes in this commit.
+  - **Verify:** `git diff --check`; `npm run typecheck`.
+  - **Depends on:** None.
+  - **Files:** `specs/history-aware-pr/{SPEC,PLAN,EVALUATION}.md`.
+  - **Size:** S.
 
-### Task 2: Collect immutable authored history
+### Checkpoint: Approved Contract
 
-- [x] Add bounded NUL-safe `merge-base..HEAD` history collection using fixed Git
-  argv and the existing command runner.
-- [x] Wire the existing `--limit` value into initial and post-gate evidence
-  collection without changing final-diff coverage.
-- [x] Recheck head/base snapshot identity and reject malformed or oversized
-  history generically.
-- [x] Add focused Git fixtures without introducing another runtime module.
-- **Acceptance:** only range commits appear; ordering is deterministic; subjects
-  and bodies remain provided; empty history is valid; secrets are redacted in
-  model messages.
-- **Verify:** focused Git-evidence/history tests, typecheck, build.
-- **Files:** `src/git-evidence.ts`, `test/git-evidence.test.ts`, inventories.
-- **Size:** M
+- [x] Spec remains accurate after independent architecture/evaluation/security
+  review.
+- [ ] Contract checkpoint committed and pushed with `npm run commit`.
 
-### Task 3: Define safe history-backed claims
+### Phase 2: Evidence Foundation
 
-- [x] Permit a conservative provided problem/rationale/risk/follow-up claim to
-  cite a nonempty history body.
-- [x] Keep subject-only history ineligible for those claims.
-- [x] Require observed change evidence alongside history for every change claim.
-- [x] Update the model and critic instructions without exposing repository policy.
-- **Acceptance:** adversarial subject-only and unrelated-history cases fail;
-  nonempty cited body plus matching critic approval succeeds.
-- **Verify:** change-evidence, artifact-draft, and critic focused tests.
-- **Files:** `src/change-evidence.ts`, prompt builders, focused tests.
-- **Size:** M
+- [ ] **Task 2: Collect batched pinned history adjacency**
+  - **Description:** Add a compatibility-preserving snapshot collector. Parse
+    one `git diff-tree --stdin --root -r --name-status -z --find-renames` result
+    into bounded history-to-final-change relationships.
+  - **Acceptance:**
+    - [ ] Exactly one fixed-argv adjacency subprocess receives exact retained
+      SHAs through stdin.
+    - [ ] NUL/status state machine handles A/M/D/T/R/C and rejects malformed,
+      repeated, missing, out-of-order, or unexpected records generically.
+    - [ ] Zero-adjacency reverted histories are identifiable and freshness is
+      still bound to head/base/merge base.
+  - **Verify:** focused Git evidence tests, typecheck, build, full gates.
+  - **Depends on:** Task 1.
+  - **Files:** `src/git-evidence.ts`, `test/git-evidence.test.ts`.
+  - **Size:** M.
 
-### Task 4: Enforce proportionate detailed coverage
+- [ ] **Task 3: Build the pure reviewer-topic planner**
+  - **Description:** Add frozen typed hint construction and post-critic topic
+    assignment validation. Collapse identical adjacency sets, compute the
+    bounded target, validate disjoint topic ownership, and derive map-only IDs.
+  - **Acceptance:**
+    - [ ] Deterministic under input permutation and immutable after return.
+    - [ ] Every substantive ID occurs exactly once across topics/map-only.
+    - [ ] Unknown, duplicate, overlapping, supporting-only, zero-change, and
+      unlinked-history topic claims fail with bounded generic diagnostics.
+  - **Verify:** `test/reviewer-topics.test.ts`, typecheck, build, full gates.
+  - **Depends on:** Task 2 contract; implementation may start once types settle.
+  - **Files:** new `src/reviewer-topics.ts`, new test, inventories.
+  - **Size:** M.
 
-- [x] Add pure required-claim and per-claim-span calculations.
-- [x] Require non-primary Changes claims to cover all substantive IDs for broad
-  PRs after criticism.
-- [x] Emit one stable generic diagnostic without evidence text.
-- [x] Add boundary and permutation tests.
-- **Acceptance:** one broad Summary cannot satisfy a 23-item PR; five bounded
-  detailed claims can; PRs below four substantive items remain concise.
-- **Verify:** artifact-completeness focused suite.
-- **Files:** `src/artifact-completeness.ts`, focused tests.
-- **Size:** S
+### Checkpoint: Local Planning
 
-### Task 5: Integrate breadth with every repair path
+- [ ] Git evidence and pure planner tests pass on Node 18-compatible APIs.
+- [ ] No provider request or rendered-output behavior changed yet.
+- [ ] Tasks 2 and 3 each committed through `npm run commit`.
 
-- [x] Give the initial draft and each repair exact bounded detail requirements.
-- [x] Revalidate after deterministic repair, primary replacement merge, coverage
-  repair, and critic pruning.
-- [x] Preserve already supported detailed claims byte-for-byte.
-- [x] Keep normal request count at two and combined maximum at five.
-- **Acceptance:** fake-provider workflows cover normal success, one repair,
-  critic-reopened detail gaps, and terminal ceiling behavior.
-- **Verify:** workflow-byok focused tests and security suite.
-- **Files:** `src/pr-workflow.ts`, `test/workflow-byok.test.ts`.
-- **Size:** M
+### Phase 3: Privacy and Workflow
 
-### Checkpoint: Runtime contract
+- [ ] **Task 4: Protect history at the model boundary**
+  - **Description:** Project only linked, allowed subjects and ID relationships;
+    blank bodies, suppress policy-touching histories, scan high-confidence
+    credentials, remove history from title-type/intent semantics, and include
+    hint bytes in the existing preflight budget.
+  - **Acceptance:**
+    - [ ] Reverted/unlinked subjects, every body, protected-policy history, and
+      credential-bearing subjects are absent from provider requests.
+    - [ ] `--context-file` remains the only authored rationale source.
+    - [ ] Nothing truncates silently; configured secrets remain redacted.
+  - **Verify:** model-evidence, change-evidence, title-semantics, security tests;
+    typecheck/build/full gates.
+  - **Depends on:** Tasks 2-3.
+  - **Files:** evidence/projection/semantics modules and focused tests.
+  - **Size:** M.
 
-- [x] Typecheck passes.
-- [x] Focused history, evidence, completeness, critic, and workflow tests pass.
-- [ ] Full suite passes.
-- [ ] No provider size/request/security invariant regresses.
+- [ ] **Task 5: Integrate topic generation and bounded repair**
+  - **Description:** Add ID-only hints to every draft/repair prompt, build the
+    accepted topic plan after criticism, repair one missing topic plan from
+    original evidence within the existing ceiling, and render unchanged.
+  - **Acceptance:**
+    - [ ] Healthy path remains exactly draft + critic.
+    - [ ] Schema fallback is at most three; every combined repair path is at
+      most five and the terminal accepted draft is criticized.
+    - [ ] Critic-pruned topic gaps repair or fail before output/GitHub mutation.
+    - [ ] Existing title, receipt, body, freshness, and GitHub tests stay green.
+  - **Verify:** workflow-byok, artifact critic/draft/completeness tests, security
+    suite, typecheck/build/full gates.
+  - **Depends on:** Task 4.
+  - **Files:** `src/pr-workflow.ts`, completeness/critic helpers, tests.
+  - **Size:** M.
 
-### Task 6: Produce the PR #20 before/after
+### Checkpoint: End-to-End Core
 
-- [ ] Reconstruct PR #20 from its original base and head SHAs in an isolated
-  temporary worktree.
-- [ ] Generate the after body without GitHub mutation using the configured
-  provider and no private context file.
-- [ ] Record exact before/after Markdown, request count, timings, and an audit of
-  which claims came from final diff versus history.
-- [ ] Confirm the after body has five grounded Changes claims and no invented
-  Why/Risk from the 32 subject-only commits.
-- **Verify:** manual comparison plus structural evaluation command.
-- **Files:** `specs/history-aware-pr/EVALUATION.md`.
-- **Size:** S
+- [ ] Fake-provider broad, one-theme, reverted, repair, and egress cases pass.
+- [ ] Packed ChangeScribe bridge and existing CLI behavior remain compatible.
+- [ ] Tasks 4 and 5 committed independently through `npm run commit`.
 
-### Task 7: Review, document, and ship
+### Phase 4: Evaluation, Review, and Ship
 
-- [ ] Update README/CLI reference to explain authored history and proportionate
-  narratives.
-- [ ] Complete `REVIEW.md` across correctness, simplicity, architecture,
-  security, and performance.
-- [ ] Complete `SHIP.md` with rollout, rollback, package, and dogfood evidence.
-- [ ] Commit each green slice through `npm run commit`, open/update the PR through
-  `npm run feature:pr`, address review feedback, and merge only through
-  `npm run pr:merge -- --yes` when explicitly requested.
-- **Verify:** full repository gates, package dry run, audit, signatures, hosted CI.
-- **Files:** docs and spec artifacts.
-- **Size:** M
+- [ ] **Task 6: Add executable editorial-quality corpus**
+  - **Description:** Add narrative-quality fixtures and a pure evaluator for
+    topic recall, uniqueness, coherence, flexible mechanism anchors, inventory
+    rate, and paraphrase equivalence.
+  - **Acceptance:**
+    - [ ] Includes PR #20, one-theme codemod, same-file independent topics,
+      reverted history, body privacy, supporting files, rename/delete, generic
+      inventory, and paraphrase cases.
+    - [ ] Every fixture expectation executes production parsing/planning code.
+    - [ ] No exact provider prose snapshot is required.
+  - **Verify:** narrative-quality and evaluation-corpus tests, full gates.
+  - **Depends on:** Task 5.
+  - **Files:** new fixture directory, new tests/evaluator, inventories.
+  - **Size:** M.
 
-## Exit Criteria
+- [ ] **Task 7: Dogfood PR #20 and PR #21**
+  - **Description:** Regenerate offline from pinned evidence, record structured
+    plan/body/request sequence/timings, score against the six-topic oracle, and
+    compare with the frozen before and inventory after.
+  - **Acceptance:**
+    - [ ] PR #20 recall 6/6, inventory rate 0%, no unsupported Why/Risk, no
+      GitHub mutation, healthy or documented schema-fallback request sequence.
+    - [ ] PR #21 output is reviewer-usable under the same hard invariants.
+  - **Verify:** structural evaluator plus human side-by-side review.
+  - **Depends on:** Task 6.
+  - **Files:** `specs/history-aware-pr/EVALUATION.md` and generated audit data.
+  - **Size:** S.
 
-- [ ] PR #20 before/after is reviewable and materially different.
-- [ ] Branch history improves change naming without becoming observed truth.
-- [ ] Broad PRs cannot collapse to one generic claim.
-- [ ] Why/Risk remain absent when commit bodies and explicit context are absent.
-- [ ] All request, size, freshness, redaction, and mutation invariants stay green.
+- [ ] **Task 8: Complete five-axis review and ship evidence**
+  - **Description:** Update public docs/CHANGELOG; complete correctness,
+    simplicity, architecture, security, and performance review; write rollback
+    and package-release evidence; resolve every required finding.
+  - **Acceptance:**
+    - [ ] `REVIEW.md` and `SHIP.md` match the implemented code and green gates.
+    - [ ] Typecheck, full tests, build, pack dry-run, audit, signatures, and
+      diff-check pass.
+    - [ ] PR #21 is updated only with `npm run feature:pr`; review feedback is
+      addressed; guarded merge is handed off for explicit approval.
+  - **Verify:** repository release gates and hosted CI.
+  - **Depends on:** Tasks 1-7.
+  - **Files:** README, CLI/provider docs as needed, CHANGELOG, review/ship.
+  - **Size:** M.
+
+## Parallelization
+
+- Safe: evaluation corpus design and adversarial safety review after the topic
+  contract is fixed.
+- Sequential: adjacency -> planner -> projection/privacy -> workflow -> live
+  dogfood.
+- Contract-first: `ReviewerTopicHints` and `ReviewerTopicPlan` types must settle
+  before workflow changes.
+
+## Risks and Mitigations
+
+| Risk | Impact | Likelihood | Mitigation |
+|---|---|---|---|
+| Central files link unrelated checkpoints | Medium | High | Identical-set hints only; disjoint final assignment; semantic corpus |
+| Provider emits inventory topics | High | Medium | Topic prompt + critic instruction + executable inventory oracle + dogfood gate |
+| Commit text leaks private data | High | Medium | Body-local default, subject scan, policy suppression, exact redaction |
+| Large adjacency exceeds prompt | High | Low | Bounded edges/groups, combined preflight, explicit failure |
+| Repair consumes request budget | Medium | Medium | Reuse full-draft repair and assert max five in orchestration tests |
+| Current branch behavior changes mid-PR | Medium | High | One independently green commit per slice and explicit rollback points |
+
+## Open Questions
+
+None. History-body opt-in, issue ingestion, and repository-specific topic
+templates are deferred.
+
+## Sign-off
+
+- [x] Every task has acceptance and verification.
+- [x] Tasks are ordered by dependency.
+- [x] No task is XL.
+- [x] Checkpoints separate contract, local core, workflow, and release.
+- [x] User approved the end-to-end direction and guarded incremental commits.
