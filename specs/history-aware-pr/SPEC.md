@@ -121,10 +121,13 @@ After bounded history collection, send the exact retained full SHAs through
 stdin to one command:
 
 ```text
-git diff-tree --stdin --root -r --name-status -z --find-renames
+git diff-tree --stdin --always --root -r --name-status -z --find-renames
 ```
 
 A NUL-state parser accepts only requested SHAs and supported status/path shapes.
+`--always` requires Git to emit a header for merge and ordinary empty commits,
+so a missing requested record is always malformed while an empty record remains
+a valid zero-adjacency checkpoint.
 It maps commit old/current paths to the final evidence index and emits only
 `historyId -> finalChangeIds`. Raw intermediate paths are never serialized.
 Missing, repeated, out-of-order, malformed, or oversized records fail closed.

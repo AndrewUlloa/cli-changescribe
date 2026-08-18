@@ -58,6 +58,14 @@ interface HistoryItem {
 }
 
 interface GitEvidenceModule {
+  collectPullRequestEvidenceSnapshot(options: {
+    baseBranch: string;
+    cwd?: string;
+    fetch?: boolean;
+    maxPatchCharsPerFile?: number;
+    maxTotalPatchChars?: number;
+    historyLimit?: number;
+  }, runner?: CommandRunner): PullRequestEvidenceSnapshot;
   collectPullRequestEvidence(options: {
     baseBranch: string;
     cwd?: string;
@@ -83,6 +91,15 @@ interface GitEvidenceModule {
     cwd?: string,
     runner?: CommandRunner,
   ): void;
+}
+
+interface PullRequestEvidenceSnapshot {
+  readonly evidence: EvidenceBundle;
+  readonly historyAdjacency: readonly Readonly<{
+    historyId: string;
+    changeEvidenceIds: readonly string[];
+  }>[];
+  readonly historyTruncated: boolean;
 }
 
 interface CommandRunner {
@@ -294,6 +311,698 @@ test('collects bounded authored history from the pinned branch range', (context)
     assert.equal(item.source.locator, item.payload.sha);
     assert.match(item.payload.sha, /^[0-9a-f]{40}$/u);
   }
+});
+
+test('collects one bounded history adjacency batch and preserves zero-adjacency history', (context) => {
+  const shaShapedPath = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+  const repository = materializeRepository({
+    id: 'history-adjacency',
+    baseFiles: {
+      'src/value.ts': 'export const value = 1;\n',
+      'src/remove.ts': 'export const remove = true;\n',
+    },
+    commits: [
+      {
+        message: 'feat: add reverted path',
+        operations: [
+          { kind: 'write', path: 'src/reverted.ts', content: 'temporary\n' },
+        ],
+      },
+      {
+        message: 'revert: remove reverted path',
+        operations: [{ kind: 'delete', path: 'src/reverted.ts' }],
+      },
+      {
+        message: 'refactor: rename value',
+        operations: [
+          {
+            kind: 'rename',
+            from: 'src/value.ts',
+            path: 'src/current.ts',
+          },
+        ],
+      },
+      {
+        message: 'fix: update final paths',
+        operations: [
+          {
+            kind: 'write',
+            path: 'src/current.ts',
+            content: 'export const value = 2;\n',
+          },
+          { kind: 'delete', path: 'src/remove.ts' },
+          { kind: 'write', path: shaShapedPath, content: 'safe path\n' },
+        ],
+      },
+    ],
+  });
+  context.after(() =>
+    fs.rmSync(repository.directory, { recursive: true, force: true }),
+  );
+
+  const diffTreeCalls: Array<{
+    args: readonly string[];
+    input: unknown;
+    maxBuffer: unknown;
+  }> = [];
+  const runner: CommandRunner = {
+    exec(file, args, options) {
+      if (file === 'git' && args[0] === 'diff-tree') {
+        diffTreeCalls.push({
+          args: [...args],
+          input: options?.input,
+          maxBuffer: options?.maxBuffer,
+        });
+      }
+      return defaultCommandRunner.exec(file, args, options);
+    },
+    spawn(file, args, options) {
+      return defaultCommandRunner.spawn(file, args, options);
+    },
+  };
+
+  const snapshot = gitEvidence.collectPullRequestEvidenceSnapshot(
+    {
+      cwd: repository.directory,
+      baseBranch: repository.baseBranch,
+      fetch: false,
+      historyLimit: 10,
+    },
+    runner,
+  );
+  const histories = snapshot.evidence.items.filter(
+    (item) => (item as unknown as HistoryItem).kind === 'history',
+  ) as unknown as HistoryItem[];
+  assert.equal(diffTreeCalls.length, 1);
+  assert.deepEqual(diffTreeCalls[0]?.args, [
+    'diff-tree',
+    '--stdin',
+    '--always',
+    '--root',
+    '-r',
+    '--name-status',
+    '-z',
+    '--find-renames',
+  ]);
+  assert.equal(
+    diffTreeCalls[0]?.input,
+    `${histories.map((item) => item.payload.sha).join('\n')}\n`,
+  );
+  assert.equal(diffTreeCalls[0]?.maxBuffer, 10 * 1024 * 1024);
+  assert.deepEqual(
+    snapshot.historyAdjacency.map((entry) => ({
+      historyId: entry.historyId,
+      paths: entry.changeEvidenceIds.map(
+        (id) =>
+          snapshot.evidence.items.find((item) => item.id === id)?.payload.path,
+      ),
+    })),
+    [
+      { historyId: 'history-1', paths: [] },
+      { historyId: 'history-2', paths: [] },
+      {
+        historyId: 'history-3',
+        paths: ['src/current.ts', 'src/value.ts'],
+      },
+      {
+        historyId: 'history-4',
+        paths: [shaShapedPath, 'src/current.ts', 'src/remove.ts'],
+      },
+    ],
+  );
+  assert.equal(snapshot.historyTruncated, false);
+  assert.equal(Object.isFrozen(snapshot), true);
+  assert.equal(Object.isFrozen(snapshot.historyAdjacency), true);
+  assert.equal(Object.isFrozen(snapshot.historyAdjacency[0]), true);
+  assert.equal(
+    Object.isFrozen(snapshot.historyAdjacency[0]?.changeEvidenceIds),
+    true,
+  );
+  assert.equal(
+    gitEvidence.collectPullRequestEvidence(
+      {
+        cwd: repository.directory,
+        baseBranch: repository.baseBranch,
+        fetch: false,
+        historyLimit: 10,
+      },
+      runner,
+    ).schemaVersion,
+    snapshot.evidence.schemaVersion,
+  );
+});
+
+test('accepts copy and type-change records in the NUL adjacency stream', (context) => {
+  const repository = materializeRepository({
+    id: 'copy-type-history-adjacency',
+    baseFiles: { 'src/value.ts': 'export const value = 0;\n' },
+    commits: [1, 2].map((value) => ({
+      message: `feat: set parser value ${value}`,
+      operations: [
+        {
+          kind: 'write' as const,
+          path: 'src/value.ts',
+          content: `export const value = ${value};\n`,
+        },
+      ],
+    })),
+  });
+  context.after(() =>
+    fs.rmSync(repository.directory, { recursive: true, force: true }),
+  );
+  const runner: CommandRunner = {
+    exec(file, args, options) {
+      if (file === 'git' && args[0] === 'diff-tree') {
+        assert.equal(typeof options?.input, 'string');
+        const shas = (options?.input as string).trimEnd().split('\n');
+        return [
+          shas[0],
+          'C100',
+          'src/value.ts',
+          'src/copied.ts',
+          shas[1],
+          'T',
+          'src/value.ts',
+          '',
+        ].join('\0');
+      }
+      return defaultCommandRunner.exec(file, args, options);
+    },
+    spawn(file, args, options) {
+      return defaultCommandRunner.spawn(file, args, options);
+    },
+  };
+
+  const snapshot = gitEvidence.collectPullRequestEvidenceSnapshot(
+    {
+      cwd: repository.directory,
+      baseBranch: repository.baseBranch,
+      fetch: false,
+      historyLimit: 2,
+    },
+    runner,
+  );
+  const changeId = snapshot.evidence.items.find(
+    (item) => item.kind === 'change',
+  )?.id;
+  assert.notEqual(changeId, undefined);
+  assert.deepEqual(snapshot.historyAdjacency, [
+    { historyId: 'history-1', changeEvidenceIds: [changeId] },
+    { historyId: 'history-2', changeEvidenceIds: [changeId] },
+  ]);
+});
+
+test('keeps same-path stale histories as non-evidentiary adjacency hints', (context) => {
+  const repository = materializeRepository({
+    id: 'same-path-history-adjacency',
+    baseFiles: { 'src/value.ts': 'export const value = 0;\n' },
+    commits: [
+      {
+        message: 'feat: add stale intermediate behavior',
+        operations: [
+          {
+            kind: 'write',
+            path: 'src/value.ts',
+            content: 'export const value = 1;\n',
+          },
+        ],
+      },
+      {
+        message: 'revert: remove stale intermediate behavior',
+        operations: [
+          {
+            kind: 'write',
+            path: 'src/value.ts',
+            content: 'export const value = 0;\n',
+          },
+        ],
+      },
+      {
+        message: 'fix: add different final behavior',
+        operations: [
+          {
+            kind: 'write',
+            path: 'src/value.ts',
+            content: 'export const value = 2;\n',
+          },
+        ],
+      },
+    ],
+  });
+  context.after(() =>
+    fs.rmSync(repository.directory, { recursive: true, force: true }),
+  );
+
+  const snapshot = gitEvidence.collectPullRequestEvidenceSnapshot({
+    cwd: repository.directory,
+    baseBranch: repository.baseBranch,
+    fetch: false,
+    historyLimit: 3,
+  });
+  const changeId = snapshot.evidence.items.find(
+    (item) => item.kind === 'change',
+  )?.id;
+  assert.notEqual(changeId, undefined);
+  assert.deepEqual(snapshot.historyAdjacency, [
+    { historyId: 'history-1', changeEvidenceIds: [changeId] },
+    { historyId: 'history-2', changeEvidenceIds: [changeId] },
+    { historyId: 'history-3', changeEvidenceIds: [changeId] },
+  ]);
+});
+
+test('keeps a header-only merge history row empty without losing surrounding records', (context) => {
+  const repository = materializeRepository({
+    id: 'merge-history-adjacency',
+    baseFiles: { 'src/base.ts': 'export const base = true;\n' },
+    commits: [
+      {
+        message: 'feat: add first change',
+        operations: [
+          {
+            kind: 'write',
+            path: 'src/first.ts',
+            content: 'export const first = true;\n',
+          },
+        ],
+      },
+    ],
+  });
+  context.after(() =>
+    fs.rmSync(repository.directory, { recursive: true, force: true }),
+  );
+
+  git(repository.directory, ['switch', '-c', 'feature/side-change']);
+  fs.writeFileSync(
+    path.join(repository.directory, 'src', 'side.ts'),
+    'export const side = true;\n',
+    'utf8',
+  );
+  git(repository.directory, ['add', 'src/side.ts']);
+  git(repository.directory, ['commit', '-m', 'feat: add side change']);
+  git(repository.directory, ['switch', repository.featureBranch]);
+  fs.writeFileSync(
+    path.join(repository.directory, 'src', 'second.ts'),
+    'export const second = true;\n',
+    'utf8',
+  );
+  git(repository.directory, ['add', 'src/second.ts']);
+  git(repository.directory, ['commit', '-m', 'feat: add second change']);
+  git(repository.directory, [
+    'merge',
+    '--no-ff',
+    'feature/side-change',
+    '-m',
+    'merge: combine side change',
+  ]);
+  fs.writeFileSync(
+    path.join(repository.directory, 'src', 'after.ts'),
+    'export const after = true;\n',
+    'utf8',
+  );
+  git(repository.directory, ['add', 'src/after.ts']);
+  git(repository.directory, ['commit', '-m', 'feat: add post-merge change']);
+
+  let diffTreeCalls = 0;
+  let diffTreeOutput = '';
+  const runner: CommandRunner = {
+    exec(file, args, options) {
+      const output = defaultCommandRunner.exec(file, args, options);
+      if (file === 'git' && args[0] === 'diff-tree') {
+        diffTreeCalls += 1;
+        diffTreeOutput = output;
+      }
+      return output;
+    },
+    spawn(file, args, options) {
+      return defaultCommandRunner.spawn(file, args, options);
+    },
+  };
+  const snapshot = gitEvidence.collectPullRequestEvidenceSnapshot(
+    {
+      cwd: repository.directory,
+      baseBranch: repository.baseBranch,
+      fetch: false,
+      historyLimit: 10,
+    },
+    runner,
+  );
+  const histories = snapshot.evidence.items.filter(
+    (item) => (item as unknown as HistoryItem).kind === 'history',
+  ) as unknown as HistoryItem[];
+  const adjacencyBySubject = new Map(
+    snapshot.historyAdjacency.map((entry) => [
+      histories.find((item) => item.id === entry.historyId)?.payload.subject,
+      entry.changeEvidenceIds,
+    ]),
+  );
+  const merge = histories.find(
+    (item) => item.payload.subject === 'merge: combine side change',
+  );
+  assert.notEqual(merge, undefined);
+  assert.equal(diffTreeCalls, 1);
+  assert.equal(diffTreeOutput.includes(merge!.payload.sha), true);
+  assert.deepEqual(adjacencyBySubject.get('merge: combine side change'), []);
+  for (const subject of [
+    'feat: add first change',
+    'feat: add side change',
+    'feat: add second change',
+    'feat: add post-merge change',
+  ]) {
+    assert.ok((adjacencyBySubject.get(subject)?.length ?? 0) > 0, subject);
+  }
+});
+
+test('collects a header-only merge when it is the entire retained slice', (context) => {
+  const repository = materializeRepository({
+    id: 'merge-only-history-adjacency',
+    baseFiles: { 'src/base.ts': 'export const base = true;\n' },
+    commits: [
+      {
+        message: 'feat: add merge-only first change',
+        operations: [
+          {
+            kind: 'write',
+            path: 'src/first.ts',
+            content: 'export const first = true;\n',
+          },
+        ],
+      },
+    ],
+  });
+  context.after(() =>
+    fs.rmSync(repository.directory, { recursive: true, force: true }),
+  );
+
+  git(repository.directory, ['switch', '-c', 'feature/merge-only-side']);
+  fs.writeFileSync(
+    path.join(repository.directory, 'src', 'side.ts'),
+    'export const side = true;\n',
+    'utf8',
+  );
+  git(repository.directory, ['add', 'src/side.ts']);
+  git(repository.directory, ['commit', '-m', 'feat: add merge-only side']);
+  git(repository.directory, ['switch', repository.featureBranch]);
+  fs.writeFileSync(
+    path.join(repository.directory, 'src', 'second.ts'),
+    'export const second = true;\n',
+    'utf8',
+  );
+  git(repository.directory, ['add', 'src/second.ts']);
+  git(repository.directory, ['commit', '-m', 'feat: add merge-only second']);
+  git(repository.directory, [
+    'merge',
+    '--no-ff',
+    'feature/merge-only-side',
+    '-m',
+    'merge: finish merge-only history',
+  ]);
+
+  let diffTreeCalls = 0;
+  let diffTreeOutput: string | undefined;
+  const runner: CommandRunner = {
+    exec(file, args, options) {
+      const output = defaultCommandRunner.exec(file, args, options);
+      if (file === 'git' && args[0] === 'diff-tree') {
+        diffTreeCalls += 1;
+        diffTreeOutput = output;
+      }
+      return output;
+    },
+    spawn(file, args, options) {
+      return defaultCommandRunner.spawn(file, args, options);
+    },
+  };
+  const snapshot = gitEvidence.collectPullRequestEvidenceSnapshot(
+    {
+      cwd: repository.directory,
+      baseBranch: repository.baseBranch,
+      fetch: false,
+      historyLimit: 1,
+    },
+    runner,
+  );
+  const histories = snapshot.evidence.items.filter(
+    (item) => (item as unknown as HistoryItem).kind === 'history',
+  ) as unknown as HistoryItem[];
+
+  assert.equal(diffTreeCalls, 1);
+  assert.equal(diffTreeOutput?.includes(histories[0]!.payload.sha), true);
+  assert.equal(snapshot.historyTruncated, true);
+  assert.deepEqual(
+    histories.map((item) => item.payload.subject),
+    ['merge: finish merge-only history'],
+  );
+  assert.deepEqual(snapshot.historyAdjacency, [
+    { historyId: 'history-1', changeEvidenceIds: [] },
+  ]);
+});
+
+test('collects a header-only allow-empty commit between ordinary histories', (context) => {
+  const repository = materializeRepository({
+    id: 'allow-empty-history-adjacency',
+    baseFiles: { 'src/value.ts': 'export const value = 0;\n' },
+    commits: [
+      {
+        message: 'feat: add value before empty checkpoint',
+        operations: [
+          {
+            kind: 'write',
+            path: 'src/value.ts',
+            content: 'export const value = 1;\n',
+          },
+        ],
+      },
+    ],
+  });
+  context.after(() =>
+    fs.rmSync(repository.directory, { recursive: true, force: true }),
+  );
+  git(repository.directory, [
+    'commit',
+    '--allow-empty',
+    '-m',
+    'chore: record empty checkpoint',
+  ]);
+  fs.writeFileSync(
+    path.join(repository.directory, 'src', 'value.ts'),
+    'export const value = 2;\n',
+    'utf8',
+  );
+  git(repository.directory, ['add', 'src/value.ts']);
+  git(repository.directory, [
+    'commit',
+    '-m',
+    'fix: update value after empty checkpoint',
+  ]);
+
+  let diffTreeOutput = '';
+  const runner: CommandRunner = {
+    exec(file, args, options) {
+      const output = defaultCommandRunner.exec(file, args, options);
+      if (file === 'git' && args[0] === 'diff-tree') {
+        diffTreeOutput = output;
+      }
+      return output;
+    },
+    spawn(file, args, options) {
+      return defaultCommandRunner.spawn(file, args, options);
+    },
+  };
+  const snapshot = gitEvidence.collectPullRequestEvidenceSnapshot(
+    {
+      cwd: repository.directory,
+      baseBranch: repository.baseBranch,
+      fetch: false,
+      historyLimit: 10,
+    },
+    runner,
+  );
+  const histories = snapshot.evidence.items.filter(
+    (item) => (item as unknown as HistoryItem).kind === 'history',
+  ) as unknown as HistoryItem[];
+  const adjacencyBySubject = new Map(
+    snapshot.historyAdjacency.map((entry) => [
+      histories.find((item) => item.id === entry.historyId)?.payload.subject,
+      entry.changeEvidenceIds,
+    ]),
+  );
+  const emptyHistory = histories.find(
+    (item) => item.payload.subject === 'chore: record empty checkpoint',
+  );
+
+  assert.notEqual(emptyHistory, undefined);
+  assert.equal(diffTreeOutput.includes(emptyHistory!.payload.sha), true);
+  assert.deepEqual(adjacencyBySubject.get('chore: record empty checkpoint'), []);
+  assert.ok(
+    (adjacencyBySubject.get('feat: add value before empty checkpoint')
+      ?.length ?? 0) > 0,
+  );
+  assert.ok(
+    (adjacencyBySubject.get('fix: update value after empty checkpoint')
+      ?.length ?? 0) > 0,
+  );
+});
+
+test('signals history truncation and batches only the retained chronological SHAs', (context) => {
+  const repository = materializeRepository({
+    id: 'history-truncation',
+    baseFiles: { 'src/value.ts': 'export const value = 0;\n' },
+    commits: [1, 2, 3].map((value) => ({
+      message: `feat: set value ${value}`,
+      operations: [
+        {
+          kind: 'write' as const,
+          path: 'src/value.ts',
+          content: `export const value = ${value};\n`,
+        },
+      ],
+    })),
+  });
+  context.after(() =>
+    fs.rmSync(repository.directory, { recursive: true, force: true }),
+  );
+  let diffTreeInput: unknown;
+  const runner: CommandRunner = {
+    exec(file, args, options) {
+      if (file === 'git' && args[0] === 'diff-tree') {
+        diffTreeInput = options?.input;
+      }
+      return defaultCommandRunner.exec(file, args, options);
+    },
+    spawn(file, args, options) {
+      return defaultCommandRunner.spawn(file, args, options);
+    },
+  };
+
+  const snapshot = gitEvidence.collectPullRequestEvidenceSnapshot(
+    {
+      cwd: repository.directory,
+      baseBranch: repository.baseBranch,
+      fetch: false,
+      historyLimit: 2,
+    },
+    runner,
+  );
+  const histories = snapshot.evidence.items.filter(
+    (item) => (item as unknown as HistoryItem).kind === 'history',
+  ) as unknown as HistoryItem[];
+
+  assert.equal(snapshot.historyTruncated, true);
+  assert.deepEqual(
+    histories.map((item) => item.payload.subject),
+    ['feat: set value 2', 'feat: set value 3'],
+  );
+  assert.equal(
+    diffTreeInput,
+    `${histories.map((item) => item.payload.sha).join('\n')}\n`,
+  );
+  assert.deepEqual(
+    snapshot.historyAdjacency.map((entry) => entry.historyId),
+    ['history-1', 'history-2'],
+  );
+});
+
+test('fails closed on malformed, missing, repeated, and out-of-order adjacency records', (context) => {
+  const repository = materializeRepository({
+    id: 'malformed-history-adjacency',
+    baseFiles: { 'src/value.ts': 'export const value = 0;\n' },
+    commits: [1, 2].map((value) => ({
+      message: `feat: set malformed value ${value}`,
+      operations: [
+        {
+          kind: 'write' as const,
+          path: 'src/value.ts',
+          content: `export const value = ${value};\n`,
+        },
+      ],
+    })),
+  });
+  context.after(() =>
+    fs.rmSync(repository.directory, { recursive: true, force: true }),
+  );
+
+  const malformedOutputs = [
+    (shas: readonly string[]) => `${shas[0]}\0M\0`,
+    (shas: readonly string[]) => `${shas[0]}\0M\0src/value.ts\0`,
+    (shas: readonly string[]) =>
+      `${shas[0]}\0M\0src/value.ts\0${shas[0]}\0`,
+    (shas: readonly string[]) =>
+      `${shas[1]}\0M\0src/value.ts\0${shas[0]}\0`,
+    (shas: readonly string[]) =>
+      `${shas[0]}\0Z\0src/value.ts\0${shas[1]}\0`,
+    (shas: readonly string[]) =>
+      `${shas[0]}\0M\0src/value.ts\0M\0src/value.ts\0${shas[1]}\0`,
+  ];
+
+  for (const makeOutput of malformedOutputs) {
+    const runner: CommandRunner = {
+      exec(file, args, options) {
+        if (file === 'git' && args[0] === 'diff-tree') {
+          assert.equal(typeof options?.input, 'string');
+          const shas = (options?.input as string).trimEnd().split('\n');
+          return makeOutput(shas);
+        }
+        return defaultCommandRunner.exec(file, args, options);
+      },
+      spawn(file, args, options) {
+        return defaultCommandRunner.spawn(file, args, options);
+      },
+    };
+
+    assert.throws(
+      () =>
+        gitEvidence.collectPullRequestEvidenceSnapshot(
+          {
+            cwd: repository.directory,
+            baseBranch: repository.baseBranch,
+            fetch: false,
+            historyLimit: 2,
+          },
+          runner,
+        ),
+      /^Error: Git returned malformed history adjacency\.$/,
+    );
+  }
+});
+
+test('rechecks snapshot freshness after collecting history adjacency', (context) => {
+  const repository = materializeRepository(fixture('delete-only'));
+  context.after(() =>
+    fs.rmSync(repository.directory, { recursive: true, force: true }),
+  );
+  let moved = false;
+  const runner: CommandRunner = {
+    exec(file, args, options) {
+      const output = defaultCommandRunner.exec(file, args, options);
+      if (!moved && file === 'git' && args[0] === 'diff-tree') {
+        moved = true;
+        git(repository.directory, [
+          'commit',
+          '--allow-empty',
+          '-m',
+          'chore: move head after adjacency',
+        ]);
+      }
+      return output;
+    },
+    spawn(file, args, options) {
+      return defaultCommandRunner.spawn(file, args, options);
+    },
+  };
+
+  assert.throws(
+    () =>
+      gitEvidence.collectPullRequestEvidenceSnapshot(
+        {
+          cwd: repository.directory,
+          baseBranch: repository.baseBranch,
+          fetch: false,
+          historyLimit: 10,
+        },
+        runner,
+      ),
+    /HEAD changed while evidence was being collected/,
+  );
 });
 
 test('keeps reverted commits as supplemental history without final change evidence', (context) => {

@@ -80,20 +80,21 @@ Rejected:
 
 - [x] Spec remains accurate after independent architecture/evaluation/security
   review.
-- [ ] Contract checkpoint committed and pushed with `npm run commit`.
+- [x] Contract checkpoint committed and pushed with `npm run commit`.
 
 ### Phase 2: Evidence Foundation
 
-- [ ] **Task 2: Collect batched pinned history adjacency**
+- [x] **Task 2: Collect batched pinned history adjacency**
   - **Description:** Add a compatibility-preserving snapshot collector. Parse
-    one `git diff-tree --stdin --root -r --name-status -z --find-renames` result
+    one `git diff-tree --stdin --always --root -r --name-status -z
+    --find-renames` result
     into bounded history-to-final-change relationships.
   - **Acceptance:**
-    - [ ] Exactly one fixed-argv adjacency subprocess receives exact retained
+    - [x] Exactly one fixed-argv adjacency subprocess receives exact retained
       SHAs through stdin.
-    - [ ] NUL/status state machine handles A/M/D/T/R/C and rejects malformed,
+    - [x] NUL/status state machine handles A/M/D/T/R/C and rejects malformed,
       repeated, missing, out-of-order, or unexpected records generically.
-    - [ ] Zero-adjacency reverted histories are identifiable and freshness is
+    - [x] Zero-adjacency reverted histories are identifiable and freshness is
       still bound to head/base/merge base.
   - **Verify:** focused Git evidence tests, typecheck, build, full gates.
   - **Depends on:** Task 1.
