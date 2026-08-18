@@ -214,8 +214,20 @@ test('classifies behavior only from provided intent or explicit evidence', () =>
       expected: ['perf'],
     },
     {
-      name: 'explicit revert history',
+      name: 'revert-shaped history remains maintenance work',
       options: { historySubjects: ['Revert "feat: add parser cache"'] },
+      expected: ['chore'],
+    },
+    {
+      name: 'explicit revert intent',
+      options: { intents: ['Revert the parser cache.'] },
+      expected: ['revert'],
+    },
+    {
+      name: 'explicit revert constraint',
+      options: {
+        constraints: [{ name: 'commit-type', value: 'revert' }],
+      },
       expected: ['revert'],
     },
     {

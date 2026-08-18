@@ -495,56 +495,52 @@ test('requires provided context for problem, compatibility, and non-goal claims'
   }
 });
 
-test('uses nonempty authored history bodies as supplemental intent', () => {
+test('does not treat unrelated history bodies as authored intent', () => {
   const bundle = createEvidenceBundle(
     inputWithHistory(
       'Why: callers use empty tokens as placeholders.\n\nRisk: malformed input may still fail.',
     ),
   );
-  const claims: DraftClaim[] = [
-    {
+  assert.doesNotThrow(() =>
+    assertSupportedClaims(bundle, [{
       id: 'claim-change',
       kind: 'change',
       text: 'Preserve empty tokens in the parser.',
       evidenceIds: ['change-1', 'history-1'],
       basis: 'observed',
       significance: 'primary',
-    },
-    {
-      id: 'claim-problem',
-      kind: 'problem',
-      text: 'Callers use empty tokens as placeholders.',
-      evidenceIds: ['history-1'],
-      basis: 'provided',
-      significance: 'supporting',
-    },
-    {
-      id: 'claim-rationale',
-      kind: 'rationale',
-      text: 'Preserve placeholders used by callers.',
-      evidenceIds: ['history-1'],
-      basis: 'provided',
-      significance: 'supporting',
-    },
-    {
-      id: 'claim-risk',
-      kind: 'risk',
-      text: 'Malformed input may still fail.',
-      evidenceIds: ['history-1'],
-      basis: 'provided',
-      significance: 'supporting',
-    },
-    {
-      id: 'claim-follow-up',
-      kind: 'follow-up',
-      text: 'Document the remaining malformed-input behavior.',
-      evidenceIds: ['history-1'],
-      basis: 'provided',
-      significance: 'incidental',
-    },
-  ];
+    }]),
+  );
+  for (const kind of ['problem', 'rationale', 'risk', 'follow-up'] as const) {
+    assert.throws(
+      () =>
+        assertSupportedClaims(bundle, [{
+          id: `claim-${kind}`,
+          kind,
+          text: 'Do not infer this authored context from commit history.',
+          evidenceIds: ['history-1'],
+          basis: 'provided',
+          significance: 'supporting',
+        }]),
+      /requires provided intent/i,
+    );
+  }
+});
 
-  assert.doesNotThrow(() => assertSupportedClaims(bundle, claims));
+test('uses explicit context-file intent for authored context claims', () => {
+  const bundle = createEvidenceBundle(baseInput());
+  for (const kind of ['problem', 'rationale', 'risk', 'follow-up'] as const) {
+    assert.doesNotThrow(() =>
+      assertSupportedClaims(bundle, [{
+        id: `claim-${kind}`,
+        kind,
+        text: 'Handle empty tokens without throwing.',
+        evidenceIds: ['intent-1'],
+        basis: 'provided',
+        significance: 'supporting',
+      }]),
+    );
+  }
 });
 
 test('does not promote subject-only history into authored intent', () => {

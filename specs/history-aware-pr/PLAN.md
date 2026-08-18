@@ -119,20 +119,22 @@ Rejected:
 
 - [x] Git evidence and pure planner tests pass on Node 18-compatible APIs.
 - [x] No provider request or rendered-output behavior changed yet.
-- [ ] Tasks 2 and 3 each committed through `npm run commit`.
+- [x] Tasks 2 and 3 each committed through `npm run commit`.
 
 ### Phase 3: Privacy and Workflow
 
-- [ ] **Task 4: Protect history at the model boundary**
+- [x] **Task 4: Protect history at the model boundary**
   - **Description:** Project only linked, allowed subjects and ID relationships;
     blank bodies, suppress policy-touching histories, scan high-confidence
-    credentials, remove history from title-type/intent semantics, and include
-    hint bytes in the existing preflight budget.
+    credentials, and remove history from title-type/intent semantics. Task 5
+    wires this projection into every request and includes hint bytes in the
+    existing preflight budget.
   - **Acceptance:**
-    - [ ] Reverted/unlinked subjects, every body, protected-policy history, and
-      credential-bearing subjects are absent from provider requests.
-    - [ ] `--context-file` remains the only authored rationale source.
-    - [ ] Nothing truncates silently; configured secrets remain redacted.
+    - [x] Reverted/unlinked subjects, every body, protected-policy history, and
+      credential-bearing subjects are absent from the projected provider view.
+    - [x] `--context-file` remains the only authored rationale source.
+    - [x] Projection preserves truncation metadata and configured-secret
+      redaction without mutating its input.
   - **Verify:** model-evidence, change-evidence, title-semantics, security tests;
     typecheck/build/full gates.
   - **Depends on:** Tasks 2-3.

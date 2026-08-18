@@ -501,9 +501,7 @@ function validateClaimKind(
   receiptsById: ReadonlyMap<string, VerificationReceipt>,
 ): void {
   const hasAuthoredIntent = cited.some(
-    (evidence) =>
-      evidence.kind === 'intent' ||
-      (evidence.kind === 'history' && evidence.payload.body.trim().length > 0),
+    (evidence) => evidence.kind === 'intent',
   );
   if (
     claim.kind === 'change' &&
